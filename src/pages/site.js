@@ -7,10 +7,10 @@ import { DEFAULTS as MASS_DEFAULTS } from '../sim/massing.js';
 import { createAtlas, lngLatToWorld, worldPerMeter } from '../ui/atlas.js';
 import { onThemeChange } from '../pipeline.js';
 
-export const title = '1단계 택지 선정';
+export const title = '02 입지 · 서울 공동주택 상세';
 
 const HEAD = `<div class="page-h">
-  <div><span class="label-sm">stage 01 / 05 · site selection</span><h1>어디에 지을까<span class="dim">서울 공동주택 후보 택지 8곳</span></h1>
+  <div><span class="label-sm">// 02.90 SEC_SEOUL · 서울 공동주택 상세 · <a href="#/site">← 전국 지도</a></span><h1>어디에 지을까<span class="dim">서울 공동주택 후보 택지 8곳</span></h1>
   <p>지도에서 후보지를 살펴보고, 같은 기준으로 비교한 뒤, 한 곳을 골라 프로젝트를 시작합니다. 평가 가중치와 사업 변수를 바꾸면 세대수·사업성·순위가 바로 다시 계산됩니다.</p></div>
   <ol class="flow-mini" aria-label="이 단계에서 할 일"><li><a href="#atlas"><span>a</span>지도에서 보기</a></li><li><a href="#compare"><span>b</span>비교하기</a></li><li><a href="#detail"><span>c</span>검토하기</a></li><li><a href="#start"><span>d</span>프로젝트 시작</a></li></ol>
 </div>`;
@@ -713,7 +713,7 @@ export function mount(root) {
     $('nextCard').innerHTML = `<div class="launch-card">
       <div class="lc-l"><span class="label-sm">02 매스 배치로 넘길 값</span>
         <dl class="lc-kv">${items.map(([k, v, sub]) => `<div><dt>${k}</dt><dd>${v}<small>${sub}</small></dd></div>`).join('')}</dl></div>
-      <div class="lc-r"><span class="label-sm">next · stage 02</span><b class="lc-t">매스 배치</b>
+      <div class="lc-r"><span class="label-sm">next · stage 03</span><b class="lc-t">매스 배치</b>
         <p>실제 지도 위에 동을 배치하고 층수·평형·주동 형식을 바꿔 가며 일조·조망·인동간격을 검토합니다.</p>
         <button class="btn big" type="button" data-launch>${withRo(s.name)} 프로젝트 시작 <span class="ar">→</span></button></div>
     </div>`;

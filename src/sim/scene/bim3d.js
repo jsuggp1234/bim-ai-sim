@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { facadeMaterial, PAT, surf } from './facade.js';
 import { Buf, strip, frames, quad, dashMaterial, treeGeometry, repaintTree } from './context3d.js';
+import { FLOOR_USES } from '../uses.js';
 
 const unitBox = () => { const g = new THREE.BoxGeometry(1, 1, 1); g.translate(0, 0.5, 0); return g; };
 // 옆면만 있는 상자 (갱폼·울타리 같은 얇은 껍질)
@@ -22,7 +23,11 @@ function sidesBox() {
 const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 
 const USE_PAT = { res: PAT.res, officetel: PAT.punched, office: PAT.curtain, retail: PAT.store, lobby: PAT.store, refuge: PAT.louvre, mech: PAT.louvre };
-const KIND_WALL = { apt: 'wRes', officetel: 'wCom', office: 'wTower', landmark: 'wTower', podium: 'wCom' };
+Object.entries(FLOOR_USES).forEach(([k, x]) => { if (USE_PAT[k] == null) USE_PAT[k] = PAT[x.pat] ?? PAT.punched; });
+USE_PAT.admin = PAT.curtain;
+const KIND_WALL = { apt: 'wRes', officetel: 'wCom', office: 'wTower', landmark: 'wTower', podium: 'wCom', hotel: 'wTower', ward: 'wCom', clinic: 'wCom', lab: 'wCom', admin: 'wCom', mall: 'wCom', ramp: 'wCom',
+  gallery: 'wCivic', store: 'wCivic', atrium: 'wCivic', lobby: 'wCivic', arena: 'wCivic',
+  fab: 'wInd', cub: 'wInd', prod: 'wInd', gmp: 'wInd', whs: 'wInd', dhall: 'wInd', elec: 'wInd', gen: 'wInd', wwt: 'wInd', comp: 'wInd', turbine: 'wInd', hrsg: 'wInd', furnace: 'wInd', cool: 'wInd', basin: 'wInd' };
 
 export function createBim(site, P0, { lite = false } = {}) {
   let P = P0;
@@ -67,6 +72,11 @@ export function createBim(site, P0, { lite = false } = {}) {
   pool('mask', box, M.mask, { shadow: false, receive: false, order: -10 });
   pool('lot', box, M.lot, { shadow: false, parent: base });
   pool('tree', treeG, M.tree);
+  const cylG = new THREE.CylinderGeometry(0.5, 0.5, 1, 40, 1, false); cylG.translate(0, 0.5, 0);
+  const sphG = new THREE.SphereGeometry(0.5, 32, 18); sphG.translate(0, 0.5, 0);
+  pool('cyl', cylG, M.solid);
+  pool('cylF', cylG, M.form, { shadow: true });
+  pool('sph', sphG, M.solid);
   function ensure(key, n) {
     const p = pools[key];
     if (p.mesh && p.cap >= n) { p.mesh.count = n; p.mesh.visible = n > 0; return p.mesh; }
@@ -107,6 +117,7 @@ export function createBim(site, P0, { lite = false } = {}) {
   };
   function coreDims(b) {
     const p0 = b.parts[0];
+    if (b.coreDims) return b.coreDims;
     if (b.kind === 'apt') return [6.5, 8.5];
     if (b.kind === 'officetel') return [Math.min(12, p0.w * 0.4), Math.min(9, p0.d * 0.45)];
     if (b.kind === 'podium') return [0, 0];
@@ -138,6 +149,7 @@ export function createBim(site, P0, { lite = false } = {}) {
     const pos = [];
     gen.bldgs.forEach(b => {
       if (b.kind === 'basement') return;
+      if (b.shape === 'cyl') { const x = b.parts[0], H = b.height, n = 28; for (let k = 0; k < n; k++) { const t0 = k / n * Math.PI * 2, t1 = (k + 1) / n * Math.PI * 2; const P0 = [x.cu + Math.cos(t0) * x.w / 2, x.cv + Math.sin(t0) * x.d / 2], P1 = [x.cu + Math.cos(t1) * x.w / 2, x.cv + Math.sin(t1) * x.d / 2]; pos.push(P0[0], H, P0[1], P1[0], H, P1[1]); if (k % 7 === 0) pos.push(P0[0], 0, P0[1], P0[0], H, P0[1]); } return; }
       b.parts.forEach(x => { const H = b.height; boxEdges(pos, x.cu, x.cv, x.w, x.d, x.a || 0, 0, H, false); });
     });
     if (ghost) { root.remove(ghost); ghost.geometry.dispose(); }
@@ -239,7 +251,7 @@ export function createBim(site, P0, { lite = false } = {}) {
     if (!gen) return;
     const prog = !!state.floor;
     const fs = state.floor || (() => 6);
-    const env = [], solid = [], form = [], glass = [], pit = [], mask = [], lots = [], trees = [];
+    const env = [], solid = [], form = [], glass = [], pit = [], mask = [], lots = [], trees = [], cyl = [], cylF = [], sph = [];
     const sIdx = [];
     const xray = state.xray;
     // 고체 부재 하나: [u, y, v, w, h, d, a, color, pitch]
@@ -254,6 +266,8 @@ export function createBim(site, P0, { lite = false } = {}) {
       let topStruct = -1, topAny = -1, topMep = -1;
       fl.forEach((f, fi) => { const s2 = stOf[fi]; if (s2 >= 2) topStruct = fi; if (s2 >= 1) topAny = fi; if (s2 >= 3) topMep = fi; });
       if (topAny < 0) return;
+      if (b.shape === 'cyl') { drawCyl(b, bi, stOf, cyl, cylF, sph, S, tint, F, prog, xray); return; }
+      if (b.shape === 'rack') { drawRack(b, bi, stOf, S, tint, F); return; }
       const p0 = b.parts[0], a0 = p0.a || 0;
       const [cw, cd] = coreDims(b);
       const coreAhead = (b.kind === 'landmark' || b.kind === 'office') && prog && stOf.some(s2 => s2 === 1) ? 3 : 0;
@@ -293,7 +307,7 @@ export function createBim(site, P0, { lite = false } = {}) {
               for (let k = 0; k <= n; k++) { const lx = -x.w / 2 + x.w * k / n; const [u, v] = loc(x.cu, x.cv, a, Math.max(-x.w / 2 + 0.1, Math.min(x.w / 2 - 0.1, lx)), 0); S(u, f.y0, v, 0.22, h, x.d - 0.4, a, colC); }
               const [u2, v2] = loc(x.cu, x.cv, a, 0, -x.d * 0.12); S(u2, f.y0, v2, x.w - 0.4, h, 0.2, a, colC);
             } else {
-              const sp = b.kind === 'landmark' ? 9 : 8.4, cs = b.kind === 'landmark' ? 1.3 : b.kind === 'office' ? 1.0 : 0.8;
+              const sp = Math.max(b.span || (b.kind === 'landmark' ? 9 : 8.4), Math.sqrt(x.w * x.d) / 26), cs = b.kind === 'landmark' ? 1.3 : b.kind === 'office' || b.span ? 1.0 : 0.8;
               const nx = Math.max(1, Math.round(x.w / sp)), nz = Math.max(1, Math.round(x.d / sp));
               for (let i = 0; i <= nx; i++) for (let j = 0; j <= nz; j++) {
                 const lx = -x.w / 2 + cs / 2 + (x.w - cs) * i / nx, lz = -x.d / 2 + cs / 2 + (x.d - cs) * j / nz;
@@ -439,6 +453,17 @@ export function createBim(site, P0, { lite = false } = {}) {
     const gm = ensure('glass', glass.length);
     glass.forEach(([u, y, v, w, h, d, a], i) => { setBox(gm, i, u, y, v, w, h, d, a); gm.setColorAt(i, P.glass); });
     gm.instanceMatrix.needsUpdate = true; if (gm.instanceColor) gm.instanceColor.needsUpdate = true;
+    const cm = ensure('cyl', cyl.length);
+    cyl.forEach((e, i) => { setBox(cm, i, e.u, e.y, e.v, e.w, e.h, e.d, e.a || 0); cm.setColorAt(i, e.c); });
+    cm.instanceMatrix.needsUpdate = true; if (cm.instanceColor) cm.instanceColor.needsUpdate = true;
+    cylItems = cyl;
+    const cfm = ensure('cylF', cylF.length);
+    cylF.forEach((e, i) => { setBox(cfm, i, e.u, e.y, e.v, e.w, e.h, e.d, 0); cfm.setColorAt(i, e.c); });
+    cfm.instanceMatrix.needsUpdate = true; if (cfm.instanceColor) cfm.instanceColor.needsUpdate = true;
+    const spm = ensure('sph', sph.length);
+    sph.forEach((e, i) => { setBox(spm, i, e.u, e.y, e.v, e.w, e.h, e.d, 0); spm.setColorAt(i, e.c); });
+    spm.instanceMatrix.needsUpdate = true; if (spm.instanceColor) spm.instanceColor.needsUpdate = true;
+    sphItems = sph;
     const pm = ensure('pit', pit.length);
     pit.forEach(([u, y, v, w, h, d], i) => setBox(pm, i, u, y, v, w, h, d, 0));
     pm.instanceMatrix.needsUpdate = true;
@@ -507,7 +532,7 @@ export function createBim(site, P0, { lite = false } = {}) {
   }
 
   // ---------- 외피 색 ----------
-  let colorFn = null, selected = null;
+  let colorFn = null, selected = null, cylItems = [], sphItems = [];
   // fn(bi, fi, item) → THREE.Color (없으면 동 종류별 외벽색)
   function paint(fn, sel) { colorFn = fn; selected = sel ?? selected; paintEnv(); }
   function paintEnv() {
@@ -523,14 +548,91 @@ export function createBim(site, P0, { lite = false } = {}) {
       p.mesh.setColorAt(i, C);
     });
     if (p.mesh.instanceColor) p.mesh.instanceColor.needsUpdate = true;
+    // 원통·구형 (탱크·탑·아레나): 외피 완료 층만 색칠 모드를 따른다
+    [[pools.cyl, cylItems], [pools.sph, sphItems]].forEach(([pl, items]) => {
+      if (!pl.mesh || !items.length) return;
+      items.forEach((e, i) => {
+        C.copy(e.c);
+        if (e.paint && colorFn) { const c = colorFn(e.bi, e.fi, e); if (c) C.copy(c); }
+        if (state.focus && !e.on) C.lerp(P.ground, 0.35);
+        if (selected != null && e.bi === selected) C.lerp(P.accent, 0.4);
+        pl.mesh.setColorAt(i, C);
+      });
+      if (pl.mesh.instanceColor) pl.mesh.instanceColor.needsUpdate = true;
+    });
   }
   function select(bi) { selected = bi; paintEnv(); }
+
+  // ---------- 원통형 설비 (저장 탱크·증류탑·연돌·소화조·아레나) ----------
+  // 단(tier)마다: 1 비계·거푸집(주황 망) → 2 강판·콘크리트 몸체 → 4 보온·도장 → 6 준공 (지붕 돔·계단)
+  function drawCyl(b, bi, stOf, cyl, cylF, sph, S, tint, F, prog, xray) {
+    const p0 = b.parts[0], W = p0.w, D = p0.d, cu = p0.cu, cv = p0.cv;
+    const fl = b.floors, last = fl.length - 1;
+    const sphere = (b.formName || '').includes('구형');
+    const shell = b.kind === 'arena' ? P.wCivic : b.kind === 'digester' ? P.concrete : b.kind === 'stack' ? P.concrete : b.kind === 'column' ? P.duct : P.wInd;
+    const raw = b.kind === 'column' || b.kind === 'tank' ? P.steel : P.concrete;
+    const on = (s2) => (F === 'struct' && s2 <= 2) || (F === 'skin' && s2 === 4) || (F === 'fin' && s2 === 5) || (F === 'mep' && s2 === 3);
+    if (sphere) {
+      const top = stOf[last], any = Math.max(...stOf);
+      const H = fl[last].y1, legs = 8, rr = W * 0.42;
+      for (let k = 0; k < legs; k++) { const t = k / legs * Math.PI * 2; S(cu + Math.cos(t) * rr, 0, cv + Math.sin(t) * rr, 0.8, H * 0.5, 0.8, 0, tint(P.steel, F === 'struct')); }
+      const frac = Math.min(1, stOf.filter(x => x >= 2).length / fl.length);
+      if (any === 1 && frac < 0.05) cylF.push({ u: cu, y: H * 0.2, v: cv, w: W + 1.2, h: H * 0.6, d: D + 1.2, c: tint(P.form, F === 'struct') });
+      if (frac > 0) sph.push({ u: cu, y: H * 0.5 - D * 0.5 + D * 0.5 * (1 - frac), v: cv, w: W, h: D * frac, d: D, c: top >= 4 ? shell : raw, bi, fi: last, paint: top >= 4, on: on(top) });
+      return;
+    }
+    let roofDone = false;
+    fl.forEach((f, fi) => {
+      const s2 = stOf[fi]; if (s2 <= 0) return;
+      const cBody = s2 >= 4 ? shell.clone() : s2 === 3 ? raw.clone().lerp(P.duct, 0.35) : raw.clone();
+      // 연돌·플레어: 위 3단은 항공 장애 표지 (빨강·흰 띠)
+      if (b.kind === 'stack' && s2 >= 4 && fi >= last - 3) cBody.copy(fi % 2 ? P.mark : P.pipeR);
+      if (s2 === 1) {
+        cylF.push({ u: cu, y: f.y0, v: cv, w: W + 1.4, h: f.h, d: D + 1.4, c: tint(P.form, F === 'struct') });
+        cyl.push({ u: cu, y: f.y0, v: cv, w: W * 0.98, h: f.h * 0.6, d: D * 0.98, c: tint(raw, F === 'struct'), bi, fi, on: on(1) });
+        return;
+      }
+      cyl.push({ u: cu, y: f.y0, v: cv, w: W, h: f.h, d: D, c: tint(cBody, on(s2)), bi, fi, paint: s2 >= 4, on: on(s2) });
+      // 보강 링(띠): 몸체 단 경계
+      if (s2 >= 2 && W > 6 && b.kind !== 'arena') cyl.push({ u: cu, y: f.y1 - 0.3, v: cv, w: W + 0.5, h: 0.3, d: D + 0.5, c: P.frame, bi, fi, on: on(s2) });
+      if (fi === last && s2 >= 4) roofDone = true;
+    });
+    const H = fl[last].y1;
+    if (roofDone) {
+      if (b.kind === 'arena') sph.push({ u: cu, y: H - 6, v: cv, w: W * 0.98, h: 18, d: D * 0.98, c: P.roof, bi, fi: last, on: true });
+      else if (b.kind === 'tank' || b.kind === 'digester') sph.push({ u: cu, y: H - W * 0.06, v: cv, w: W, h: W * 0.12, d: D, c: b.kind === 'digester' ? P.concrete : shell, bi, fi: last, on: true });
+      // 나선 계단 (탱크·탑): 바깥 둘레 계단참
+      if (W > 4 && b.kind !== 'arena') { const n = Math.min(14, Math.ceil(H / 4)); for (let k = 0; k < n; k++) { const t = k / n * Math.PI * 1.6, r = W / 2 + 0.9; S(cu + Math.cos(t) * r, (k + 1) * H / (n + 1), cv + Math.sin(t) * r, 1.2, 0.15, 1.2, -t, P.steel); } }
+    }
+  }
+  // ---------- 파이프랙: 기둥 열 + 단마다 보 + 배관 ----------
+  function drawRack(b, bi, stOf, S, tint, F) {
+    const p0 = b.parts[0], a = p0.a || 0, long = p0.w >= p0.d, L = long ? p0.w : p0.d, Wd = long ? p0.d : p0.w;
+    const ang = a + (long ? 0 : Math.PI / 2);
+    const fl = b.floors, n = Math.max(2, Math.round(L / 6));
+    fl.forEach((f, fi) => {
+      const s2 = stOf[fi]; if (s2 <= 0 || f.lv <= 0) return;
+      const cS = s2 === 1 ? tint(P.form, F === 'struct') : tint(P.steel, F === 'struct');
+      for (let k = 0; k <= n; k++) {
+        const lx = -L / 2 + L * k / n;
+        [-Wd / 2 + 0.3, Wd / 2 - 0.3].forEach(lz => { const [u, v] = loc(p0.cu, p0.cv, ang, lx, lz); S(u, f.y0, v, 0.5, f.h, 0.5, ang, cS, [bi, fi]); });
+        const [u, v] = loc(p0.cu, p0.cv, ang, lx, 0); S(u, f.y1 - 0.5, v, 0.4, 0.5, Wd, ang, cS, [bi, fi]);
+      }
+      if (s2 >= 3) {
+        const cols = [P.pipeR, P.pipeB, P.duct, P.tray, P.wInd, P.pipeB];
+        const k2 = Math.max(2, Math.floor(Wd / 1.4));
+        for (let j = 0; j < k2; j++) { const lz = -Wd / 2 + 0.8 + (Wd - 1.6) * j / Math.max(1, k2 - 1); const [u, v] = loc(p0.cu, p0.cv, ang, 0, lz); S(u, f.y1, v, L, 0.7, 0.7, ang, tint(cols[(j + fi) % cols.length], F === 'mep'), [bi, fi]); }
+      }
+    });
+  }
 
   // ---------- 고르기 ----------
   function pick(ray) {
     const hits = [];
     if (pools.env.mesh && pools.env.mesh.count) hits.push(...ray.intersectObject(pools.env.mesh, false).map(h => ({ d: h.distance, r: envItems[h.instanceId] ? [envItems[h.instanceId].bi, envItems[h.instanceId].fi] : null })));
     if (pools.solid.mesh && pools.solid.mesh.count) hits.push(...ray.intersectObject(pools.solid.mesh, false).map(h => ({ d: h.distance, r: solidIdx[h.instanceId] })));
+    if (pools.cyl.mesh && pools.cyl.mesh.count) hits.push(...ray.intersectObject(pools.cyl.mesh, false).map(h => { const e = cylItems[h.instanceId]; return { d: h.distance, r: e && e.bi != null ? [e.bi, e.fi] : null }; }));
+    if (pools.sph.mesh && pools.sph.mesh.count) hits.push(...ray.intersectObject(pools.sph.mesh, false).map(h => { const e = sphItems[h.instanceId]; return { d: h.distance, r: e && e.bi != null ? [e.bi, e.fi] : null }; }));
     hits.sort((a, b) => a.d - b.d);
     const h = hits.find(x => x.r);
     return h ? h.r : null;
@@ -552,7 +654,7 @@ export function createBim(site, P0, { lite = false } = {}) {
 
   function dispose() {
     Object.values(pools).forEach(p => { if (p.mesh) { p.parent.remove(p.mesh); p.mesh.dispose(); if (p.mesh.geometry !== p.geo) p.mesh.geometry.dispose(); } });
-    [box, sbox, pitGeo, treeG].forEach(g => g.dispose());
+    [box, sbox, pitGeo, treeG, cylG, sphG].forEach(g => g.dispose());
     Object.values(M).forEach(m => m.dispose());
     baseObjs.forEach(o => { if (o.geometry) o.geometry.dispose(); });
     if (craneSolid) craneSolid.dispose();

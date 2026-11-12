@@ -2,7 +2,7 @@
 import { resolveSite } from './sim/sites.js';
 const KEY = 'bim-sim-pipeline-v1';
 const listeners = new Set();
-const blank = () => ({ handoff1: null, site: null, useMap: true, mass: null, massFrom: null, proc: null, cost: null, seen3: false });
+const blank = () => ({ use: 'housing', handoff1: null, site: null, useMap: true, mass: null, massFrom: null, massx: {}, methods: {}, opt: {}, siteW: {}, proc: null, cost: null, risk: null, seen3: false });
 
 function load() {
   try {
@@ -56,8 +56,9 @@ export function massParamsFromStage1(h, defaults) {
 // 지금 고른 택지 (선택이 없으면 1단계에서 넘긴 택지, 그것도 없으면 용산)
 export function currentSite(s = state) {
   const sel = s.site || (s.handoff1 && s.handoff1.siteId ? { id: s.handoff1.siteId } : null);
-  return resolveSite(sel);
+  return resolveSite(sel, s.use || 'housing');
 }
+export const currentUse = (s = state) => s.use || 'housing';
 // 택지 기본값으로 시작하는 2단계 변수
 export function paramsForSite(site, defaults) {
   if (site.id === 'yongsan') return { ...defaults };

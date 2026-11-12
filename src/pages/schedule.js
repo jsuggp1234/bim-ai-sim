@@ -3,7 +3,7 @@ import { USE_LABEL, FORMS } from '../sim/massing.js';
 import { store } from '../store.js';
 import { pipeline, fmt, download, csv, tip } from '../pipeline.js';
 
-export const title = '03 층별 일람표';
+export const title = '03 층별 일람표 (매스 부록)';
 
 const KIND = { apt: '아파트', officetel: '오피스텔', office: '업무', landmark: '랜드마크', podium: '포디움', basement: '지하층' };
 const USE_TOKEN = { res: '--res', officetel: '--officetel', office: '--office', retail: '--retail', lobby: '--retail', refuge: '--refuge', mech: '--mech', b1: '--mech', parking: '--ctx' };
@@ -21,9 +21,9 @@ export function mount(root, arg) {
 
   root.innerHTML = `
   <div class="page-h">
-    <div><span class="label-sm">stage 03 / 05 · floor schedule</span><h1>동·층별 일람표 <span class="dim">(${gen.plan.site.name})</span></h1>
-    <p>2단계 매스 배치안의 모든 동을 층 단위로 펼쳤습니다. 층고, 바닥 레벨(FL), 바닥면적, 세대수, 외벽 면적과 지하 굴토 물량이 4단계 공정과 5단계 예산의 입력이 됩니다. 2단계에서 변수를 바꾸면 이 표도 바뀝니다.</p></div>
-    <div class="actions"><a class="btn ghost" href="#/mass">← 02 매스</a><a class="btn" href="#/process">04 4D 공정 <span class="ar">→</span></a></div>
+    <div><span class="label-sm">// 03.90 SEC_SCHEDULE · 매스 부록 · floor schedule</span><h1>동·층별 일람표 <span class="dim">(${gen.plan.site.name})</span></h1>
+    <p>03 매스 배치안의 모든 동을 층 단위로 펼쳤습니다. 층고, 바닥 레벨(FL), 바닥면적, 세대수, 외벽 면적과 지하 굴토 물량이 04 공법·05 공정·06 예산·07 위험의 입력이 됩니다. 03 매스에서 변수를 바꾸면 이 표도 바뀝니다.</p></div>
+    <div class="actions"><a class="btn ghost" href="#/mass">← 03 매스</a><a class="btn acc" href="#/method">04 공법·재료 <span class="ar">→</span></a></div>
   </div>
   <div class="wrap p-sched">
     <section class="s-sum" aria-label="요약"><div class="sec-title"><span class="n">03.1</span><h2>요약</h2><span class="hint" id="s-from"></span></div><div class="stats panel" id="s-stats"></div></section>

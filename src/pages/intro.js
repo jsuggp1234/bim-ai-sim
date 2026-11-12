@@ -1,15 +1,22 @@
 // 첫 화면: BIM·AI 시뮬레이터의 정체성을 보여 주는 배경(가상 도시가 층마다 지어지고, AI가 훑으며 계산하는 장면) + 시작하기
 import * as THREE from 'three';
 import { onThemeChange } from '../pipeline.js';
+import { USES } from '../sim/uses.js';
+import { KR_SITES } from '../sim/kr-sites.js';
+import { WPS } from '../sim/methods.js';
+import { RISKS } from '../sim/risk.js';
+import { countUp } from '../ui/sys.js';
 
 export const title = 'BIM·AI 건설 시뮬레이터';
 
 const STEPS = [
-  ['01', '택지 선정', '지도 위 후보지를 같은 기준으로 비교'],
-  ['02', '매스 배치', '변수로 동을 배치하고 일조·조망 검토'],
-  ['03', '층별 일람표', '동·층·세대 물량을 표로'],
-  ['04', '4D 공정', '흙막이부터 준공까지 층별 시뮬레이션'],
-  ['05', '5D 예산', '공정에 따라 쌓이는 공사비'],
+  ['01', '용도', '무엇을 지을지: 주거·오피스·반도체·박물관·플랜트', 'use'],
+  ['02', '입지', '전국 후보지를 용도별 기준으로 평가', 'site'],
+  ['03', '매스', '변수로 동을 배치하고 물량 산출', 'mass'],
+  ['04', '공법·재료', '공종마다 AI가 공법을 추천하고 이유를 설명', 'method'],
+  ['05', '4D·간섭', '공정을 짜고 간섭을 찾아 AI가 최적화', 'process'],
+  ['06', '5D 예산', '공정에 따라 쌓이는 공사비', 'budget'],
+  ['07', '위험 예측', '위험 등록부와 몬테카를로 확률', 'risk'],
 ];
 
 export function mount(root) {
@@ -24,17 +31,24 @@ export function mount(root) {
       <div class="intro-prog"><i id="i-prog"></i></div>
     </div>
     <div class="intro-copy">
-      <span class="label-sm intro-kicker">bim · ai construction simulator</span>
+      <span class="sx-code intro-kicker"><span class="sl">//</span> 00.00 SYS_BOOT <b>[00 / 07]</b></span>
       <h1>Build it <em>before</em><br>you build it.</h1>
-      <p>택지를 고르고, 동을 배치하고, 층마다 공정과 예산을 계산합니다.<br>사업 전체를 실제로 짓기 전에 화면 위에서 먼저 지어 봅니다.</p>
+      <p>용도를 정하고, 전국에서 입지를 고르고, 동을 배치하고, 공법을 고르고,<br>공정·간섭·예산·위험까지 BIM 모델 하나로 계산합니다. 짓기 전에 화면 위에서 먼저 지어 봅니다.</p>
+      <dl class="intro-stats">
+        <div><dt>용도</dt><dd id="is-u">0</dd></div>
+        <div><dt>전국 후보지</dt><dd id="is-s">0</dd></div>
+        <div><dt>공법·기술</dt><dd id="is-m">0</dd></div>
+        <div><dt>위험 모델</dt><dd id="is-r">0</dd></div>
+      </dl>
       <div class="intro-cta">
-        <a class="btn big" href="#/site" id="i-start">시작하기 <span class="ar" aria-hidden="true">→</span></a>
-        <span class="note">01 택지 선정부터 05 5D 예산까지, 5단계</span>
+        <a class="btn acc big" href="#/use" id="i-start">시작하기 <span class="ar" aria-hidden="true">→</span></a>
+        <span class="note">01 용도부터 07 위험 예측까지, 7단계</span>
       </div>
     </div>
-    <ol class="intro-steps">${STEPS.map(([n, t, d], i) => `<li><a href="#/${['site', 'mass', 'schedule', 'process', 'budget'][i]}"><span class="n">${n}</span><b>${t}</b><span>${d}</span></a></li>`).join('')}</ol>
+    <ol class="intro-steps">${STEPS.map(([n, t, d], i) => `<li><a href="#/${STEPS[i][3]}"><span class="n">${n}</span><b>${t}</b><span>${d}</span></a></li>`).join('')}</ol>
   </section>`;
 
+  [['is-u', USES.length], ['is-s', KR_SITES.length], ['is-m', WPS.reduce((a, w) => a + w.opts.length, 0)], ['is-r', RISKS.length]].forEach(([id, v]) => countUp(root.querySelector('#' + id), v, { ms: 1100 }));
   const bg = root.querySelector('#i-bg');
   const scene3 = createCity(bg, root.querySelector('#i-tags'), root.querySelector('#i-lead'), root.querySelector('#i-hud'), root.querySelector('#i-prog'));
   const offTheme = onThemeChange(() => scene3 && scene3.theme());
@@ -194,7 +208,7 @@ function createCity(host, tagBox, leadSvg, hud, prog) {
   // ---- 테마 ----
   const col = {};
   function theme() {
-    const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+    const dark = document.documentElement.dataset.theme !== 'light';
     const C = (n, d) => new THREE.Color(css(n, d));
     col.bg = C('--paper', '#ffffff'); col.ink = C('--ink', '#0b0b0c'); col.muted = C('--muted', '#7c7c82'); col.line = C('--line', '#e4e4e7');
     col.acc = C('--accent', '#eb6834'); col.lo = C('--heat-lo', '#f0f0f1'); col.hi = C('--heat-hi', '#0c6f68');

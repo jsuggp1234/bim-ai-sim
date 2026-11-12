@@ -1,5 +1,6 @@
 // 3D 장면 색: CSS 변수(라이트·다크)를 읽어 three 색으로. 변수가 없으면 기본값
 import * as THREE from 'three';
+import { FLOOR_USES } from '../uses.js';
 
 const DEF = {
   scene: '#f4f5f6', skyTop: '#c9dbea', skyHor: '#f4f6f8', ground: '#e9e6e0', asphalt: '#cac8c4', walk: '#dedad3', curb: '#bdb9b2', mark: '#ffffff', markY: '#e3b341',
@@ -25,6 +26,7 @@ export function readPalette() {
     res: tok('--res', '#1f9e95'), officetel: tok('--officetel', '#8fcfc7'), office: tok('--office', '#2a78d6'), retail: tok('--retail', '#d6d2c6'),
     lobby: tok('--retail', '#d6d2c6'), refuge: tok('--refuge', '#eb6834'), mech: tok('--mech', '#57554f'),
   };
+  Object.entries(FLOOR_USES).forEach(([k, x]) => { if (!P.use[k]) P.use[k] = tok(x.tok, '#9a9aa0'); });
   P.model = tok('--model', '#ffffff'); P.na = tok('--model-na', '#e7e4df');
   P.heatLo = tok('--heat-lo', '#efede7'); P.heatHi = tok('--heat-hi', '#0c6f68');
   P.dark = isDark();
@@ -35,5 +37,5 @@ export function readPalette() {
 export function isDark() {
   if (typeof document === 'undefined') return false;
   const t = document.documentElement.dataset.theme;
-  return t === 'dark' || (!t && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  return t !== 'light';
 }

@@ -13,7 +13,7 @@ export const worldPerMeter = (lat) => TILE / (40075016.686 * Math.cos(lat * Math
 
 const isDark = () => {
   const t = document.documentElement.dataset.theme;
-  return t === 'dark' || (!t && matchMedia('(prefers-color-scheme: dark)').matches);
+  return t !== 'light';
 };
 
 export function createAtlas(el, { minZoom = 9.6, maxZoom = 16.5, onSelect = null, onHover = null } = {}) {

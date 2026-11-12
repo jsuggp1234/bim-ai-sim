@@ -8,8 +8,9 @@ import { fallbackFor, osmFor, analysisBoxes } from '../sim/ctxload.js';
 import { createViewer } from '../sim/viewer.js';
 import { store, massParamsFromStage1, currentSite, paramsForSite } from '../store.js';
 import { fmt, onThemeChange } from '../pipeline.js';
+import { code, dot } from '../ui/sys.js';
 
-export const title = '02 매스 배치';
+export const title = '03 매스 배치';
 
 const man = (v) => fmt(v / 1e4, 1) + '만㎡';
 const pct = (a, b) => (b ? (a / b * 100) : 0);
@@ -69,11 +70,15 @@ export function mount(root) {
   const $ = (id) => root.querySelector('#' + id);
 
   root.innerHTML = `
-  <div class="page-h">
-    <div><span class="label-sm">stage 02 / 05 · massing</span><h1 id="m-title"></h1>
-    <p id="m-intro"></p></div>
-    <div class="actions"><a class="btn ghost" href="#/site">← 01 택지</a><a class="btn" href="#/schedule">03 층별 일람표 <span class="ar">→</span></a></div>
-  </div>
+  <header class="sx-head">
+    <div class="sx-head-l">
+      <div class="sx-meta">${code(3, 'MASS')}${dot('GENERATIVE MASSING · 공동주택')}</div>
+      <h1 class="sx-title" id="m-title"></h1>
+      <p class="sx-dim" id="m-dim"></p>
+      <p class="sx-desc" id="m-intro"></p>
+      <div class="sx-act"><a class="btn ghost" href="#/site">← 02 입지</a><a class="btn ghost" href="#/schedule">층별 일람표</a><a class="btn acc" href="#/method">04 공법·재료 <span class="ar">→</span></a></div>
+    </div>
+  </header>
   <section class="ws" id="m-ws" aria-label="3D 매스 작업 화면">
     <div class="stage" id="m-stage"></div>
     <div class="ov f-top"><div class="seg" id="m-modes" role="group" aria-label="색 표시"></div>
@@ -84,7 +89,7 @@ export function mount(root) {
       <div class="f-body m-ctl">
         <div class="grp site-pick">
           <label class="label-sm" for="m-site">택지 · site</label>
-          <select id="m-site">${SITE_IDS.map(id => `<option value="${id}">${siteName(id)}</option>`).join('')}<option value="custom">직접 입력 …</option></select>
+          <select id="m-site"></select>
           <div class="custom-site" id="m-custom" hidden></div>
           <div class="map-state" id="m-map" role="status"></div>
         </div>
@@ -494,6 +499,8 @@ export function mount(root) {
   }));
   // ---------- 택지 ----------
   function renderSitePick() {
+    const ids = SITE_IDS.includes(site.id) || site.id === 'custom' ? SITE_IDS : [site.id, ...SITE_IDS];
+    $('m-site').innerHTML = ids.map(id => `<option value="${id}">${id === site.id ? site.name : siteName(id)}${SITE_IDS.includes(id) ? '' : ' · 전국 후보'}</option>`).join('') + '<option value="custom">직접 입력 …</option>';
     $('m-site').value = site.id === 'custom' ? 'custom' : site.id;
     const c = $('m-custom');
     c.hidden = site.id !== 'custom';
@@ -534,7 +541,7 @@ export function mount(root) {
   }
   function applySite(sel, resetParams) {
     store.set({ site: sel });
-    site = resolveSite(sel); plan = makePlan(site); ctx = fallbackFor(plan);
+    site = resolveSite(sel, store.get().use || 'housing'); plan = makePlan(site); ctx = fallbackFor(plan);
     if (resetParams) { params = paramsForSite(site, DEFAULTS); store.set({ massFrom: 'default' }); }
     if (viewer) viewer.setPlan(plan, ctx);
     if (!plan.views.water && ui.mode === 'river') ui.mode = 'use';
@@ -546,14 +553,15 @@ export function mount(root) {
   }
   function renderHeader() {
     const zs = Object.values(makePlan(site).ZONES).map(z => z.name.split('(')[0].trim());
-    $('m-title').innerHTML = `${site.name} 매스 배치 <span class="dim">(${fmt(site.area / 1e4, 1)}만㎡)</span>`;
+    $('m-title').innerHTML = `${site.name}<span class="pd">.</span>`;
+    $('m-dim').textContent = `매스 배치 · 대지 ${fmt(site.area / 1e4, 1)}만㎡ · ${site.region || site.gu || '서울'}`;
     $('m-intro').textContent = site.id === 'yongsan'
       ? '대지 49.5만㎡를 국제업무·업무복합·업무지원(주거) 존으로 나누고, 주동 형식과 높이 계획에 맞춰 동을 놓습니다. 인동간격은 건축법 시행령 제86조 제3항으로 검토하고, 모든 세대의 동지 일조와 한강·남산 조망, 주변 주거의 일조 변화를 계산합니다.'
       : `${site.gu ? site.gu + ' ' + site.dong + ' · ' : ''}대지를 ${zs.join('·')}으로 나누고 획지 ${plan.BLOCKS.length}곳에 주동을 놓습니다. 인동간격은 건축법 시행령 제86조 제3항으로 검토하고, 모든 세대의 동지 일조${plan.views.water ? '와 ' + plan.views.water.name : ''}${plan.views.peak ? '·' + plan.views.peak.name : ''} 조망, 주변 주거의 일조 변화를 계산합니다.`;
     $('m-modes').innerHTML = modesFor(plan).map(([k, n]) => `<button type="button" data-mode="${k}" aria-pressed="${k === ui.mode}">${n}</button>`).join('');
     $('m-views').innerHTML = viewsFor(plan).map(([k, n]) => `<button type="button" data-view="${k}" aria-pressed="${k === ui.view}">${n}</button>`).join('');
     $('m-elev-h').textContent = plan.views.water ? `${plan.views.water.name} 쪽에서 본 남측 입면` : '남측 입면';
-    document.title = `02 매스 배치 · ${site.name}`;
+    document.title = `03 매스 배치 · ${site.name}`;
   }
   $('m-site').addEventListener('change', e => {
     const id = e.target.value;

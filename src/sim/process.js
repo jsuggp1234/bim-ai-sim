@@ -1,3 +1,4 @@
+import { FLOOR_USES } from './uses.js';
 // 4단계 공정(4D): 블록·동·층·공종 단위 공정표
 // 블록: 착공·가설 → 흙막이 → 굴토 → 기초 매트 → 지하 골조(층별). 동: 층마다 거푸집·철근 → 타설(골조) → 설비 → 창호·외장 → 내부 마감 → 승강기·시운전 → 준공
 // 후속 공종은 골조보다 정해진 층수만큼 뒤따르고(선행 층이 끝나야 그 층 작업 가능), 자기 속도로 한 층씩 올라간다.
@@ -55,6 +56,8 @@ export const FLOOR_STATES = [
 ];
 // 공정 세부 단계 (4D 화면 탭)
 export const PHASES = [
+  { key: 'survey', name: '지반조사', cats: ['survey'], note: '시추·탐사로 지층·지하수 확인 (4단계에서 고른 조사 방법)' },
+  { key: 'improve', name: '지반 개량', cats: ['improve'], note: '연약층 압밀·고결 (연약 지반에서만)' },
   { key: 'prep', name: '착공·가설', cats: ['prep'], note: '가설 울타리·현장 사무실·진입로' },
   { key: 'wall', name: '흙막이', cats: ['wall'], note: '지하연속벽(CIP·SCW)으로 굴토 경계를 막음' },
   { key: 'earth', name: '굴토', cats: ['earth'], note: '버팀보를 걸며 단계별로 파 내려감' },
@@ -69,6 +72,8 @@ export const PHASES = [
 ];
 
 export const CATS = [
+  { key: 'survey', name: '지반조사', color: '--c-prep' },
+  { key: 'improve', name: '지반 개량', color: '--c-earth' },
   { key: 'prep', name: '착공·가설', color: '--c-prep' },
   { key: 'wall', name: '흙막이', color: '--c-earth' },
   { key: 'earth', name: '굴토', color: '--c-earth' },
@@ -83,6 +88,9 @@ export const CATS = [
 ];
 
 const DAY = 86400000;
+// 공법 효과 기본값 (공법 단계를 거치지 않았을 때: 전통 공법 묶음과 같은 값)
+export const FX_DEFAULT = { surveyDays: 35, unc: 1, improveDays: 0, wallRate: 150, excavK: 0.85, baseCycK: 1, overlap: 0, waterDays: 25, foundDaysK: 1.1, structCycK: 1.15,
+  coreAhead: false, winterK: 1, craneR: 60, skinCycK: 1.15, mepCycK: 1.1, finSave: 0, lagCut: 0 };
 export function parseYM(s) { const [y, m] = String(s).split('-').map(Number); return new Date(Date.UTC(y || 2028, (m || 1) - 1, 1)); }
 export const dateAt = (t0, d) => new Date(t0.getTime() + d * DAY);
 export const ym = (dt) => `${dt.getUTCFullYear()}.${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -93,7 +101,7 @@ function calendar(t0, p, days = 365 * 16) {
   for (let d = 0; d < days; d++) {
     const dt = new Date(t0.getTime() + d * DAY), wd = dt.getUTCDay(), mo = dt.getUTCMonth();
     let w = wd === 0 ? 0 : wd === 6 ? 0.5 : 1;
-    if (mo === 11 || mo === 0 || mo === 1) w *= 1 - p.winterLoss / 100;
+    if (mo === 11 || mo === 0 || mo === 1) w *= 1 - Math.min(0.9, p.winterLoss / 100 * (p.winterK || 1));
     if (mo === 6) w *= 1 - p.rainLoss / 100;
     cap[d + 1] = cap[d] + w;
   }
@@ -109,6 +117,8 @@ function calendar(t0, p, days = 365 * 16) {
 }
 
 const cycleOf = (b, f, p) => {
+  const X = FLOOR_USES[f.use];
+  if (X && !['admin'].includes(f.use)) return X.cyc;
   if (f.roof) return p.cycleSpecial * 1.5;
   if (f.lv === 1 || f.use === 'refuge' || f.use === 'retail' || f.use === 'lobby') return p.cycleSpecial;
   if (b.kind === 'landmark') return p.cycleLandmark;
@@ -117,79 +127,109 @@ const cycleOf = (b, f, p) => {
   return p.cycleOffice;
 };
 
+// 매트 두께(m): 고층·중량 설비가 얹히는 블록일수록 두껍다
+function d_matT(gen, blockId) {
+  let top = 0, heavy = false;
+  gen.bldgs.forEach(b => { if (b.block === blockId && b.kind !== 'basement') { top = Math.max(top, b.storeys || 0); if (['fab', 'dhall', 'turbine', 'tank', 'hrsg'].includes(b.kind)) heavy = true; } });
+  return heavy ? 1.8 : top >= 40 ? 2.6 : top >= 20 ? 1.8 : 1.2;
+}
+
 export function schedule(gen, Q, pIn) {
   const p = { ...P4_DEFAULTS, ...pIn };
+  const fx = { ...FX_DEFAULT, ...(p.fx || {}) };
+  p.winterK = fx.winterK;
   const t0 = parseYM(p.start);
   const C = calendar(t0, p);
   const M = 30.44;
-  // 블록 착공 순서
-  const zoneOrder = p.order === 'intl' ? ['intl', 'mixed', 'supp'] : ['supp', 'mixed', 'intl'];
+  const lag = (v) => Math.max(2, v - (fx.lagCut || 0) * 2);
+  // 블록 착공 순서: 주거 생성기는 존(supp·mixed·intl), 다른 용도는 생성기가 정한 순서
+  const zoneOrder = gen.zoneOrder ? [...gen.zoneOrder, ...Object.keys(gen.zones || {}).filter(z => !gen.zoneOrder.includes(z))]
+    : p.order === 'intl' ? ['intl', 'mixed', 'supp'] : ['supp', 'mixed', 'intl'];
   const blocks = gen.blocks.filter(b => gen.bldgs.some(x => x.block === b.id && x.kind !== 'basement'));
+  const acts = [], blds = new Map(), bsum = [], bstate = new Map();
+  const add = (a) => { acts.push(a); return a; };
+  // 지반조사: 부지 전체 (착공 전 설계 확정 단계와 겹침)
+  const survey = add({ block: '*', cat: 'survey', name: '지반조사 (시추·시험·지층 모델)', start: 0, end: Math.round(fx.surveyDays * 1.4) });
   const startOf = new Map();
   let zi = 0;
   zoneOrder.forEach(z => {
     const list = blocks.filter(b => b.zone === z).sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }));
     if (!list.length) return;
-    list.forEach((b, i) => startOf.set(b.id, Math.round(((p.order === 'together' ? 0 : zi * p.phaseGap) + i * p.blockGap) * M)));
+    list.forEach((b, i) => startOf.set(b.id, Math.max(survey.end, survey.end + Math.round(((p.order === 'together' ? 0 : zi * p.phaseGap) + i * p.blockGap) * M) + Math.round((p.offsets && p.offsets[b.id]) || 0))));
     zi++;
   });
-  const acts = [], blds = new Map(), bsum = [], bstate = new Map();
-  const add = (a) => { acts.push(a); return a; };
   blocks.forEach(bl => {
-    const s0 = startOf.get(bl.id);
+    const s0 = startOf.get(bl.id) ?? survey.end;
     const base = Q.basements.find(x => x.block === bl.id);
-    const prep = add({ block: bl.id, cat: 'prep', name: '착공·가설 (울타리·현장 사무실)', start: s0, end: C.after(s0, 18) });
-    const wall = add({ block: bl.id, cat: 'wall', name: '흙막이 (지하연속벽)', start: prep.end, end: C.after(prep.end, base ? base.retainWall / p.wallRate : 20) });
+    let s1 = s0;
+    let improve = null;
+    if (fx.improveDays > 0) { improve = add({ block: bl.id, cat: 'improve', name: '지반 개량', start: s0, end: s0 + fx.improveDays }); s1 = improve.end; }
+    const prep = add({ block: bl.id, cat: 'prep', name: '착공·가설 (울타리·현장 사무실)', start: s1, end: C.after(s1, 18) });
+    const wallW = base ? base.retainWall / fx.wallRate : 20;
+    const wall = add({ block: bl.id, cat: 'wall', name: '흙막이·차수', start: prep.end, end: Math.max(C.after(prep.end, wallW), C.after(prep.end, fx.waterDays || 0)) });
     const eS = C.after(prep.end, (wall.end - prep.end) * 0.45 / 1.3);
-    const earth = add({ block: bl.id, cat: 'earth', name: '굴토·버팀보·잔토 반출', start: eS, end: Math.max(wall.end, C.after(eS, base ? base.volume / p.excavRate : 20)) });
-    const found = add({ block: bl.id, cat: 'found', name: '기초 매트 (철근·타설)', start: earth.end, end: C.after(earth.end, 25 + (base ? base.foot / 900 : 0)) });
-    const nB = base ? base.levels : 2;
-    const baseFl = []; { let t = found.end; for (let k = 0; k < nB; k++) { t = C.after(t, p.cycleBase); baseFl.push(t); } }
-    const bstr = add({ block: bl.id, cat: 'base', name: `지하 골조 B${nB}~B1`, start: found.end, end: baseFl[baseFl.length - 1] || found.end });
+    const exRate = p.excavRate * fx.excavK / 0.85;
+    const earth = add({ block: bl.id, cat: 'earth', name: '굴착·지보·잔토 반출', start: eS, end: Math.max(wall.end, C.after(eS, base ? base.volume / exRate : 20)) });
+    // 매트 기초: 하루 타설 한도(pourCap, ㎥)로 나눠 치므로 물량이 크면 기초 기간이 늘어난다
+    const matVol = base ? base.foot * (d_matT(gen, bl.id)) : 0;
+    const pourCap = p.pourCap || 2500, pourDays = Math.ceil(matVol / pourCap);
+    const foundDur = Math.max((25 + (base ? base.foot / 900 : 0)) * fx.foundDaysK, pourDays * 1.15 + 10);
+    const found = add({ block: bl.id, cat: 'found', name: '기초 (말뚝·매트)', start: earth.end, end: C.after(earth.end, foundDur), matVol, pourDays, pourCap });
+    const nB = base ? base.levels : 0;
+    const baseFl = []; { let t = found.end; for (let k = 0; k < nB; k++) { t = C.after(t, p.cycleBase * fx.baseCycK); baseFl.push(t); } }
+    const bstr = add({ block: bl.id, cat: 'base', name: nB ? `지하 골조 B${nB}~B1` : '기초 상부·지중보', start: found.end, end: baseFl[baseFl.length - 1] || C.after(found.end, 12) });
+    // 역타·업다운: 지상 골조가 1층 슬래브 직후 시작 (지하와 동시)
+    const topStart = C.after(wall.end, 35);
+    const ov = Math.min(1, fx.overlap || 0);
+    const superStart = nB >= 2 && ov > 0 ? Math.round(Math.max(topStart, bstr.end - ov * (bstr.end - topStart))) : bstr.end;
     let blockEnd = bstr.end;
     const towers = gen.bldgs.map((b, bi) => ({ b, bi })).filter(x => x.b.block === bl.id && x.b.kind !== 'basement')
       .sort((a, b) => (a.b.kind === 'podium') - (b.b.kind === 'podium') || b.b.storeys - a.b.storeys);
+    // 같은 블록 안 건물은 크레인을 나눠 쓰며 차례로 착수 (설비류는 한꺼번에 여러 대)
+    const stagger = p.towerGap ?? (towers.length > 8 ? 2 : 6);
     towers.forEach(({ b, bi }, k) => {
-      const st = C.after(bstr.end, k * 6); // 크레인 설치 간격
+      const st = C.after(superStart, k * stagger);
       const fl = b.floors.filter(f => f.lv > 0);
       const F = fl.length;
       const fEnd = [], fForm = [];
       let t = st;
-      fl.forEach(f => { const c = cycleOf(b, f, p); fForm.push(C.after(t, c * 0.6)); t = C.after(t, c); fEnd.push(t); });
+      fl.forEach(f => { const c = cycleOf(b, f, p) * fx.structCycK; fForm.push(C.after(t, c * 0.6)); t = C.after(t, c); fEnd.push(t); });
       const sEnd = t;
       const at = (i) => fEnd[Math.max(0, Math.min(F - 1, i))];
-      // 후속 공종: 층 i는 골조가 i+lag층을 마친 뒤, 바로 아래층을 마친 뒤 시작
-      const follow = (lag, per, extraStart = 0) => {
+      const follow = (lagFl, per, extraStart = 0) => {
         const out = []; let prev = -Infinity;
         for (let i = 0; i < F; i++) {
-          const ready = b.kind === 'podium' ? C.after(sEnd, extraStart) : C.after(at(i + Math.min(lag, F - 1)), extraStart);
-          const s1 = Math.max(ready, prev);
-          prev = C.after(s1, per * (fl[i].roof ? 1.5 : 1));
-          out.push([s1, prev]);
+          const ready = b.kind === 'podium' || F <= 3 ? C.after(sEnd, extraStart) : C.after(at(i + Math.min(lagFl, F - 1)), extraStart);
+          const s2 = Math.max(ready, prev);
+          prev = C.after(s2, per * (fl[i].roof ? 1.5 : 1));
+          out.push([s2, prev]);
         }
         return out;
       };
-      const tMep = follow(p.mepLagFl, p.mepPerFl);
-      const tWin = follow(p.facadeLagFl, p.winPerFl);
-      const tFin = follow(p.finishLagFl, p.finPerFl, 10).map(([a, e], i) => { const s1 = Math.max(a, tWin[i][1], tMep[i][1]); return [s1, Math.max(e, C.after(s1, p.finPerFl))]; });
+      const big = (fl[0] && fl[0].area > 6000) ? Math.min(3, Math.sqrt(fl[0].area / 6000)) : 1; // 넓은 층은 한 층 작업이 길다
+      const tMep = follow(lag(p.mepLagFl), p.mepPerFl * fx.mepCycK * big);
+      const tWin = follow(lag(p.facadeLagFl), p.winPerFl * fx.skinCycK * big);
+      const finPer = p.finPerFl * (1 - fx.finSave) * big;
+      const tFin = follow(lag(p.finishLagFl), finPer, 10).map(([a, e], i) => { const s2 = Math.max(a, tWin[i][1], tMep[i][1]); return [s2, Math.max(e, C.after(s2, finPer))]; });
       for (let i = 1; i < F; i++) if (tFin[i][1] < tFin[i - 1][1]) tFin[i][1] = tFin[i - 1][1];
       const mepS = tMep[0][0], mepE = Math.max(tMep[F - 1][1], C.after(sEnd, 40));
       const skinS = tWin[0][0], skinE = Math.max(tWin[F - 1][1], C.after(sEnd, 30));
       const finS = tFin[0][0], finE = Math.max(tFin[F - 1][1], C.after(sEnd, 60));
-      const commE = C.after(finE, b.kind === 'landmark' ? 110 : b.kind === 'podium' ? 40 : 70);
+      const commDays = b.kind === 'landmark' ? 110 : b.kind === 'podium' ? 40 : ['fab', 'dhall', 'turbine', 'furnace', 'gmp'].includes(b.kind) ? 150 : ['column', 'tank', 'stack', 'rack', 'hrsg'].includes(b.kind) ? 60 : 70;
+      const commE = C.after(finE, commDays);
       const rec = { bi, id: b.id, block: bl.id, kind: b.kind, structStart: st, structEnd: sEnd, fEnd, fForm, tMep, tWin, tFin,
         floors: fl.map(f => b.floors.indexOf(f)), skinS, skinE, mepS, mepE, finS, finE, commS: finE, commE, F };
       blds.set(bi, rec);
-      add({ block: bl.id, bi, bldg: b.id, cat: 'struct', name: `${b.id} 골조 ${F}층`, start: st, end: sEnd });
+      add({ block: bl.id, bi, bldg: b.id, cat: 'struct', name: `${b.id} 골조 ${F}${b.shape === 'cyl' ? '단' : '층'}`, start: st, end: sEnd });
       add({ block: bl.id, bi, bldg: b.id, cat: 'mep', name: `${b.id} 설비·전기`, start: mepS, end: mepE });
-      add({ block: bl.id, bi, bldg: b.id, cat: 'skin', name: `${b.id} 창호·외장`, start: skinS, end: skinE });
-      add({ block: bl.id, bi, bldg: b.id, cat: 'fin', name: `${b.id} 내부 마감`, start: finS, end: finE });
-      add({ block: bl.id, bi, bldg: b.id, cat: 'comm', name: `${b.id} 승강기·시운전·사용승인`, start: finE, end: commE });
+      add({ block: bl.id, bi, bldg: b.id, cat: 'skin', name: `${b.id} ${b.shape === 'cyl' ? '보온·도장' : '창호·외장'}`, start: skinS, end: skinE });
+      add({ block: bl.id, bi, bldg: b.id, cat: 'fin', name: `${b.id} ${b.shape === 'cyl' ? '내부 설비·계장' : '내부 마감'}`, start: finS, end: finE });
+      add({ block: bl.id, bi, bldg: b.id, cat: 'comm', name: `${b.id} ${['fab', 'dhall', 'turbine', 'furnace', 'gmp', 'column', 'tank', 'stack', 'hrsg'].includes(b.kind) ? '시운전·성능 시험' : '승강기·시운전·사용승인'}`, start: finE, end: commE });
       blockEnd = Math.max(blockEnd, commE);
     });
     const land = add({ block: bl.id, cat: 'land', name: '조경·외부 공사', start: Math.max(bstr.end, blockEnd - 200), end: blockEnd });
-    bstate.set(bl.id, { prep, wall, earth, found, bstr, baseFl, land, nB });
-    bsum.push({ id: bl.id, zone: bl.zone, start: s0, baseEnd: bstr.end, topping: Math.max(...towers.map(x => blds.get(x.bi).structEnd)), end: Math.max(blockEnd, land.end), towers: towers.length });
+    bstate.set(bl.id, { prep, wall, earth, found, bstr, baseFl, land, nB, improve });
+    bsum.push({ id: bl.id, zone: bl.zone, start: s0, baseEnd: bstr.end, topping: towers.length ? Math.max(...towers.map(x => blds.get(x.bi).structEnd)) : bstr.end, end: Math.max(blockEnd, land.end), towers: towers.length });
   });
   const end = Math.max(...acts.map(a => a.end));
   // 날짜 t의 층 상태: 0 미착공 · 1 거푸집·철근 · 2 골조 · 3 설비 · 4 창호·외장 · 5 내부 마감 · 6 준공
@@ -222,13 +262,14 @@ export function schedule(gen, Q, pIn) {
     });
     return out;
   }
+  const craneOK = (r) => { const b = gen.bldgs[r.bi]; return r.kind !== 'podium' && !(b.shape === 'cyl' && b.parts[0].w < 12) && !['gen', 'rack'].includes(b.kind); };
   function cranesAt(t) {
     const out = [];
     blds.forEach(r => {
-      if (r.kind === 'podium' || t < r.structStart - 20 || t > r.structEnd + 15) return;
+      if (!craneOK(r) || t < r.structStart - 20 || t > r.structEnd + 15) return;
       const b = gen.bldgs[r.bi];
       let h = 0; r.fEnd.forEach((fe, i) => { if (fe <= t) h = b.floors[r.floors[i]].y1; });
-      out.push({ u: b.core.u, v: b.core.v, h: Math.max(h, 8), a: (r.bi * 1.7) % (Math.PI * 2), bi: r.bi });
+      out.push({ u: b.core.u, v: b.core.v, h: Math.max(h, 8), a: (r.bi * 1.7) % (Math.PI * 2), bi: r.bi, r: fx.craneR, block: r.block });
     });
     return out;
   }
@@ -260,5 +301,5 @@ export function schedule(gen, Q, pIn) {
     const peak = top.length ? top[Math.floor(top.length / 2)][0] : s1;
     return { ...ph, start: s1, end: e1, peak: Math.round(peak), n: list.length };
   });
-  return { p, t0, acts, blds, blocks: bsum, end, months: Math.ceil(end / M), stateAt, blockStateAt, cranesAt, progressAt, phases, cal: C };
+  return { p, fx, t0, acts, blds, blocks: bsum, bstate, end, months: Math.ceil(end / M), stateAt, blockStateAt, cranesAt, craneOK, progressAt, phases, cal: C, survey };
 }

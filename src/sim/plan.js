@@ -103,12 +103,13 @@ function genericPlan(site) {
   const SITE = { u0: -W / 2, u1: W / 2, v0: -D / 2, v1: D / 2, area: A };
   const tiny = A < 30000;
   const edge = tiny ? 4 : EDGE;
-  // 열·행 나누기 (블록 폭 약 110~170m, 깊이 약 150~190m)
-  const nc = tiny ? 1 : Math.max(1, Math.round((W - 2 * edge) / 150));
-  const spine = !tiny && D >= 420 ? SPINE_W : 0;
+  // 열·행 나누기 (블록 폭 약 110~170m, 깊이 약 150~190m). 산업·플랜트 용도는 site.cell로 큰 블록
+  const [CW, CD] = site.cell || [150, 175];
+  const nc = tiny ? 1 : Math.max(1, Math.round((W - 2 * edge) / CW));
+  const spine = !tiny && !site.cell && D >= 420 ? SPINE_W : 0;
   const halves = spine ? 2 : 1;
   const depthAvail = (D - 2 * edge - spine) / halves;
-  const nrh = tiny ? 1 : Math.max(1, Math.round(depthAvail / 175));
+  const nrh = tiny ? 1 : Math.max(1, Math.round(depthAvail / CD));
   const cw = (W - 2 * edge - (nc - 1) * ROAD_W) / nc;
   const rd = (depthAvail - (nrh - 1) * ROAD_W) / nrh;
   const rowsV = [];
@@ -194,7 +195,7 @@ function finish(pl) {
 const cache = new Map();
 export function makePlan(site) {
   const s = site || siteFrom(DEFAULT_SITE_ID);
-  const key = JSON.stringify([s.id, s.area, s.aspect, s.rot, s.netRatio, s.resShare, s.units, s.features]);
+  const key = JSON.stringify([s.id, s.area, s.aspect, s.rot, s.netRatio, s.resShare, s.units, s.features, s.cell, s.use]);
   if (cache.has(key)) return cache.get(key);
   const pl = s.id === 'yongsan' && !s.generic ? yongsanPlan(s) : genericPlan(s);
   if (cache.size > 24) cache.clear();

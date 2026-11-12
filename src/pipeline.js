@@ -1,21 +1,90 @@
-// 단계 사이 계산을 한곳에서: 2단계 배치 → 3단계 물량 → 4단계 공정 → 5단계 예산
+// 단계 사이 계산을 한곳에서: 용도·입지 → 매스 → 물량 → 공법(현장 조건·추천) → 4D 공정 → 간섭 → 5D 예산 → 위험
 import { DEFAULTS as MASS_D, generate } from './sim/massing.js';
+import { generateX, XDEF } from './sim/massx.js';
+import { isHousingGen, useOf } from './sim/uses.js';
 import { quantities } from './sim/quantities.js';
 import { schedule, P4_DEFAULTS } from './sim/process.js';
 import { estimate, P5_DEFAULTS } from './sim/cost.js';
+import { siteConditions, derive, resolveMethods, PRIO_DEFAULT, BASELINE } from './sim/methods.js';
+import { detect } from './sim/clash.js';
+import { register, monteCarlo, exposure, exposureTimeline } from './sim/risk.js';
 import { store, currentSite } from './store.js';
+
+// 용도·택지마다 따로 저장하는 설정의 열쇠
+export const projKey = (s = store.get()) => `${s.use || 'housing'}@${currentSite(s).id}`;
+export const methodState = (s = store.get()) => ((s.methods || {})[projKey(s)]) || {};
+export const optState = (s = store.get()) => ((s.opt || {})[projKey(s)]) || null;
+export function setMethodState(patch) {
+  const s = store.get(), k = projKey(s);
+  store.set({ methods: { ...(s.methods || {}), [k]: { ...methodState(s), ...patch } } });
+}
+export function setOptState(v) {
+  const s = store.get(), k = projKey(s);
+  const o = { ...(s.opt || {}) }; if (v) o[k] = v; else delete o[k];
+  store.set({ opt: o });
+}
+// 최적화 결과(착공 시차·동 간격·후속 공종 간격·타설 분할) → 공정 변수
+export const POUR_CAPS = [2500, 1800, 1200];
+export function optProc(x, pp) {
+  if (!x) return {};
+  return { offsets: x.offsets, towerGap: x.towerGap ?? undefined, pourCap: POUR_CAPS[x.pour || 0],
+    mepLagFl: (pp.mepLagFl ?? 4) + (x.lagAdd || 0), facadeLagFl: (pp.facadeLagFl ?? 8) + (x.lagAdd || 0) };
+}
 
 let memo = {};
 export function pipeline(over = {}) {
   const s = store.get();
-  const mp = { ...MASS_D, ...(s.mass || {}), ...(over.mass || {}), site: currentSite(s) };
-  const pp = { ...P4_DEFAULTS, ...(s.proc || {}), ...(over.proc || {}) };
+  const use = s.use || 'housing';
+  const housing = isHousingGen(use);
+  const site = currentSite(s);
+  const mp = housing ? { ...MASS_D, ...(s.mass || {}), ...(over.mass || {}), site, use }
+    : { ...(XDEF[use] || {}), ...((s.massx || {})[use] || {}), ...(over.mass || {}), site, use };
+  const ms = { ...methodState(s), ...(over.methods || {}) };
+  const opt = over.noOpt ? null : optState(s);
   const cp = { ...P5_DEFAULTS, ...(s.cost || {}), ...(over.cost || {}) };
-  const km = JSON.stringify(mp), kp = JSON.stringify(pp), kc = JSON.stringify(cp);
-  if (memo.km !== km) { memo = { km }; memo.gen = generate(mp); memo.Q = quantities(memo.gen); }
-  if (memo.kp !== kp) { memo.kp = kp; memo.S = schedule(memo.gen, memo.Q, pp); memo.kc = null; }
-  if (memo.kc !== kc) { memo.kc = kc; memo.E = estimate(memo.gen, memo.Q, memo.S, cp); }
-  return { mp, pp, cp, gen: memo.gen, Q: memo.Q, S: memo.S, E: memo.E };
+  const km = JSON.stringify(mp), kmeth = JSON.stringify(ms), kc = JSON.stringify(cp);
+  if (memo.km !== km) { memo = { km }; memo.gen = housing ? generate(mp) : generateX(mp); memo.Q = quantities(memo.gen); }
+  if (memo.kmeth !== kmeth) {
+    memo.kmeth = kmeth; memo.kp = null; memo.base = null;
+    const cond0 = siteConditions(site, memo.gen, memo.Q);
+    memo.cond0 = cond0;
+    memo.cond = { ...cond0, ...(ms.cond || {}) };
+    memo.d = derive(memo.cond, memo.gen, memo.Q, site);
+    memo.prio = { ...PRIO_DEFAULT, ...(ms.prio || {}) };
+    memo.M = resolveMethods(memo.cond, memo.d, ms.picks || {}, memo.prio);
+  }
+  const pp0 = { ...P4_DEFAULTS, ...(s.proc || {}), ...(over.proc || {}), fx: memo.M.fx };
+  const pp = { ...pp0, ...optProc(opt && opt.x, pp0) };
+  const kp = JSON.stringify(pp) + '|' + (opt ? opt.x.stagger : '');
+  if (memo.kp !== kp) {
+    memo.kp = kp; memo.kc = null; memo.risk = null;
+    memo.S = schedule(memo.gen, memo.Q, pp);
+    memo.C = detect(memo.gen, memo.S, { stagger: !!(opt && opt.x.stagger), noise: memo.cond.noise });
+  }
+  if (memo.kc !== kc) { memo.kc = kc; memo.risk = null; memo.E = estimate(memo.gen, memo.Q, memo.S, cp); }
+  const m = memo;
+  return {
+    mp, pp, pp0, cp, use, u: useOf(use), site, gen: m.gen, Q: m.Q, S: m.S, E: m.E, C: m.C, opt,
+    cond: m.cond, cond0: m.cond0, d: m.d, M: m.M, fx: m.M.fx, prio: m.prio, ms,
+    // 기준선(전통 공법) 공정·예산: 비교용, 필요할 때만 계산
+    base() {
+      if (!m.base) {
+        const B = resolveMethods(m.cond, m.d, BASELINE, m.prio);
+        const S0 = schedule(m.gen, m.Q, { ...pp0, fx: B.fx });
+        m.base = { M: B, S: S0, E: estimate(m.gen, m.Q, S0, cp), C: detect(m.gen, S0, { noise: m.cond.noise }) };
+      }
+      return m.base;
+    },
+    // 위험 등록부 + 몬테카를로 (잔여·고유)
+    risk() {
+      if (!m.risk) {
+        const ctx = { site, u: useOf(use), cond: m.cond, d: m.d, S: m.S, C: m.C, E: m.E, ex: exposure(m.S, m.Q), fx: m.M.fx };
+        const reg = register(ctx);
+        m.risk = { ctx, reg, mc: monteCarlo(reg, m.S, m.E, m.M.fx), mc0: monteCarlo(reg, m.S, m.E, m.M.fx, { mode: 'raw' }), tl: exposureTimeline(reg, m.S) };
+      }
+      return m.risk;
+    },
+  };
 }
 
 // 공통 서식

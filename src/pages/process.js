@@ -3,13 +3,15 @@ import { createViewer } from '../sim/viewer.js';
 import { P4_DEFAULTS, P4_META, CATS, PHASES, FLOOR_STATES, dateAt, ym } from '../sim/process.js';
 import { osmFor, osmReady } from '../sim/ctxload.js';
 import { store } from '../store.js';
-import { pipeline, fmt, won, tip, download, csv, onThemeChange } from '../pipeline.js';
+import { pipeline, fmt, won, tip, download, csv, onThemeChange, setOptState } from '../pipeline.js';
+import { CLASH_TYPES, optimize, describeMoves } from '../sim/clash.js';
+import { head, sub, dot, escH } from '../ui/sys.js';
 
-export const title = '04 4D 공정';
+export const title = '05 4D·간섭';
 
 const M = 30.44;
 const LANES = [
-  { key: 'g1', name: '토공·흙막이·기초', cats: ['prep', 'wall', 'earth', 'found'] },
+  { key: 'g1', name: '지반·토공·흙막이·기초', cats: ['improve', 'prep', 'wall', 'earth', 'found'] },
   { key: 'g2', name: '골조 (지하·지상)', cats: ['base', 'struct'] },
   { key: 'g3', name: '외장', cats: ['skin'] },
   { key: 'g4', name: '설비·전기·승강기', cats: ['mep', 'comm'] },
@@ -29,12 +31,14 @@ export function mount(root) {
   const $ = (id) => root.querySelector('#' + id);
   let viewer = null, alive = true;
 
-  root.innerHTML = `
-  <div class="page-h">
-    <div><span class="label-sm">stage 04 / 05 · 4d construction</span><h1>4D 공정 시뮬레이션 <span class="dim">(${site.name})</span></h1>
-    <p>블록마다 가설 울타리를 치고 흙막이를 세운 뒤 버팀보를 걸며 파 내려가고, 기초 매트와 지하층을 아래부터 올립니다. 동마다 층 단위로 거푸집·철근 → 타설을 반복하고, 몇 개 층 아래에서 설비 배관 → 창호·커튼월 → 내부 마감이 따라 올라갑니다. 작업일 달력(주말, 동절기, 장마)을 반영하고, 3단계 일람표의 굴토량·흙막이 면적·층수로 기간을 계산합니다.</p></div>
-    <div class="actions"><a class="btn ghost" href="#/schedule">← 03 일람표</a><a class="btn" href="#/budget">05 5D 예산 <span class="ar">→</span></a></div>
-  </div>
+  const housing = !R.gen.x;
+  root.innerHTML = head({
+    n: 5, key: 'PROCESS', title: '언제, 어떤 순서로', status: 'BIM × 4D LINKED',
+    dim: `${escH(site.name)} · ${R.u.name} · ${R.gen.blocks.length}개 블록 · 작업 ${fmt(R.S.acts.length)}건`,
+    desc: `지반조사부터 시운전·준공까지 블록·동·층 단위 공정을 BIM 매스에 연결해 3D로 재생합니다. 04단계에서 고른 공법이 사이클·기간을 바꾸고, 크레인 반경·인접 굴착·공종 적층·차량·소음 간섭을 자동으로 찾아 AI가 착공 순서와 시차를 최적화합니다.`,
+    stats: [['총 공기', '<b id="k-mo">—</b>', '<span id="k-mo2">MONTHS</span>'], ['간섭 (미해결)', '<b id="k-cl">—</b>', '<span id="k-cl2"></span>'], ['착공 전 탐지율', '<b id="k-det">—</b>', '<span id="k-det2"></span>']],
+    actions: `<a class="btn ghost" href="#/method">← 04 공법</a><a class="btn acc" href="#/budget">06 5D 예산 <span class="ar">→</span></a>`,
+  }) + `
   <section class="ws proc" id="p-ws" aria-label="4D 공정 작업 화면">
     <div class="stage" id="p-stage"></div>
     <div class="ov f-top"><div class="clock" id="p-clock" aria-live="polite"></div>
@@ -60,16 +64,25 @@ export function mount(root) {
   </section>
   <div class="statband"><div class="stats" id="p-stats"></div></div>
   <div class="wrap">
+    <section class="sx-sec" id="clash" aria-label="공정 간섭 검토">
+      ${sub('05.1', '공정 간섭 검토 · AI 최적화', '4D 공정(시간)과 BIM 배치(공간)를 겹쳐 충돌을 찾습니다. 항목을 누르면 그 시점·위치로 이동합니다.')}
+      <div class="cl-types" id="cl-types"></div>
+      <div class="cl-grid">
+        <div class="panel pad"><div class="sec-h"><h2>월별 간섭</h2><span class="hint" id="cl-mhint"></span></div><div id="cl-month"></div></div>
+        <div class="panel pad cl-opt" id="cl-opt"></div>
+      </div>
+      <div class="panel"><div class="tw"><table class="cl-list" id="cl-list"></table></div></div>
+    </section>
     <div class="sec">
-      <div class="sec-title"><span class="n">04.1</span><h2>블록별 공정 간트</h2><span class="hint">월 단위 격자. 블록마다 다섯 줄이 공종 그룹이고, 주황 마름모는 상량(골조 완료), 검은 마름모는 준공입니다. 막대에 마우스를 올리면 기간이 나옵니다.</span></div>
+      <div class="sec-title"><span class="n">05.2</span><h2>블록별 공정 간트</h2><span class="hint">월 단위 격자. 블록마다 다섯 줄이 공종 그룹이고, 주황 마름모는 상량(골조 완료), 검은 마름모는 준공입니다. 막대에 마우스를 올리면 기간이 나옵니다.</span></div>
       <div class="gantt" id="p-gantt"></div>
       <div class="g-leg" id="p-gleg"></div>
     </div>
     <div class="sec p4">
-      <div><div class="sec-title"><span class="n">04.2</span><h2>마일스톤</h2><span class="hint">상량 = 블록의 마지막 동 골조 완료</span></div>
+      <div><div class="sec-title"><span class="n">05.3</span><h2>마일스톤</h2><span class="hint">상량 = 블록의 마지막 동 골조 완료</span></div>
         <div class="panel"><div class="tw"><table class="ms-table" id="p-ms"></table></div></div>
         <div class="row" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn ghost" type="button" id="p-csv">공정표 CSV</button></div></div>
-      <div><div class="sec-title"><span class="n">04.3</span><h2>공정 변수</h2></div>
+      <div><div class="sec-title"><span class="n">05.4</span><h2>공정 변수</h2></div>
         <div class="panel" id="p-ctl">
           <div class="grp"><div class="ctl"><label for="p-start">건축 착공</label><span class="inbox"><input type="month" id="p-start" min="2026-01" max="2035-12"></span></div>
             <span class="label-sm" style="display:block;margin:8px 0 6px">착공 순서</span><div class="seg" id="p-order" role="group" aria-label="착공 순서"></div></div>
@@ -78,7 +91,7 @@ export function mount(root) {
         </div></div>
     </div>
     <div class="sec">
-      <div class="sec-title"><span class="n">04.4</span><h2>공정 가정</h2></div>
+      <div class="sec-title"><span class="n">05.5</span><h2>공정 가정</h2></div>
       <ul class="issues" id="p-assume"></ul>
     </div>
   </div>`;
@@ -102,10 +115,10 @@ export function mount(root) {
     const floors = towers.reduce((s, r) => s + r.F, 0);
     const cyc = towers.reduce((s, r) => s + (r.structEnd - r.structStart), 0) / Math.max(1, floors);
     const cells = [
-      ['건축 착공', D(0), ORDER.find(o => o[0] === S.p.order)[1], ''],
+      ['지반조사 착수', D(0), housing ? ORDER.find(o => o[0] === S.p.order)[1] : `${R.fx.ids.survey === 'ai' ? 'AI 3D 지반 모델' : '시추 조사'} ${fmt(S.survey.end)}일`, ''],
       ['전체 준공', D(S.end), `${S.blocks.length}개 블록`, ''],
       ['총 공기', `${S.months}개월`, `${fmt(S.end / 365.25, 1)}년`, 'acc'],
-      ['주거 첫 준공', D(Math.min(...S.blocks.filter(b => b.zone === 'supp').map(b => b.end))), '주거 블록', ''],
+      housing && S.blocks.some(b => b.zone === 'supp') ? ['주거 첫 준공', D(Math.min(...S.blocks.filter(b => b.zone === 'supp').map(b => b.end))), '주거 블록', ''] : ['첫 블록 준공', D(Math.min(...S.blocks.map(b => b.end))), S.blocks.slice().sort((a, b) => a.end - b.end)[0].id, ''],
       [lmRec && lmRec.kind === 'landmark' ? '랜드마크 상량' : '최고층 동 상량', lmRec ? D(lmRec.structEnd) : '—', lmRec ? `${lmRec.id} · 골조 ${fmt((lmRec.structEnd - lmRec.structStart) / M, 0)}개월 · ${lmRec.F}개 층` : '', ''],
       ['지상 골조', fmt(floors) + '개 층', `평균 ${fmt(cyc, 1)}일/층 (달력일)`, ''],
       ['동시 크레인 최대', maxCranes + '대', '골조 공사 중인 동', ''],
@@ -227,7 +240,7 @@ export function mount(root) {
   function renderCtl() {
     const p = params();
     $('p-start').value = p.start;
-    $('p-order').innerHTML = ORDER.map(([k, n]) => `<button type="button" data-order="${k}" aria-pressed="${p.order === k}">${n}</button>`).join('');
+    $('p-order').innerHTML = housing ? ORDER.map(([k, n]) => `<button type="button" data-order="${k}" aria-pressed="${p.order === k}">${n}</button>`).join('') : `<span class="note">${R.u.name}: 생성기가 정한 순서 (${(R.gen.zoneOrder || []).map(z => (R.gen.zones[z] || { name: z }).name).join(' → ')})</span>`;
     $('p-sliders').innerHTML = Object.entries(P4_META).map(([k, m]) => {
       const v = p[k], ch = Math.abs(v - P4_DEFAULTS[k]) > 1e-9 ? ' changed' : '';
       return `<div class="ctl${ch}"><label for="pc-${k}">${m.label}</label><span class="inbox"><input type="number" id="pn-${k}" data-k="${k}" value="${v}" min="${m.min}" max="${m.max}" step="${m.step}" aria-label="${m.label} 값"><span class="unit">${m.unit}</span></span>
@@ -244,7 +257,7 @@ export function mount(root) {
       const ratio = ui.t / S.end;
       R = pipeline(); lmRec = derive();
       $('p-t').max = S.end;
-      renderStats(); renderGantt(); renderMilestones(); syncCtl();
+      renderStats(); renderGantt(); renderMilestones(); renderClash(); syncCtl();
       setT(ratio * S.end, true);
     });
   }
@@ -354,6 +367,101 @@ export function mount(root) {
     $('p-near').addEventListener('click', () => { if (viewer) viewer.focusBuilding(ui.pick); });
   }
 
+  // ---------- 간섭 검토 · AI 최적화 ----------
+  const SEV = { 3: '중대', 2: '주의', 1: '경미' };
+  let optRun = null;
+  function renderClash() {
+    const C = R.C, fx = R.fx, open = C.list.filter(c => !c.mit), hard = open.filter(c => c.sev >= 3).length;
+    $('k-mo').textContent = S.months + '개월'; $('k-mo2').textContent = R.opt ? 'AI OPTIMIZED' : 'MONTHS';
+    $('k-cl').textContent = open.length + '건'; $('k-cl2').textContent = `중대 ${hard} · 해소 ${C.list.length - open.length}`;
+    $('k-det').textContent = Math.round((fx.detect || 0) * 100) + '%'; $('k-det2').textContent = ({ cpm: 'CPM', lob: 'LOB', takt: '택트', lps: 'LAST PLANNER', bim4d: '4D BIM', ai: 'AI + 4D BIM' })[fx.plan] || '';
+    $('cl-types').innerHTML = Object.entries(CLASH_TYPES).map(([k, T]) => { const b = C.byType[k]; return `<div class="cl-t ${b.n - b.mit ? '' : 'z'}"><span class="sx-code-s">${T.en}</span><b>${T.name}</b><span class="n">${b.n - b.mit}<small>건</small></span><span class="note">${b.hard ? `중대 ${b.hard} · ` : ''}${b.mit ? `해소 ${b.mit} · ` : ''}${fmt(b.days)}일</span><span class="hint">${T.note}</span></div>`; }).join('');
+    // 월별 띠
+    const NM = Math.max(C.monthly.length, S.months), cw = Math.max(6, Math.min(18, 880 / NM)), keys = Object.keys(CLASH_TYPES), rh = 16, lw = 96;
+    const mx = Math.max(1, ...C.monthly.flatMap(m => keys.map(k => m[k] || 0)));
+    let svg = '';
+    keys.forEach((k, r) => { svg += `<text class="rl" x="0" y="${r * rh + 12}">${CLASH_TYPES[k].name}</text>`; for (let m = 0; m < NM; m++) { const v = (C.monthly[m] || {})[k] || 0; svg += `<rect class="hc${v ? '' : ' e'}" data-m="${m}" data-tip="${CLASH_TYPES[k].name} · ${D(m * M)} · ${v}건" x="${lw + m * cw}" y="${r * rh}" width="${cw - 1.5}" height="${rh - 2}" style="--h:${(v / mx).toFixed(2)}"/>`; } });
+    const y0 = S.t0.getUTCFullYear(), m0 = S.t0.getUTCMonth();
+    for (let m = 0; m < NM; m++) if ((m0 + m) % 12 === 0) svg += `<text class="yr" x="${lw + m * cw}" y="${keys.length * rh + 12}">${y0 + Math.floor((m0 + m) / 12)}</text>`;
+    svg += `<line class="now" x1="${lw + ui.t / M * cw}" x2="${lw + ui.t / M * cw}" y1="0" y2="${keys.length * rh}"/>`;
+    $('cl-month').innerHTML = `<svg viewBox="0 0 ${lw + NM * cw} ${keys.length * rh + 16}" class="cl-heat" role="img" aria-label="월별 간섭 수">${svg}</svg>`;
+    $('cl-mhint').textContent = `칸 = 한 달 · 진할수록 그 달 진행 중인 간섭이 많음`;
+    // 목록
+    const top = C.list.slice(0, 16);
+    $('cl-list').innerHTML = `<thead><tr><th></th><th class="l">유형</th><th class="l">내용</th><th>기간</th><th>일수</th><th class="l">대책</th></tr></thead><tbody>${top.map((c, i) => `<tr data-ci="${i}" class="${c.mit ? 'mit' : ''}"><td><span class="sev s${c.sev}" title="${SEV[c.sev]}"></span></td><td class="l"><b>${CLASH_TYPES[c.type].name}</b><small>${c.mit ? '해소 (AI 계획)' : SEV[c.sev]}</small></td><td class="l">${escH(c.msg)}</td><td class="mono">${D(c.start)}–${D(c.end)}</td><td>${fmt(c.days)}</td><td class="l note">${escH(c.fix)}</td></tr>`).join('') || '<tr><td colspan="6" class="l note">간섭이 없습니다.</td></tr>'}</tbody>${C.list.length > top.length ? `<tfoot><tr><td colspan="6" class="l note">외 ${C.list.length - top.length}건</td></tr></tfoot>` : ''}`;
+    renderOpt();
+  }
+  function convSVG(h, w = 420, hh = 120) {
+    if (!h || h.length < 2) return '';
+    const fs = h.map(x => x.f), lo = Math.min(...fs), hi = Math.max(...fs), X = (i) => (i / (h.length - 1) * (w - 8) + 4).toFixed(1), Y = (v) => (hh - 6 - (v - lo) / Math.max(1e-6, hi - lo) * (hh - 14)).toFixed(1);
+    return `<svg class="conv" viewBox="0 0 ${w} ${hh}" role="img" aria-label="최적화 수렴 곡선">${h.map((x, i) => `<circle cx="${X(i)}" cy="${Y(x.f)}" r="1.6" class="pt"/>`).join('')}<polyline class="best" points="${h.map((x, i) => `${X(i)},${Y(x.best)}`).join(' ')}"/></svg>`;
+  }
+  function metr(S1, C1) { const open = C1.list.filter(c => !c.mit); return { months: S1.months, n: open.length, hard: open.filter(c => c.sev >= 3).length, score: C1.score }; }
+  function renderOpt() {
+    const fx = R.fx, its = Math.round(14 + 90 * (fx.solve || 0));
+    const planName = ({ cpm: 'CPM', lob: 'LOB', takt: '택트', lps: 'Last Planner', bim4d: '4D BIM', ai: 'AI 공정 최적화' })[fx.plan] || fx.plan;
+    let html = `<div class="sec-h"><h2>AI 공정 최적화</h2>${dot(optRun && optRun.running ? 'SEARCHING' : R.opt ? 'APPLIED' : 'READY', optRun && optRun.running ? 'acc blink' : R.opt ? 'acc' : 'mute')}</div>
+      <p class="note">모의 담금질(simulated annealing)로 블록 착공 시차·동 착수 간격·후속 공종 간격·매트 분할 타설·크레인 높이 계획을 바꿔 가며 <b>공기 + 간섭 비용</b>을 줄입니다. 공정관리 기법 <b>${planName}</b> → 탐색 ${its}회${(fx.solve || 0) < 0.45 ? ' (04 공법의 L15에서 4D BIM·AI를 고르면 더 깊이 탐색합니다)' : ''}.</p>`;
+    if (optRun && optRun.running) {
+      html += `<div class="opt-run"><span class="mono">${optRun.i} / ${optRun.iters}</span>${conv(optRun.history)}</div>`;
+    } else if (optRun && optRun.done) {
+      const a = optRun.before, b = optRun.after;
+      html += `${conv(optRun.history)}<table class="fx-t"><thead><tr><th></th><th>현재</th><th>최적안</th></tr></thead><tbody>
+        <tr><th>총 공기</th><td>${a.months}개월</td><td class="${b.months < a.months ? 'pos' : b.months > a.months ? 'neg' : ''}">${b.months}개월</td></tr>
+        <tr><th>미해결 간섭</th><td>${a.n}건</td><td class="${b.n < a.n ? 'pos' : ''}">${b.n}건</td></tr>
+        <tr><th>중대 간섭</th><td>${a.hard}건</td><td class="${b.hard < a.hard ? 'pos' : ''}">${b.hard}건</td></tr>
+        <tr><th>간섭 비용</th><td>${fmt(a.score)}</td><td class="${b.score < a.score ? 'pos' : ''}">${fmt(b.score)}</td></tr></tbody></table>
+        <ul class="moves">${optRun.moves.map(m => `<li><b>${escH(m.t)}</b><span>${escH(m.d)}</span></li>`).join('') || '<li>지금 계획이 이미 최적에 가깝습니다.</li>'}</ul>
+        <div class="row"><button type="button" class="btn acc" id="opt-apply">최적안 적용 <span class="ar">→</span></button><button type="button" class="btn ghost" id="opt-run">다시 탐색</button></div>`;
+    } else if (R.opt) {
+      const a = R.opt.before, b = R.opt.after;
+      html += `${conv(R.opt.history || [])}<div class="okbox">AI 최적안을 적용했습니다: 공기 ${a.months} → ${b.months}개월, 미해결 간섭 ${a.n} → ${b.n}건 (중대 ${a.hard} → ${b.hard}). 5D 예산·위험 예측도 이 공정으로 계산합니다.</div>
+        <ul class="moves">${(R.opt.moves || []).map(m => `<li><b>${escH(m.t)}</b><span>${escH(m.d)}</span></li>`).join('')}</ul>
+        <div class="row"><button type="button" class="btn ghost" id="opt-undo">적용 취소</button><button type="button" class="btn ghost" id="opt-run">다시 탐색</button></div>`;
+    } else html += `<button type="button" class="btn acc wide" id="opt-run">AI 최적화 실행 <span class="ar">→</span></button>`;
+    $('cl-opt').innerHTML = html;
+  }
+  const conv = (h) => convSVG(h);
+  function runOpt() {
+    if (optRun && optRun.running) return;
+    if (R.opt) { setOptState(null); R = pipeline(); }
+    const base = pipeline({ noOpt: true });
+    optRun = { running: true, i: 0, iters: 0, history: [] };
+    renderOpt();
+    optimize(base.gen, base.Q, base.pp, { solve: base.fx.solve || 0, noise: base.cond.noise, onStep: ({ i, iters, history }) => { if (!alive) return; optRun.i = i; optRun.iters = iters; optRun.history = history; renderOpt(); } })
+      .then(O => {
+        if (!alive) return;
+        const hist = O.history.filter((_, i) => i % Math.max(1, Math.floor(O.history.length / 120)) === 0);
+        optRun = { running: false, done: true, O, history: hist, before: metr(O.before.S, O.before.C), after: metr(O.after.S, O.after.C), moves: describeMoves(O, base.gen) };
+        renderOpt();
+      });
+  }
+  function applyOpt() {
+    if (!optRun || !optRun.done) return;
+    setOptState({ x: optRun.O.after.x, before: optRun.before, after: optRun.after, moves: optRun.moves, history: optRun.history, at: Date.now() });
+    optRun = null; refreshAll();
+  }
+  function refreshAll() {
+    const ratio = ui.t / S.end;
+    R = pipeline(); lmRec = derive(); $('p-t').max = S.end;
+    renderStats(); renderGantt(); renderMilestones(); renderClash();
+    setT(ratio * S.end, true);
+  }
+  $('clash').addEventListener('click', (e) => {
+    if (e.target.closest('#opt-run')) { runOpt(); return; }
+    if (e.target.closest('#opt-apply')) { applyOpt(); return; }
+    if (e.target.closest('#opt-undo')) { setOptState(null); optRun = null; refreshAll(); return; }
+    const tr = e.target.closest('tr[data-ci]');
+    if (tr) {
+      const c = R.C.list[+tr.dataset.ci]; setPlaying(false); setT((c.start + c.end) / 2, true);
+      if (viewer) { const bi = gen.bldgs.findIndex(b => b.id === c.a); if (bi >= 0) { viewer.focusBuilding(bi); viewer.select(bi); } else if (c.block && c.block !== '*') viewer.focusBlock(c.block); }
+      $('p-ws').scrollIntoView({ behavior: 'smooth', block: 'start' }); return;
+    }
+    const hc = e.target.closest('[data-m]'); if (hc) { setPlaying(false); setT(+hc.dataset.m * M + M / 2, true); }
+  });
+  $('cl-month').addEventListener('pointermove', (e) => { const el = e.target.closest('[data-tip]'); tip(el ? el.dataset.tip : null, e.clientX, e.clientY); });
+  $('cl-month').addEventListener('pointerleave', () => tip(null));
+
   // ---------- 3D ----------
   viewer = createViewer($('p-stage'), {
     onView: (k) => { ui.view = k; $('p-views').querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === k))); },
@@ -370,7 +478,7 @@ export function mount(root) {
   const flush = setInterval(() => { if (pendingPush) push3D(true); }, 150);
 
   $('p-t').max = S.end;
-  renderCtl(); renderStats(); renderGantt(); renderMilestones();
+  renderCtl(); renderStats(); renderGantt(); renderMilestones(); renderClash();
   setT(ui.t, true);
   if (!store.get().proc) store.set({ proc: params() });
 

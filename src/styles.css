@@ -10,9 +10,10 @@
   --muted: #7c7c82;
   --line: #e4e4e7;
   --hair: #efeff1;
-  --accent: #eb6834;
-  --accent-ink: #b8451a;
-  --accent-soft: rgba(235, 104, 52, .1);
+  --accent: #d0103a;
+  --accent-ink: #a50d2e;
+  --accent-fill: #d0103a;
+  --accent-soft: rgba(208, 16, 58, .09);
   --good: #0f7f61;
   --warn: #a8670f;
   --bad: #c63b1d;
@@ -46,24 +47,27 @@
   --officetel: #8fcfc7;
   --office: #2a78d6;
   --retail: #d4d4d2;
-  --refuge: #eb6834;
+  --refuge: #d0103a;
   --mech: #56565a;
   --ctx: #e6e6e8;
   --heat-lo: #f0f0f1;
   --heat-hi: #0c6f68;
   /* 4D 진행 */
-  --p-struct: #eb6834;
+  --p-struct: #d0103a;
   --p-skin: #c8c8cb;
   /* 공종 그룹 (검증한 범주 팔레트 순서) */
   --g1: #6250d6; --g2: #eb6834; --g3: #2a78d6; --g4: #1baf7a; --g5: #eda100; --g6: #008300;
   --g-ind: #a3a3a7; --g-esc: #56565a;
   --c-prep: var(--g1); --c-earth: var(--g1); --c-found: var(--g1); --c-struct: var(--g2); --c-skin: var(--g3); --c-mep: var(--g4); --c-fin: var(--g5); --c-comm: var(--g4); --c-land: var(--g6);
   /* 1단계 */
+  --u-hotel: #b97a2a; --u-banquet: #d1a24e; --u-ward: #3f97c4; --u-clinic: #2a78d6; --u-gallery: #9a6bd6; --u-store: #6550b8; --u-hall: #7f52c6; --u-lab: #1c9a88;
+  --u-fab: #d0103a; --u-subfab: #8e2440; --u-cub: #5d6b78; --u-prod: #2f875f; --u-gmp: #3fa877; --u-whs: #b38c12; --u-ramp: #8c8c92; --u-dhall: #2f6fd0; --u-elec: #c98a1e;
+  --u-process: #c4552b; --u-tank: #9a9aa0; --u-rack: #707076; --u-stack: #8f4b2f; --u-turbine: #4d63c4; --u-hrsg: #9a5d3a; --u-basin: #2a93a1;
   --sale: #33414f;
   --rental: #1f9e95;
   --nonres: #c19a5b;
   --f-body: "Inter", "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
-  --f-mono: var(--f-body);
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
   --f-serif: var(--f-body);
   --f-code: ui-monospace, "SFMono-Regular", Menlo, monospace;
   --r: 12px;
@@ -73,49 +77,30 @@
   --max: 1600px;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --paper: #0a0a0b; --panel: #161618; --card: #111113; --sunk: #222226; --ink: #f4f4f5; --ink-2: #c4c4c9; --muted: #8b8b92; --line: #26262a; --hair: #1c1c20;
-    --accent: #ff6d33; --accent-ink: #ff8a5c; --accent-soft: rgba(255, 109, 51, .14); --good: #3cc79a; --warn: #e0a043; --bad: #ff7a5c;
-    --sh-1: 0 0 0 1px var(--line); --sh-2: 0 14px 34px -16px rgba(0, 0, 0, .75), 0 0 0 1px rgba(255, 255, 255, .07);
-    --scene: #0e0f11; --ground: #0e0f11; --site: #131416; --water: #142229; --park: #172019; --road: #1b1b1d; --rail: #1e1e20; --hill: #18181a;
-    --model: #1d1d1f; --model-na: #252528; --tree: #222224; --edge: #d9dade;
-    --s-sky-top: #070a10; --s-sky-hor: #161a21;
-    --s-ground: #141517; --s-asphalt: #222326; --s-walk: #1b1c1e; --s-curb: #2a2b2e; --s-mark: #6f7074; --s-mark-y: #8a7333;
-    --s-water: #0c1a21; --s-bank: #242528; --s-park: #152018; --s-forest: #121d16; --s-grass: #182119; --s-pitch: #1a2a19; --s-sand: #28251f;
-    --s-w-res: #2b2c2e; --s-w-com: #27282a; --s-w-house: #2a2826; --s-w-tower: #23272b; --s-w-ind: #252527; --s-w-civic: #2a2825; --s-roof: #2e2f31;
-    --s-glass: #0f151a; --s-film: #1f4b47; --s-interior: #4a4436; --s-lit: #ffc879; --s-frame: #8a8d90;
-    --s-crown: #203527; --s-trunk: #3b342d; --s-concrete: #58585a; --s-form: #c4652a; --s-ply: #6e5636; --s-duct: #6c7276; --s-pipe-r: #b8402f; --s-pipe-b: #3d74b8; --s-tray: #b18a2a;
-    --s-soil: #4b3e31; --s-pit-wall: #3d3d3f; --s-steel: #7b8794; --s-crane: #d8a020; --s-fence: #38393b; --s-fence-band: #2a6a58; --s-container: #4a5058;
-    --s-site: #18191b; --s-lot: #1c1d1f; --s-edge: #d9dade; --s-ballast: #2e2c29; --s-rail: #77777b; --s-bridge: #39393c;
-    --res: #189a90; --officetel: #4f9d96; --office: #3987e5; --retail: #434346; --refuge: #ff6d33; --mech: #9a9a9f; --ctx: #29292c;
-    --heat-lo: #1e1e21; --heat-hi: #3fd2c4; --p-struct: #ff6d33; --p-skin: #3e3e42;
-    --g1: #9085e9; --g2: #d95926; --g3: #3987e5; --g4: #199e70; --g5: #c98500; --g6: #008300; --g-ind: #6d6f72; --g-esc: #a4a6a9;
-    --sale: #9fb3c8; --rental: #189a90; --nonres: #c9a66e;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --paper: #0a0a0b; --panel: #161618; --card: #111113; --sunk: #222226; --ink: #f4f4f5; --ink-2: #c4c4c9; --muted: #8b8b92; --line: #26262a; --hair: #1c1c20;
-  --accent: #ff6d33; --accent-ink: #ff8a5c; --accent-soft: rgba(255, 109, 51, .14); --good: #3cc79a; --warn: #e0a043; --bad: #ff7a5c;
-  --sh-1: 0 0 0 1px var(--line); --sh-2: 0 14px 34px -16px rgba(0, 0, 0, .75), 0 0 0 1px rgba(255, 255, 255, .07);
-  --scene: #0e0f11; --ground: #0e0f11; --site: #131416; --water: #142229; --park: #172019; --road: #1b1b1d; --rail: #1e1e20; --hill: #18181a;
-  --model: #1d1d1f; --model-na: #252528; --tree: #222224; --edge: #d9dade;
-  --s-sky-top: #070a10; --s-sky-hor: #161a21;
-  --s-ground: #141517; --s-asphalt: #222326; --s-walk: #1b1c1e; --s-curb: #2a2b2e; --s-mark: #6f7074; --s-mark-y: #8a7333;
-  --s-water: #0c1a21; --s-bank: #242528; --s-park: #152018; --s-forest: #121d16; --s-grass: #182119; --s-pitch: #1a2a19; --s-sand: #28251f;
-  --s-w-res: #2b2c2e; --s-w-com: #27282a; --s-w-house: #2a2826; --s-w-tower: #23272b; --s-w-ind: #252527; --s-w-civic: #2a2825; --s-roof: #2e2f31;
+/* 기본은 검정 화면. 밝은 화면은 data-theme="light"일 때만 위 값(:root)을 쓴다 */
+:root:not([data-theme="light"]) {
+  --paper: #000000; --panel: #0c0c0d; --card: #070708; --sunk: #17171a; --ink: #f2f2f0; --ink-2: #b8b8bc; --muted: #75757c; --line: #222226; --hair: #141416;
+  --accent: #ff2d55; --accent-ink: #ff5674; --accent-fill: #d81b3f; --accent-soft: rgba(255, 45, 85, .13); --good: #3cc79a; --warn: #e0a043; --bad: #ff5c6c;
+  --sh-1: 0 0 0 1px var(--line); --sh-2: 0 14px 34px -16px rgba(0, 0, 0, .8), 0 0 0 1px rgba(255, 255, 255, .07);
+  --scene: #050506; --ground: #050506; --site: #0d0d0f; --water: #0f1b21; --park: #121a14; --road: #151517; --rail: #19191b; --hill: #121214;
+  --model: #1d1d1f; --model-na: #252528; --tree: #1d1d1f; --edge: #d9dade;
+  --s-sky-top: #030407; --s-sky-hor: #12151b;
+  --s-ground: #0f1012; --s-asphalt: #1c1d20; --s-walk: #17181a; --s-curb: #26272a; --s-mark: #6f7074; --s-mark-y: #8a7333;
+  --s-water: #0a161c; --s-bank: #202124; --s-park: #121c15; --s-forest: #0f1912; --s-grass: #151d16; --s-pitch: #172616; --s-sand: #24221c;
+  --s-w-res: #2b2c2e; --s-w-com: #27282a; --s-w-house: #2a2826; --s-w-tower: #23272b; --s-w-ind: #2c2d30; --s-w-civic: #2d2a26; --s-roof: #2e2f31;
   --s-glass: #0f151a; --s-film: #1f4b47; --s-interior: #4a4436; --s-lit: #ffc879; --s-frame: #8a8d90;
-  --s-crown: #203527; --s-trunk: #3b342d; --s-concrete: #58585a; --s-form: #c4652a; --s-ply: #6e5636; --s-duct: #6c7276; --s-pipe-r: #b8402f; --s-pipe-b: #3d74b8; --s-tray: #b18a2a;
+  --s-crown: #1d3124; --s-trunk: #3b342d; --s-concrete: #5a5a5c; --s-form: #c4652a; --s-ply: #6e5636; --s-duct: #6c7276; --s-pipe-r: #c43a4c; --s-pipe-b: #3d74b8; --s-tray: #b18a2a;
   --s-soil: #4b3e31; --s-pit-wall: #3d3d3f; --s-steel: #7b8794; --s-crane: #d8a020; --s-fence: #38393b; --s-fence-band: #2a6a58; --s-container: #4a5058;
-  --s-site: #18191b; --s-lot: #1c1d1f; --s-edge: #d9dade; --s-ballast: #2e2c29; --s-rail: #77777b; --s-bridge: #39393c;
-  --res: #189a90; --officetel: #4f9d96; --office: #3987e5; --retail: #434346; --refuge: #ff6d33; --mech: #9a9a9f; --ctx: #29292c;
-  --heat-lo: #1e1e21; --heat-hi: #3fd2c4; --p-struct: #ff6d33; --p-skin: #3e3e42;
+  --s-site: #141517; --s-lot: #18191b; --s-edge: #d9dade; --s-ballast: #2e2c29; --s-rail: #77777b; --s-bridge: #39393c;
+  --res: #189a90; --officetel: #4f9d96; --office: #3987e5; --retail: #434346; --refuge: #ff2d55; --mech: #9a9a9f; --ctx: #29292c;
+  --heat-lo: #1e1e21; --heat-hi: #3fd2c4; --p-struct: #ff2d55; --p-skin: #3e3e42;
   --g1: #9085e9; --g2: #d95926; --g3: #3987e5; --g4: #199e70; --g5: #c98500; --g6: #008300; --g-ind: #6d6f72; --g-esc: #a4a6a9;
   --sale: #9fb3c8; --rental: #189a90; --nonres: #c9a66e;
+  --u-hotel: #d39a4a; --u-banquet: #e8c27a; --u-ward: #5fb3d9; --u-clinic: #3987e5; --u-gallery: #b58ae0; --u-store: #7d63c4; --u-hall: #9a6bd6; --u-lab: #2fb7a3;
+  --u-fab: #ff4d6d; --u-subfab: #a8324f; --u-cub: #6d7c8a; --u-prod: #3d9a6f; --u-gmp: #57c08f; --u-whs: #c9a227; --u-ramp: #6e6e74; --u-dhall: #4f86e0; --u-elec: #e0a43a;
+  --u-process: #d9643a; --u-tank: #b9b9be; --u-rack: #8c8c92; --u-stack: #a05a3c; --u-turbine: #6a7fe0; --u-hrsg: #b0704a; --u-basin: #3fa7b5;
   color-scheme: dark;
 }
-
 /* ---------- 기본 ---------- */
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; background: var(--paper); }

@@ -4,22 +4,27 @@ import { dateAt, ym } from '../sim/process.js';
 import { SITES, GLOBAL_DEFAULTS, evaluate } from '../stage1/engine.js';
 import { store } from '../store.js';
 import { pipeline, fmt, won, tip, download, csv } from '../pipeline.js';
+import { FLOOR_USES } from '../sim/uses.js';
+import { programFor } from '../sim/siting.js';
+import { siteById } from '../sim/kr-sites.js';
+import { head, escH } from '../ui/sys.js';
 
-export const title = '05 5D 예산';
+export const title = '06 5D 예산';
 
 const M = 30.44, PY = 3.3058;
 const GROUPS = [
-  { key: 'g1', name: '토공·기초', cats: ['earth', 'found'] },
+  { key: 'g1', name: '지반·토공·기초', cats: ['geo', 'earth', 'found'] },
   { key: 'g2', name: '골조', cats: ['base', 'struct'] },
   { key: 'g3', name: '외장', cats: ['skin'] },
-  { key: 'g4', name: '설비·전기·승강기', cats: ['mep', 'lift'] },
+  { key: 'g4', name: '설비·승강기·공정 설비', cats: ['mep', 'lift', 'equip'] },
   { key: 'g5', name: '마감', cats: ['fin'] },
   { key: 'g6', name: '조경·외부', cats: ['land'] },
-  { key: 'g-ind', name: '간접비', cats: ['indirect'] },
+  { key: 'g-ind', name: '간접비·품질 기술', cats: ['indirect', 'qa'] },
   { key: 'g-esc', name: '물가상승', cats: ['esc'] },
 ];
 const DIRECT = GROUPS.slice(0, 6);
-const USES = [['res', '아파트', '--res'], ['officetel', '오피스텔', '--officetel'], ['office', '업무', '--office'], ['retail', '상업·로비', '--retail'], ['refuge', '피난안전층', '--refuge'], ['mech', '옥탑·기계', '--mech'], ['parking', '지하층', '--sunk'], ['site', '토공·조경 (대지)', '--g-ind']];
+const USES = [['res', '아파트', '--res'], ['officetel', '오피스텔', '--officetel'], ['office', '업무', '--office'], ['retail', '상업·로비', '--retail'], ['refuge', '피난안전층', '--refuge'], ['mech', '옥탑·기계', '--mech'],
+  ...Object.entries(FLOOR_USES).filter(([k]) => k !== 'admin').map(([k, x]) => [k, x.name, x.tok]), ['parking', '지하층', '--sunk'], ['site', '토공·조경 (대지)', '--g-ind']];
 const groupOf = (cat) => GROUPS.find(g => g.cats.includes(cat));
 const nice = (v) => { const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].map(x => x * p).find(x => x >= v) || 10 * p; };
 
@@ -29,26 +34,27 @@ export function mount(root) {
   let alive = true;
   if (!store.get().cost) store.set({ cost: { ...P5_DEFAULTS } });
 
-  root.innerHTML = `
-  <div class="page-h">
-    <div><span class="label-sm">stage 05 / 05 · 5d cost</span><h1>5D 예산과 현금흐름 <span class="dim">(${R.gen.plan.site.name})</span></h1>
-    <p>3단계 층별 물량(바닥면적·외벽·굴토·흙막이·지하층)에 공종별 단가를 곱해 직접공사비를 만들고, 4단계 공정의 작업 기간에 나눠 얹어 월별 기성과 누계 S커브를 그립니다. 단가는 2026년 기준이며 작업 시점까지 물가상승을 반영합니다.</p></div>
-    <div class="actions"><a class="btn ghost" href="#/process">← 04 공정</a><a class="btn ghost" href="#/">처음 화면</a></div>
-  </div>
+  root.innerHTML = head({
+    n: 6, key: 'COST', title: '얼마가 들까', status: 'BIM QUANTITY × 4D TIME',
+    dim: `${escH(R.site.name)} · ${R.u.name} · 공종 내역 ${fmt(R.E.items.length)}건`,
+    desc: 'BIM 물량(층별 바닥면적·외벽·굴토·흙막이·지하층·설비)에 공종 단가와 04단계 공법 계수를 곱해 직접공사비를 만들고, 05단계 공정의 작업 기간에 나눠 얹어 월별 기성과 누계 S커브를 그립니다. 단가는 2026년 기준이며 작업 시점까지 물가상승을 반영합니다.',
+    stats: [['총공사비', `<b>${won(R.E.total)}</b>`, 'TOTAL'], ['㎡당', `<b>${fmt(R.E.perM2, 0)}</b>`, '만원 / ㎡'], ['월 최대 기성', `<b>${won(R.E.peak.total)}</b>`, 'PEAK MONTH']],
+    actions: `<a class="btn ghost" href="#/process">← 05 4D·간섭</a><a class="btn acc" href="#/risk">07 위험 예측 <span class="ar">→</span></a>`,
+  }) + `
   <div class="wrap p5">
     <div class="p5-main">
       <div class="cost-head" id="b-head"></div>
-      <section><div class="sec-title"><span class="n">05.1</span><h2>월별 기성</h2><span class="hint">막대 하나가 한 달의 공사비입니다. 막대에 마우스를 올리면 그 달의 공종별 금액이 나옵니다.</span></div>
+      <section><div class="sec-title"><span class="n">06.1</span><h2>월별 기성</h2><span class="hint">막대 하나가 한 달의 공사비입니다. 막대에 마우스를 올리면 그 달의 공종별 금액이 나옵니다.</span></div>
         <div class="panel pad"><div class="g-leg" id="b-leg1" style="margin:0 0 10px"></div><div class="chart" id="b-bars"></div>
         <div class="chart" id="b-curve" style="margin-top:18px"></div><div class="g-leg" id="b-leg2"></div></div></section>
-      <section><div class="sec-title"><span class="n">05.2</span><h2>직접비에서 총공사비까지</h2><span class="hint">공종별 직접비를 쌓은 뒤 가설·관리·설계·예비비와 물가상승을 더합니다.</span></div>
+      <section><div class="sec-title"><span class="n">06.2</span><h2>직접비에서 총공사비까지</h2><span class="hint">공종별 직접비를 쌓은 뒤 가설·관리·설계·예비비와 물가상승을 더합니다.</span></div>
         <div class="panel pad"><div class="wf" id="b-wf"></div></div></section>
-      <section><div class="sec-title"><span class="n">05.3</span><h2>블록 × 공종 매트릭스</h2><span class="hint">점 면적이 직접공사비에 비례합니다. 주황 점은 가장 큰 항목입니다.</span></div>
+      <section><div class="sec-title"><span class="n">06.3</span><h2>블록 × 공종 매트릭스</h2><span class="hint">점 면적이 직접공사비에 비례합니다. 주황 점은 가장 큰 항목입니다.</span></div>
         <div class="panel pad dm" id="b-dm"></div></section>
-      <section><div class="sec-title"><span class="n">05.4</span><h2>1단계 개략 공사비와 비교</h2><span class="hint" id="b-cmp-h"></span></div>
+      <section><div class="sec-title"><span class="n">06.4</span><h2>개략 추정과 비교</h2><span class="hint" id="b-cmp-h"></span></div>
         <div class="cols2"><div class="panel pad"><div class="cmp" id="b-cmp"></div><p class="note" id="b-cmp-note" style="margin:12px 0 0"></p></div>
         <div class="panel pad"><span class="label-sm">용도별 직접비</span><div class="mixbar" id="b-use-bar" style="margin:10px 0" role="img" aria-label="용도별 직접비 구성"></div><div class="mixleg" id="b-use"></div></div></div></section>
-      <section><div class="sec-title"><span class="n">05.5</span><h2>예산 가정</h2></div><ul class="issues" id="b-assume"></ul></section>
+      <section><div class="sec-title"><span class="n">06.5</span><h2>예산 가정</h2></div><ul class="issues" id="b-assume"></ul></section>
     </div>
     <aside class="panel" id="b-ctl" aria-label="단가와 비율">
       <div class="grp"><div class="sec-h" style="margin:0"><span class="label-sm">Unit rates · 공종 단가</span><button class="chipbtn" id="b-reset" type="button">기본값</button></div></div>
@@ -59,9 +65,16 @@ export function mount(root) {
   </div>`;
 
   // ---------- 1단계 기준 ----------
+  // 주거 외 용도·서울 8곳 밖 택지: 02 입지 단계의 개략 추정(연면적 × 용도 단가)과 비교
+  const generic = () => R.gen.x || !SITES.find(x => x.id === R.gen.plan.site.id);
   function stage1() {
     const h = store.get().handoff1;
     const sid = R.gen.plan.site.id;
+    if (generic()) {
+      const kr = siteById(sid), u = R.u;
+      const pg = kr ? programFor(kr, u.id) : { cost: R.E.total, gfa: R.E.gfa };
+      return { label: '02 입지 개략 추정', cost: pg.cost, gfa: pg.gfa, months: Math.round((u.months[0] + u.months[1]) / 2), unit: u.cost * PY };
+    }
     if (h && h.stage1 && h.siteId === sid) {
       const n = h.stage1.next_stage_inputs;
       return { label: `1단계 ${h.presetLabel}`, cost: n.budget.construction_cost_eok * 1e4, gfa: n.quantity.gfa_total_m2, months: n.schedule.construction_months, unit: n.budget.unit_cost_manwon_per_py };
@@ -163,7 +176,19 @@ export function mount(root) {
     });
     $('b-dm').innerHTML = `<svg viewBox="0 0 ${DW} ${DH}" style="max-width:${DW * 1.15}px" role="img" aria-label="블록별 공종별 직접공사비 점 매트릭스">${d}</svg>`;
 
-    // ---------- 1단계 비교 ----------
+    // ---------- 개략 추정 비교 ----------
+    if (generic()) {
+      const rows2 = [
+        ['평당 공사비', s1.cost / s1.gfa * PY, E.total / E.gfa * PY, '만원 · 연면적(지하 포함)', (v) => fmt(v, 0)],
+        ['총 공사비', s1.cost, E.total, '물가상승 포함', (v) => won(v)],
+        ['공사기간', s1.months, S.months, '개월', (v) => fmt(v, 0)],
+      ];
+      $('b-cmp-h').textContent = `${s1.label} → 06 상세 (BIM 물량 × 공법)`;
+      $('b-cmp').innerHTML = rows2.map(([nm, a, b, unit, f]) => { const mx = Math.max(a, b); return `<div><span class="label-sm">${nm} · ${unit}</span>
+        <div class="r"><span>개략</span><span class="tr"><i style="width:${(a / mx * 100).toFixed(1)}%;background:var(--g-ind)"></i></span><span class="v">${f(a)}</span></div>
+        <div class="r"><span>상세</span><span class="tr"><i style="width:${(b / mx * 100).toFixed(1)}%;background:var(--ink)"></i></span><span class="v">${f(b)} <span class="${b > a ? 'neg' : 'pos'}" style="font-size:11px">${b >= a ? '+' : '−'}${fmt(Math.abs(b / a - 1) * 100, 0)}%</span></span></div></div>`; }).join('');
+      $('b-cmp-note').textContent = `개략 추정은 시뮬레이션 구역 × 가용 비율 × 용적률 × ${R.u.name} 기준 단가(${fmt(R.u.cost)}만원/㎡)의 한 줄 계산입니다. 상세는 층별 물량·공종 단가·공법 계수·공정 시점 물가상승을 쌓아 올렸습니다.`;
+    } else {
     const resIdx = new Set(gen.bldgs.map((b, bi) => (b.kind === 'apt' || b.kind === 'officetel') ? bi : -1).filter(x => x >= 0));
     const suppBlocks = new Set(gen.blocks.filter(b => b.zone === 'supp').map(b => b.id));
     let resDirect = 0, resGfa = 0;
@@ -186,6 +211,7 @@ export function mount(root) {
         <div class="r"><span>5단계 상세</span><span class="tr"><i style="width:${(b / mx * 100).toFixed(1)}%;background:var(--ink)"></i></span><span class="v">${f(b)} <span class="${b > a ? 'neg' : 'pos'}" style="font-size:11px">${b >= a ? '+' : '−'}${fmt(Math.abs(b / a - 1) * 100, 0)}%</span></span></div></div>`;
     }).join('');
     $('b-cmp-note').textContent = `1단계는 연면적 × 평당 단가(${fmt(s1.unit)}만원) × 30층 초과 할증의 한 줄 추정입니다. 5단계는 층별 물량과 공종 단가로 쌓아 올리고 공정 시점까지 물가상승을 더했습니다. 전체 사업(업무·랜드마크 포함)은 ${won(E.total)}입니다.`;
+    }
     const uses = USES.map(([k, nm, col]) => [nm, E.byUse[k] + (k === 'retail' ? (E.byUse.lobby || 0) : 0) || 0, col]).filter(x => x[1] > 0);
     const ut = uses.reduce((a, x) => a + x[1], 0);
     $('b-use-bar').innerHTML = uses.map(([nm, v, col]) => `<i style="width:${(v / ut * 100).toFixed(2)}%;background:var(${col})" title="${nm} ${won(v)}"></i>`).join('');
