@@ -6,7 +6,7 @@
 //  - 블록: 가설 울타리·현장 사무실, 흙막이(CIP 두부 정리 보)와 천공기, 굴토(지면에 구멍) + 버팀보·띠장 + 굴착기,
 //          기초 매트, 지하층 슬래브·기둥, 조경 수목, 타워크레인(격자 마스트·지브·카운터웨이트)과 외부 승강기
 import * as THREE from 'three';
-import { facadeMaterial, PAT } from './facade.js';
+import { facadeMaterial, PAT, surf } from './facade.js';
 import { Buf, strip, frames, quad, dashMaterial, treeGeometry, repaintTree } from './context3d.js';
 
 const unitBox = () => { const g = new THREE.BoxGeometry(1, 1, 1); g.translate(0, 0.5, 0); return g; };
@@ -37,20 +37,20 @@ export function createBim(site, P0, { lite = false } = {}) {
   const M = {
     env: facadeMaterial({ color: 0xffffff }, { instanced: true }),
     envX: facadeMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, depthWrite: false }, { instanced: true }),
-    solid: new THREE.MeshLambertMaterial({ color: 0xffffff }),
-    form: new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
-    glass: new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.4, depthWrite: false }),
-    pit: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.BackSide }),
+    solid: surf({ color: 0xffffff }, 0.78),
+    form: surf({ color: 0xffffff, transparent: true, opacity: 0.92, side: THREE.DoubleSide }, 0.62),
+    glass: surf({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false }, 0.08, 0.3),
+    pit: surf({ vertexColors: true, side: THREE.BackSide }, 1),
     mask: new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp, stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp }),
-    lot: new THREE.MeshLambertMaterial({ color: 0xffffff, ...STENCIL_TEST, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
-    tree: new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }),
+    lot: surf({ color: 0xffffff, ...STENCIL_TEST, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }, 0.95),
+    tree: surf({ vertexColors: true, flatShading: true }, 0.95),
     crane: new THREE.LineBasicMaterial({ color: 0xffffff }),
     ghost: new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 }),
     edge: new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.32 }),
-    walk: new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }),
-    asph: new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -5 }),
+    walk: surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }, 0.95),
+    asph: surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -5 }, 0.88),
     mark: dashMaterial({ polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -9 }),
-    green: new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -3 }),
+    green: surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -3 }, 1),
     site: new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 14, gapSize: 9, transparent: true, opacity: 0.95 }),
   };
 

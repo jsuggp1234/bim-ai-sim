@@ -3,7 +3,7 @@
 // 맥락 모델은 월드 좌표(x 동쪽, z 남쪽, 대지 중심 원점). ctxmodel.js 참고.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { facadeMaterial, PAT } from './facade.js';
+import { facadeMaterial, PAT, surf } from './facade.js';
 import { terrainFn, inPoly, centroid, rng, hashStr, densify, ROAD_CLASS } from '../ctxmodel.js';
 
 const E = 3600; // 지면 텍스처 범위(±m)
@@ -69,7 +69,7 @@ export function quad(B, p, y, color, dashS = [0, 0, 0, 0], dash = [0, 1]) {
 
 // 차선 무늬(점선) 재질: aDash = (거리, 주기, 칠한 비율)
 export function dashMaterial(extra = {}) {
-  const m = new THREE.MeshLambertMaterial({ vertexColors: true, ...extra });
+  const m = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6, metalness: 0, ...extra });
   m.onBeforeCompile = (sh) => {
     sh.vertexShader = 'attribute vec3 aDash;\nvarying vec3 vDash;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvDash = aDash;');
     sh.fragmentShader = 'varying vec3 vDash;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vDash.y > 0.0 && fract(vDash.x / vDash.y) > vDash.z) discard;');
@@ -130,21 +130,55 @@ const KIND_PAT = { res: PAT.res, house: PAT.house, com: PAT.punched, tower: PAT.
 const KIND_FH = { res: 2.9, house: 3.0, com: 3.8, tower: 4.0, ind: 6.0, civic: 3.9 };
 const KIND_COL = { res: 'wRes', house: 'wHouse', com: 'wCom', tower: 'wTower', ind: 'wInd', civic: 'wCivic' };
 
-// 나무 한 그루 (줄기 + 수관), 정점색. 높이 1 기준
+// 나무 한 그루 (줄기 + 두 덩이 수관), 정점색. 높이 1 기준. 수관은 아래쪽을 어둡게 해 그늘진 잎처럼
 export function treeGeometry(P) {
-  const trunk = new THREE.CylinderGeometry(0.035, 0.05, 0.42, 5, 1, true).toNonIndexed(); trunk.translate(0, 0.21, 0);
-  const crown = new THREE.IcosahedronGeometry(0.3, 0); crown.scale(1, 1.25, 1); crown.translate(0, 0.66, 0);
-  const paint = (g, c) => { const n = g.attributes.position.count, a = new Float32Array(n * 3); for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; } g.setAttribute('color', new THREE.BufferAttribute(a, 3)); };
-  paint(trunk, P.trunk); paint(crown, P.crown);
-  ['uv'].forEach(k => { trunk.deleteAttribute(k); crown.deleteAttribute(k); });
-  const g = mergeGeometries([trunk, crown]);
-  g.userData.split = trunk.attributes.position.count;
+  const trunk = new THREE.CylinderGeometry(0.03, 0.05, 0.46, 6, 1, true).toNonIndexed(); trunk.translate(0, 0.23, 0);
+  const c1 = new THREE.IcosahedronGeometry(0.29, 1); c1.scale(1, 1.15, 1); c1.translate(0, 0.66, 0);
+  const c2 = new THREE.IcosahedronGeometry(0.2, 1); c2.translate(0.13, 0.8, 0.07);
+  const c3 = new THREE.IcosahedronGeometry(0.17, 0); c3.translate(-0.12, 0.56, -0.08);
+  // 정점마다 살짝 흔들어 덜 기계적으로
+  [c1, c2, c3].forEach((g, k) => { const p = g.attributes.position; for (let i = 0; i < p.count; i++) { const f = 1 + 0.07 * Math.sin(i * 12.9898 + k * 78.233); p.setXYZ(i, p.getX(i) * f, p.getY(i) * (0.97 + 0.06 * Math.sin(i * 4.1)), p.getZ(i) * f); } });
+  const parts = [trunk, c1, c2, c3];
+  parts.forEach(g => { ['uv'].forEach(k => g.attributes[k] && g.deleteAttribute(k)); });
+  const g = mergeGeometries(parts.map(x => x.index ? x.toNonIndexed() : x));
+  const n = g.attributes.position.count, split = trunk.attributes.position.count;
+  const shade = new Float32Array(n);
+  for (let i = 0; i < n; i++) shade[i] = i < split ? 1 : 0.68 + 0.42 * Math.min(1, Math.max(0, (g.attributes.position.getY(i) - 0.4) / 0.6));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  g.userData.split = split; g.userData.shade = shade;
+  repaintTree(g, P);
+  g.computeVertexNormals();
   return g;
 }
 export function repaintTree(g, P) {
-  const c = g.attributes.color, s = g.userData.split;
-  for (let i = 0; i < c.count; i++) { const k = i < s ? P.trunk : P.crown; c.setXYZ(i, k.r, k.g, k.b); }
+  const c = g.attributes.color, s = g.userData.split, sh = g.userData.shade;
+  for (let i = 0; i < c.count; i++) { const k = i < s ? P.trunk : P.crown, f = sh ? sh[i] : 1; c.setXYZ(i, k.r * f, k.g * f, k.b * f); }
   c.needsUpdate = true;
+}
+
+// 물결 법선 지도: 여러 방향 사인파를 더한 높이장 → 법선 (타일링)
+function rippleNormal(n = 256) {
+  const c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'), img = g.createImageData(n, n), H = new Float32Array(n * n);
+  const waves = [[3, 1, 0.5], [1, 4, 0.35], [-5, 2, 0.22], [7, -3, 0.15], [2, 9, 0.1], [-11, -6, 0.06]];
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    let h = 0; waves.forEach(([a, b, k], i) => { h += k * Math.sin(((a * x + b * y) / n) * Math.PI * 2 + i * 1.7); }); H[y * n + x] = h;
+  }
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const hx = H[y * n + (x + 1) % n] - H[y * n + (x - 1 + n) % n], hy = H[((y + 1) % n) * n + x] - H[((y - 1 + n) % n) * n + x];
+    const l = Math.hypot(hx * 6, hy * 6, 1), i = (y * n + x) * 4;
+    img.data[i] = (-hx * 6 / l * 0.5 + 0.5) * 255; img.data[i + 1] = (-hy * 6 / l * 0.5 + 0.5) * 255; img.data[i + 2] = (1 / l * 0.5 + 0.5) * 255; img.data[i + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1 / 46, 1 / 46);
+  return t;
+}
+// 녹지 질감: 밝고 어두운 점을 흩뿌린 작은 타일
+function grainPattern(g2, n = 96) {
+  const c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'), R = rng(7);
+  for (let i = 0; i < n * n * 0.18; i++) { const d = R() < 0.5; g.fillStyle = d ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.10)'; g.fillRect(Math.floor(R() * n), Math.floor(R() * n), 1 + (R() < 0.3 ? 1 : 0), 1); }
+  return g2.createPattern(c, 'repeat');
 }
 
 // ---------- 본체 ----------
@@ -189,7 +223,8 @@ export function buildContext(ctx, plan, P, opts = {}) {
     const path = (rings) => { g2.beginPath(); rings.forEach(r => { r.forEach(([x, z], i) => (i ? g2.lineTo(tx(x), tx(z)) : g2.moveTo(tx(x), tx(z)))); g2.closePath(); }); };
     const GK = { park: Pp.park, garden: Pp.park, forest: Pp.forest, grass: Pp.grass, golf: Pp.grass, pitch: Pp.pitch };
     // 큰 것부터 (작은 공원이 숲 위에 보이게)
-    [...ctx.green].sort((a, b) => b.outer.length - a.outer.length).forEach(gr => { path([gr.outer, ...(gr.holes || [])]); g2.fillStyle = hex(GK[gr.kind] || Pp.grass); g2.fill('evenodd'); });
+    const grain = grainPattern(g2);
+    [...ctx.green].sort((a, b) => b.outer.length - a.outer.length).forEach(gr => { path([gr.outer, ...(gr.holes || [])]); g2.fillStyle = hex(GK[gr.kind] || Pp.grass); g2.fill('evenodd'); g2.fillStyle = grain; g2.fill('evenodd'); });
     ctx.water.forEach(w => {
       path([w.outer, ...(w.holes || [])]);
       g2.fillStyle = hex(Pp.water); g2.fill('evenodd');
@@ -210,11 +245,25 @@ export function buildContext(ctx, plan, P, opts = {}) {
   const hasHills = ctx.peaks.length > 0;
   const tg = new THREE.PlaneGeometry(2 * E, 2 * E, hasHills ? (lite ? 120 : 200) : 1, hasHills ? (lite ? 120 : 200) : 1); tg.rotateX(-Math.PI / 2);
   if (hasHills) { const p = tg.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, terrain(p.getX(i), p.getZ(i))); tg.computeVertexNormals(); }
-  mats.ground = new THREE.MeshLambertMaterial({ map: tex });
+  mats.ground = surf({ map: tex }, 1);
   const ground = keep(new THREE.Mesh(tg, mats.ground)); ground.receiveShadow = true; ground.name = 'ground'; group.add(ground);
-  mats.outer = new THREE.MeshLambertMaterial({ color: P.ground.clone() });
+  mats.outer = surf({ color: P.ground.clone() }, 1);
   const og = new THREE.RingGeometry(E * 0.999, 40000, 8, 1); og.rotateX(-Math.PI / 2); og.rotateY(Math.PI / 8);
   const outer = keep(new THREE.Mesh(og, mats.outer)); outer.position.y = -0.05; outer.receiveShadow = true; group.add(outer);
+
+  // ===== 수면: 하늘을 비추는 물 (잔물결 법선 지도) =====
+  let water = null;
+  if (ctx.water.length) {
+    const shapes = ctx.water.map(w => {
+      const sh = new THREE.Shape(w.outer.map(([x, z]) => new THREE.Vector2(x, -z)));
+      (w.holes || []).forEach(h => sh.holes.push(new THREE.Path(h.map(([x, z]) => new THREE.Vector2(x, -z)))));
+      return sh;
+    });
+    const wg = new THREE.ShapeGeometry(shapes); wg.rotateX(-Math.PI / 2);
+    const ripple = rippleNormal(); textures.push(ripple);
+    mats.water = surf({ color: P.water.clone(), normalMap: ripple, normalScale: new THREE.Vector2(0.22, 0.22) }, 0.1, 0.02);
+    water = keep(new THREE.Mesh(wg, mats.water)); water.position.y = 0.12; water.receiveShadow = true; water.name = 'water'; group.add(water);
+  }
 
   // 산 등고선 (20m 간격)
   const lines = { contour: [], shore: [], rail: [], railing: [], bedge: [] };
@@ -385,10 +434,10 @@ export function buildContext(ctx, plan, P, opts = {}) {
       quad(BM, S4, y, W.white);
     });
   });
-  mats.walk = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
-  mats.asph = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -5 });
+  mats.walk = surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }, 0.95);
+  mats.asph = surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -5 }, 0.88);
   mats.mark = dashMaterial({ polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -9 });
-  mats.deck = new THREE.MeshLambertMaterial({ vertexColors: true });
+  mats.deck = surf({ vertexColors: true }, 0.85);
   const walkM = keep(new THREE.Mesh(BW.geo(), mats.walk)); walkM.receiveShadow = true; group.add(walkM);
   const asphM = keep(new THREE.Mesh(BA.geo(), mats.asph)); asphM.receiveShadow = true; group.add(asphM);
   const markM = keep(new THREE.Mesh(BM.geo({ aDash: 3 }), mats.mark)); markM.receiveShadow = true; group.add(markM);
@@ -396,7 +445,7 @@ export function buildContext(ctx, plan, P, opts = {}) {
   const unit = new THREE.BoxGeometry(1, 1, 1); unit.translate(0, 0.5, 0); geos.push(unit);
   const m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion(), s3 = new THREE.Vector3(), p3 = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
   const put = (mesh, i, x, y, z, w, h, d, a) => { q4.setFromAxisAngle(Y, -a); s3.set(w, h, d); p3.set(x, y, z); m4.compose(p3, q4, s3); mesh.setMatrixAt(i, m4); };
-  mats.pier = new THREE.MeshLambertMaterial({ color: P.bridge.clone() });
+  mats.pier = surf({ color: P.bridge.clone() }, 0.85);
   if (piers.length) {
     const pm = new THREE.InstancedMesh(unit, mats.pier, piers.length);
     piers.forEach(([x, y, z, h, w, a], i) => put(pm, i, x, y, z, w, h, 2.4, a));
@@ -476,11 +525,11 @@ export function buildContext(ctx, plan, P, opts = {}) {
     }
   });
   mats.wall = facadeMaterial({ vertexColors: true }, { instanced: false });
-  mats.roof = new THREE.MeshLambertMaterial({ vertexColors: true });
+  mats.roof = surf({ vertexColors: true }, 0.82);
   const wallG = BWall.geo({ aFm: 3, aFac: 4 }), roofG = BRoof.geo();
   const walls = keep(new THREE.Mesh(wallG, mats.wall)); walls.castShadow = true; walls.receiveShadow = true; walls.name = 'ctx-walls'; group.add(walls);
   const roofs = keep(new THREE.Mesh(roofG, mats.roof)); roofs.castShadow = true; roofs.receiveShadow = true; group.add(roofs);
-  mats.rbox = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  mats.rbox = surf({ color: 0xffffff }, 0.7);
   if (roofBoxes.length) {
     const rb = new THREE.InstancedMesh(unit, mats.rbox, roofBoxes.length);
     roofBoxes.forEach(([x, y, z, w, h, d, a, c], i) => { put(rb, i, x, y, z, w, h, d, a); rb.setColorAt(i, c); });
@@ -516,7 +565,7 @@ export function buildContext(ctx, plan, P, opts = {}) {
     }
   });
   const treeG = treeGeometry(P); geos.push(treeG);
-  mats.tree = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+  mats.tree = surf({ vertexColors: true, flatShading: true }, 0.95);
   let treeMesh = null;
   if (trees.length) {
     treeMesh = new THREE.InstancedMesh(treeG, mats.tree, Math.min(trees.length, cap));
@@ -547,6 +596,7 @@ export function buildContext(ctx, plan, P, opts = {}) {
     P = Pn;
     paintGround(Pn);
     mats.pier.color.copy(Pn.bridge); flat(Pn);
+    if (mats.water) mats.water.color.copy(Pn.water);
     ['edge', 'contour', 'shore', 'railing'].forEach(k => mats[k].color.copy(Pn.edge));
     mats.rail.color.copy(Pn.rail);
     recolor(walkM.geometry, Pn.walk); recolor(asphM.geometry, Pn.asphalt); recolor(deckM.geometry, Pn.bridge);

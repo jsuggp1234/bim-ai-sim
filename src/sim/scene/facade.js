@@ -1,4 +1,5 @@
-// 파사드 셰이더: 램버트 재질에 층·창·커튼월·발코니 무늬를 그린다 (텍스처 없이 미터 단위 좌표로 계산).
+// 파사드 셰이더: PBR(Standard) 재질에 층·창·커튼월·발코니 무늬를 그린다 (텍스처 없이 미터 단위 좌표로 계산).
+// 유리 부분은 거칠기를 낮추고 금속성을 조금 주어 하늘이 비친다.
 // 멀리서 보면 무늬가 평균색으로 자연스럽게 바뀌어 깜빡임(모아레)이 없다.
 import * as THREE from 'three';
 
@@ -55,12 +56,13 @@ vec4 facadeMask(vec2 m, float pat, float fh, float sd, vec2 fw) {
   }
   float k = clamp(1.6 - max(fw.x / bay, fw.y / fh) * 3.2, 0.0, 1.0);
   float lit = step(0.56, fh21(vec2(floor(m.x / bay), fl) + sd * 17.13));
-  return vec4(mix(avg, g, k), mix(0.28, lit, k), mix(bavg, band, k), mix(avg * 0.25, spd, k));
+  return vec4(mix(avg, g, k), mix(0.16, lit, k), mix(bavg, band, k), mix(avg * 0.25, spd, k));
 }
 `;
 
 // 외피 색 섞기 (fragment): diffuseColor를 바꾸고 야간 불빛을 더한다
 const MIX = /* glsl */`
+  float facGlass = 0.0;
   {
     vec4 FM = facadeMask(vFm.xy, vFac.x, vFac.y, vFac.w, fwidth(vFm.xy));
     FM *= vFm.z;
@@ -75,8 +77,15 @@ const MIX = /* glsl */`
     vec3 col = mix(wall, glass, clamp(FM.x, 0.0, 1.0));
     col = mix(col, glass * 0.62 + base * 0.12, clamp(FM.w, 0.0, 1.0));
     diffuseColor.rgb = col;
+    // 유리: 매끈하고 하늘을 비춘다 (커튼월은 더 강하게). 벽은 무광 도장
+    float gl = clamp(FM.x + FM.w * 0.6, 0.0, 1.0);
+    float cw = step(1.5, vFac.x) * step(vFac.x, 2.5);
+    facGlass = gl;
+    roughnessFactor = mix(roughnessFactor, 0.14, gl);
+    metalnessFactor = mix(metalnessFactor, mix(0.32, 0.55, cw), gl);
+    roughnessFactor = mix(roughnessFactor, 0.6, clamp(FM.z, 0.0, 1.0) * (1.0 - gl));
     float on = uNight * FM.y * FM.x * step(4.5, st);
-    totalEmissiveRadiance += uLit * on * 0.6;
+    totalEmissiveRadiance += uLit * on * 0.34;
   }
 `;
 
@@ -85,7 +94,7 @@ const MIX = /* glsl */`
 //                  면 비트: 남(+z)=1, 북(-z)=2, 동(+x)=4, 서(-x)=8. 위·아래 면은 무늬 없음
 // instanced=false: 정점 속성 aFm = (가로 m, 높이 m, 무늬 켬 0/1), aFac = (무늬, 층고, 상태, 난수)
 export function facadeMaterial(params = {}, { instanced = true } = {}) {
-  const mat = new THREE.MeshLambertMaterial(params);
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.86, metalness: 0, ...params });
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, FACADE_U);
     const vDecl = instanced
@@ -106,7 +115,9 @@ export function facadeMaterial(params = {}, { instanced = true } = {}) {
       vFm = aFm; vFac = vec4(aFac.x, aFac.y, aFac.z, aFac.w);
     `;
     sh.vertexShader = vDecl + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + vBody);
-    sh.fragmentShader = 'varying vec3 vFm;\nvarying vec4 vFac;\n' + GLSL + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + MIX);
+    sh.fragmentShader = 'varying vec3 vFm;\nvarying vec4 vFac;\n' + GLSL + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + MIX)
+      // 유리는 하늘 반사를 더 강하게 (환경광 전체를 키우면 벽까지 밝아지므로 유리 반사만)
+      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#if defined( RE_IndirectSpecular )\nradiance *= mix(1.0, 2.6, facGlass);\n#endif');
   };
   mat.extensions = { derivatives: true };
   mat.customProgramCacheKey = () => 'facade-' + (instanced ? 'i' : 'v');
@@ -114,4 +125,6 @@ export function facadeMaterial(params = {}, { instanced = true } = {}) {
 }
 
 // 단순 색 + 그림자용 재질
-export const lambert = (color, extra = {}) => new THREE.MeshLambertMaterial({ color: new THREE.Color(color), ...extra });
+export const lambert = (color, extra = {}) => surf({ color: new THREE.Color(color), ...extra });
+// 무늬 없는 PBR 재질 (거칠기 기본 0.9, 비금속)
+export const surf = (params = {}, roughness = 0.9, metalness = 0) => new THREE.MeshStandardMaterial({ roughness, metalness, ...params });

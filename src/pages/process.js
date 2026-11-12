@@ -178,11 +178,13 @@ export function mount(root) {
       const mo = (m0 + i) % 12, x = LW + i * CW;
       if (mo === 0 || i === 0) s += `<line class="yrl" x1="${x}" x2="${x}" y1="6" y2="${H}"/><text class="yr" x="${x + 3}" y="16">${y0 + Math.floor((m0 + i) / 12)}</text>`;
       s += `<text class="mo" x="${x + CW / 2}" y="32" text-anchor="middle">${mo + 1}</text>`;
+      // 분기마다 가는 세로선 (달마다 칸을 그리면 표가 무거워진다)
+      if (i && mo % 3 === 0 && mo !== 0) s += `<line class="qtl" x1="${x}" x2="${x}" y1="${HD}" y2="${H}"/>`;
     }
     S.blocks.forEach((b, r) => {
       const y = HD + r * RH;
       s += `<line class="rowsep" x1="0" x2="${W}" y1="${y}" y2="${y}"/>`;
-      for (let i = 0; i < NM; i++) s += `<rect class="cell" x="${LW + i * CW}" y="${y + 4}" width="${CW}" height="${RH - 8}"/>`;
+      if (r % 2) s += `<rect class="zebra" x="${LW}" y="${y}" width="${W - LW}" height="${RH}"/>`;
       s += `<text class="rowl" x="6" y="${y + 18}">${b.id}</text><text class="rows" x="6" y="${y + 31}">${gen.zones[b.zone].name.replace('(주거)', '')} · ${b.towers}동</text>`;
       LANES.forEach((L, li) => {
         const acts = S.acts.filter(a => a.block === b.id && L.cats.includes(a.cat));
@@ -190,7 +192,7 @@ export function mount(root) {
         const a0 = Math.min(...acts.map(a => a.start)), a1 = Math.max(...acts.map(a => a.end));
         const ly = y + 7 + li * (LH + LG);
         const col = L.key === 'g5' ? 'var(--g5)' : `var(--${L.key})`;
-        s += `<rect class="bar" data-tip="${b.id}|${L.name}|${a0}|${a1}" x="${X(a0).toFixed(1)}" y="${ly.toFixed(1)}" width="${Math.max(2, X(a1) - X(a0)).toFixed(1)}" height="${LH}" rx="1" style="fill:${col}"/>`;
+        s += `<rect class="bar" data-tip="${b.id}|${L.name}|${a0}|${a1}" x="${X(a0).toFixed(1)}" y="${ly.toFixed(1)}" width="${Math.max(2, X(a1) - X(a0)).toFixed(1)}" height="${LH}" rx="2.5" style="fill:${col}"/>`;
         if (L.key === 'g5') { const land = acts.filter(a => a.cat === 'land'); land.forEach(a => { s += `<rect class="bar" data-tip="${b.id}|조경·외부|${a.start}|${a.end}" x="${X(a.start).toFixed(1)}" y="${ly.toFixed(1)}" width="${Math.max(2, X(a.end) - X(a.start)).toFixed(1)}" height="${LH}" style="fill:var(--g6)"/>`; }); }
       });
       const dia = (d, cls, label) => `<rect class="ms ${cls}" data-tip="${b.id}|${label}|${d}|${d}" x="${(X(d) - 4).toFixed(1)}" y="${(y + RH / 2 - 4).toFixed(1)}" width="8" height="8" transform="rotate(45 ${X(d).toFixed(1)} ${(y + RH / 2).toFixed(1)})"/>`;

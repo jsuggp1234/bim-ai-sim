@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 
 const DEF = {
-  scene: '#ebe8e3', ground: '#e9e6e0', asphalt: '#cac8c4', walk: '#dedad3', curb: '#bdb9b2', mark: '#ffffff', markY: '#e3b341',
+  scene: '#f4f5f6', skyTop: '#c9dbea', skyHor: '#f4f6f8', ground: '#e9e6e0', asphalt: '#cac8c4', walk: '#dedad3', curb: '#bdb9b2', mark: '#ffffff', markY: '#e3b341',
   water: '#b7cad1', bank: '#d3cfc7', park: '#d2dbc4', forest: '#bccab0', grass: '#dbe2cf', pitch: '#c9d9b6', sand: '#e6dcc6',
   wRes: '#f3f1ed', wCom: '#e9e6e1', wHouse: '#e6ded2', wTower: '#dfe4e7', wInd: '#dfdcd6', wCivic: '#ebe2d3', roof: '#f6f5f2',
   glass: '#8ea2ad', film: '#8cc6be', interior: '#f1e9d6', lit: '#ffcf8a', frame: '#4a4d50',
@@ -28,8 +28,8 @@ export function readPalette() {
   P.model = tok('--model', '#ffffff'); P.na = tok('--model-na', '#e7e4df');
   P.heatLo = tok('--heat-lo', '#efede7'); P.heatHi = tok('--heat-hi', '#0c6f68');
   P.dark = isDark();
-  // 밝은 화면은 하늘빛+햇빛이 강해 수평면(땅·물·도로)이 하얗게 날아간다. 그 면들만 이만큼 낮춰 제 색이 보이게 한다
-  P.flat = P.dark ? 1 : 0.46;
+  // 수평면(땅·물·도로) 밝기 보정. 톤 매핑이 하이라이트를 눌러 주므로 이제는 거의 그대로 쓴다
+  P.flat = 1;
   return P;
 }
 export function isDark() {

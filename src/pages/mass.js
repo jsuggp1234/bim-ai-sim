@@ -37,7 +37,7 @@ const TYPO_ICON = {
 };
 const TYPO_ORDER = ['tower', 'y', 'slab', 'l', 'v', 'court', 'mixed'];
 // 조망 이름은 택지마다 다르다 (한강·양재천·중랑천 / 남산·청계산·불암산 …)
-const modesFor = (pl) => [['use', '용도'], ['sun', '일조'], ...(pl.views.water ? [['river', pl.views.water.name + ' 조망']] : []), ...(pl.views.peak ? [['namsan', pl.views.peak.name + ' 조망']] : []), ['ctx', '주변 영향'], ['model', '흰 모형']];
+const modesFor = (pl) => [['real', '실사'], ['use', '용도'], ['sun', '일조'], ...(pl.views.water ? [['river', pl.views.water.name + ' 조망']] : []), ...(pl.views.peak ? [['namsan', pl.views.peak.name + ' 조망']] : []), ['ctx', '주변 영향'], ['model', '흰 모형']];
 const viewsFor = (pl) => [['axon', 'AXON'], ['bird', '조감'], ['wide', '광역'], ['top', '평면'], ['street', '가로'], ...(pl.views.water ? [['river', pl.views.water.name]] : []), ['east', '동측'], ...(pl.views.peak ? [['namsan', pl.views.peak.name]] : [])];
 const GROUPS = [['plan', '계획 물량', true], ['res', '주거 구성', false], ['height', '높이 계획', true], ['law', '인동간격', false], ['office', '업무·랜드마크', false], ['h', '층고', false], ['park', '주차', false]];
 const YS_SOURCES = [
@@ -62,7 +62,7 @@ export function mount(root) {
   delete params.site;
   if (!TYPOLOGIES[params.typology]) params.typology = DEFAULTS.typology;
   if (!S.mass) store.set({ mass: params, massFrom: 'default' });
-  const ui = { mode: 'use', decl: -23.44, hour: 10, view: 'axon', pick: null, block: null };
+  const ui = { mode: 'real', decl: -23.44, hour: 10, view: 'axon', pick: null, block: null };
   const map = { state: 'fallback', msg: '', ctl: null };
   let gen = null, agg = null, viewer = null, worker = null, reqId = 0, alive = true, analysisMs = 0;
   const gp = () => ({ ...params, site });
@@ -354,7 +354,10 @@ export function mount(root) {
   // ---------- 범례 ----------
   function renderLegend() {
     let html;
-    if (ui.mode === 'use') {
+    if (ui.mode === 'real') {
+      html = [['--s-glass', '유리 커튼월·창'], ['--s-w-res', '외벽 패널'], ['--s-frame', '멀리언·프레임'], ['--s-park', '조경·녹지'], ['--s-w-com', ctx.source === 'osm' ? '주변 건물 (실제 지도)' : '주변 건물 (근사)']]
+        .map(([c, n]) => `<span class="lg"><i style="background:var(${c})"></i>${n}</span>`).join('') + '<span class="note">준공 후 모습 · 용도별 색은 \'용도\'</span>';
+    } else if (ui.mode === 'use') {
       html = [['--res', '아파트'], ['--officetel', '오피스텔'], ['--office', '업무'], ['--retail', '상업·로비·근생'], ['--refuge', '피난안전층'], ['--mech', '옥탑·기계'], ['--s-w-com', ctx.source === 'osm' ? '주변 건물 (실제 지도)' : '주변 건물 (근사)']]
         .map(([c, n]) => `<span class="lg"><i style="background:var(${c})"></i>${n}</span>`).join('');
     } else if (ui.mode === 'model') {

@@ -4,94 +4,112 @@ import { SITES, GLOBAL_DEFAULTS, GLOBAL_META, SITE_META, PRICE_SOURCES, evaluate
 import { SEOUL } from '../stage1/seoulmap.js';
 import { store, massParamsFromStage1 } from '../store.js';
 import { DEFAULTS as MASS_DEFAULTS } from '../sim/massing.js';
+import { createAtlas, lngLatToWorld, worldPerMeter } from '../ui/atlas.js';
+import { onThemeChange } from '../pipeline.js';
 
 export const title = '1단계 택지 선정';
 
 const HEAD = `<div class="page-h">
-  <div><span class="label-sm">stage 01 / 05 · site selection</span><h1>서울 공동주택 택지 사업성 비교 <span class="dim">(후보지 8곳)</span></h1>
-  <p>개발이 거론되거나 논란 중인 서울 택지 8곳을 같은 기준으로 비교합니다. 변수를 바꾸면 세대수, 사업성, 순위가 바로 다시 계산됩니다. 용산국제업무지구를 고르면 2단계 상세 매스 배치로 넘어갈 수 있습니다.</p></div>
-  <div class="actions"><a class="btn ghost" href="#/">처음 화면</a><a class="btn" href="#/mass">02 매스 배치 <span class="ar">→</span></a></div>
+  <div><span class="label-sm">stage 01 / 05 · site selection</span><h1>어디에 지을까<span class="dim">서울 공동주택 후보 택지 8곳</span></h1>
+  <p>지도에서 후보지를 살펴보고, 같은 기준으로 비교한 뒤, 한 곳을 골라 프로젝트를 시작합니다. 평가 가중치와 사업 변수를 바꾸면 세대수·사업성·순위가 바로 다시 계산됩니다.</p></div>
+  <ol class="flow-mini" aria-label="이 단계에서 할 일"><li><a href="#atlas"><span>a</span>지도에서 보기</a></li><li><a href="#compare"><span>b</span>비교하기</a></li><li><a href="#detail"><span>c</span>검토하기</a></li><li><a href="#start"><span>d</span>프로젝트 시작</a></li></ol>
 </div>`;
 
-const BODY = `<div class="p-site">
-  <section id="rank" class="panel pad" aria-label="후보지 순위">
-    <div class="sec-h"><h2>후보지 순위</h2><span class="hint">가중치로 순위 조정</span></div>
-    <p class="pick" id="pick"></p>
+const BODY = `<section class="atlas" id="atlas" aria-label="후보지 지도">
+  <div class="atlas-map" id="map"></div>
+  <aside class="atlas-rank" id="rank" aria-label="후보지 순위">
+    <div class="sec-h"><h2>후보지 순위</h2><span class="hint" id="wHint">가중치 기준</span></div>
     <ul class="sites" id="sites"></ul>
-    <div class="weights" id="weights"></div>
-    <div class="bulk">
-      <button class="chipbtn" id="allPlan" type="button">모든 후보지 발표안</button>
-      <button class="chipbtn" id="allPrivate" type="button">모든 후보지 분양 최대화</button>
-    </div>
-    <div class="map" id="map"></div>
-    <div class="map-cap">원 크기는 세대수. 위치는 대략적인 지점입니다.</div>
-  </section>
-
-  <section id="view" class="panel" aria-label="3D 매스">
-    <div class="site-head" id="siteHead"></div>
-    <div class="stage" id="stage">
-      <canvas id="cv" aria-label="선택한 후보지의 3D 매스 모델. 드래그로 회전, 휠로 확대"></canvas>
-      <div class="ov tl" id="legend3d">
-        <span class="lg"><i style="background:var(--model)"></i>분양</span>
-        <span class="lg"><i style="background:var(--rental)"></i>공공임대·장기전세</span>
-        <span class="lg"><i style="background:var(--nonres)"></i>업무·상업</span>
+    <details class="wdet"><summary>평가 가중치 조정</summary>
+      <div class="weights" id="weights"></div>
+      <div class="bulk">
+        <button class="chipbtn" id="allPlan" type="button">모든 후보지 발표안</button>
+        <button class="chipbtn" id="allPrivate" type="button">모든 후보지 분양 최대화</button>
       </div>
-      <div class="ov tr">
-        <button class="vbtn" type="button" data-view="bird">조감</button>
-        <button class="vbtn" type="button" data-view="top">평면</button>
-        <button class="vbtn" type="button" data-view="south">남측 입면</button>
+    </details>
+  </aside>
+  <div class="atlas-pick" id="pickCard" aria-live="polite"></div>
+  <div class="atlas-legend" aria-hidden="true"><span><i class="lg-pin"></i>숫자 = 종합 순위, 원 크기 = 세대수</span><span><i class="lg-foot"></i>점선 = 택지 면적을 원으로 환산</span></div>
+</section>
+
+<div class="p-site">
+  <section class="sec" id="compare" aria-label="후보지 비교">
+    <div class="sec-title"><span class="n">b</span><h2>후보지 비교</h2><span class="hint">같은 가정과 가중치로 계산한 8곳. 행이나 점을 누르면 그 택지를 고릅니다.</span></div>
+    <div class="cmp-grid">
+      <div class="panel pad"><div class="sec-h"><h2>평가 매트릭스</h2><span class="hint">항목별 0–100점 · 종합은 가중 합</span></div><div class="matrix" id="matrix"></div></div>
+      <div class="panel pad"><div class="sec-h"><h2>공급 규모 × 수익률</h2><span class="hint">원 크기 = 택지 면적</span></div><div class="scatter" id="scatter"></div></div>
+    </div>
+    <details class="panel pad tdet" id="table"><summary><span>수치 비교표</span><span class="hint">세대수 · 용적률 · 사업비 · 이익</span></summary><div class="tw"><table id="cmp"></table></div></details>
+  </section>
+
+  <section class="sec" id="detail" aria-label="선택한 택지 검토">
+    <div class="sec-title"><span class="n">c</span><h2 id="detTitle">선택한 택지 검토</h2><span class="hint">단순 매스로 본 배치 가능량과 사업성. 변수는 이 택지에만 적용됩니다.</span></div>
+    <div class="det-grid">
+      <section id="view" class="panel" aria-label="3D 매스">
+        <div class="site-head" id="siteHead"></div>
+        <div class="stage" id="stage">
+          <canvas id="cv" aria-label="선택한 후보지의 3D 매스 모델. 드래그로 회전, 휠로 확대"></canvas>
+          <div class="ov tl" id="legend3d">
+            <span class="lg"><i style="background:var(--model)"></i>분양</span>
+            <span class="lg"><i style="background:var(--rental)"></i>공공임대·장기전세</span>
+            <span class="lg"><i style="background:var(--nonres)"></i>업무·상업</span>
+          </div>
+          <div class="ov tr seg" role="group" aria-label="시점">
+            <button type="button" data-view="bird" aria-pressed="true">조감</button>
+            <button type="button" data-view="top" aria-pressed="false">평면</button>
+            <button type="button" data-view="south" aria-pressed="false">남측 입면</button>
+          </div>
+          <div class="ov bl" id="warn3d"></div>
+        </div>
+        <div class="sun">
+          <label for="season" class="label-sm">shadow</label>
+          <select id="season">
+            <option value="-23.44">동지 12.22</option>
+            <option value="0">춘분 3.20</option>
+            <option value="23.44">하지 6.21</option>
+          </select>
+          <input id="hour" type="range" min="8" max="16" step="0.25" value="12" aria-label="시각">
+          <span class="mono" id="hourOut">12:00</span>
+          <span class="muted" id="sunOut"></span>
+        </div>
+        <div class="stats" id="stats"></div>
+        <div class="insight" id="insight"></div>
+      </section>
+
+      <section id="vars" class="panel" aria-label="변수와 사업성">
+        <div class="pad" style="padding-bottom:12px">
+          <div class="sec-h"><h2>시나리오 변수</h2><button class="chipbtn" id="reset" type="button">기본값</button></div>
+          <div class="presets" id="presets"></div>
+        </div>
+        <div class="grp"><span class="label-sm">대지·매스</span><div id="ctlMass"></div></div>
+        <div class="grp"><span class="label-sm">가격·비용</span><div id="ctlCost"></div></div>
+        <div class="result" id="result"></div>
+      </section>
+    </div>
+    <section id="dossier" class="panel pad" aria-label="쟁점과 근거">
+      <div class="sec-h"><h2 id="dosTitle">쟁점과 근거</h2></div>
+      <div class="cols2">
+        <div><span class="label-sm">쟁점</span><ul class="issues" id="issues"></ul><ul class="srcs" id="srcs"></ul></div>
+        <div><span class="label-sm">모델 가정</span>
+          <ul class="issues note" id="assume"></ul>
+          <ul class="srcs" id="psrcs"></ul>
+        </div>
       </div>
-      <div class="ov bl" id="warn3d"></div>
-    </div>
-    <div class="sun">
-      <label for="season">일조</label>
-      <select id="season">
-        <option value="-23.44">동지 (12월 22일)</option>
-        <option value="0">춘분 (3월 20일)</option>
-        <option value="23.44">하지 (6월 21일)</option>
-      </select>
-      <input id="hour" type="range" min="8" max="16" step="0.25" value="12" aria-label="시각">
-      <span class="mono" id="hourOut">12:00</span>
-      <span class="muted" id="sunOut"></span>
-    </div>
-    <div class="stats" id="stats"></div>
-    <div class="insight" id="insight"></div>
+    </section>
   </section>
 
-  <section id="vars" class="panel" aria-label="변수와 사업성">
-    <div class="pad" style="padding-bottom:12px">
-      <div class="sec-h"><h2>시나리오 변수</h2><button class="chipbtn" id="reset" type="button">기본값</button></div>
-      <div class="presets" id="presets"></div>
+  <section class="sec" id="start" aria-label="프로젝트 시작">
+    <div class="sec-title"><span class="n">d</span><h2>프로젝트 시작</h2><span class="hint">고른 택지와 시나리오를 2단계 매스 배치의 시작값으로 넘깁니다.</span></div>
+    <div class="launch" id="export">
+      <div id="nextCard"></div>
+      <details class="jdet"><summary>JSON으로 내보내기</summary>
+        <dl class="handoff" id="handoff"></dl>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <button class="btn ghost" id="copy" type="button">JSON 복사</button><span class="toast" id="toast" role="status"></span>
+        </div>
+        <textarea id="json" readonly aria-label="시나리오 JSON"></textarea>
+      </details>
     </div>
-    <div class="grp"><span class="label-sm">대지·매스</span><div id="ctlMass"></div></div>
-    <div class="grp"><span class="label-sm">가격·비용</span><div id="ctlCost"></div></div>
-    <div class="result" id="result"></div>
-  </section>
-
-  <section id="table" class="panel pad" aria-label="후보지 비교표">
-    <div class="sec-h"><h2>후보지 비교</h2><span class="hint">각 후보지의 현재 변수 기준. 행을 누르면 선택</span></div>
-    <div class="tw"><table id="cmp"></table></div>
-  </section>
-
-  <section id="dossier" class="panel pad" aria-label="쟁점과 근거">
-    <div class="sec-h"><h2 id="dosTitle">쟁점과 근거</h2></div>
-    <div class="cols2">
-      <div><span class="label-sm">쟁점</span><ul class="issues" id="issues"></ul><ul class="srcs" id="srcs"></ul></div>
-      <div><span class="label-sm">모델 가정</span>
-        <ul class="issues note" id="assume"></ul>
-        <ul class="srcs" id="psrcs"></ul>
-      </div>
-    </div>
-  </section>
-
-  <section id="export" class="panel pad" aria-label="다음 단계로 내보내기">
-    <div class="sec-h"><h2>다음 단계로 넘길 값</h2><span class="hint">2단계 매스 배치 입력</span></div>
-    <div id="nextCard"></div>
-    <dl class="handoff" id="handoff"></dl>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-      <button class="btn" id="copy" type="button">JSON 복사</button><span class="toast" id="toast" role="status"></span>
-    </div>
-    <textarea id="json" readonly aria-label="시나리오 JSON"></textarea>
   </section>
 </div>`;
 
@@ -150,22 +168,22 @@ export function mount(root) {
     if (!state.sel || !siteById[state.sel]) state.sel = order[0];
   }
 
-  // ---------- 왼쪽: 순위 ----------
+  // ---------- 지도 위 순위 목록 ----------
   function renderRank() {
     const tw = Object.values(state.w).reduce((a, b) => a + b, 0) || 1;
     $('sites').innerHTML = order.map((id, i) => {
       const s = siteById[id], sc = scores[id], f = evals[id].f;
       const segs = W_META.map(([k, , cls]) => `<i class="${cls}" style="width:${(sc[k] * state.w[k] / tw).toFixed(2)}%"></i>`).join('');
       return `<li><button class="site-btn" type="button" data-id="${id}" aria-pressed="${id === state.sel}">
-        <span class="rk">${i + 1}</span><span class="nm">${s.name}</span><span class="sc">${sc.total.toFixed(0)}</span>
-        <span class="sub"><span>${s.gu}</span><span>${fmt(f.units)}세대</span><span>착공 ${s.start}</span><span>수익률 ${pct(f.roi, 0)}</span></span>
+        <span class="rk">${String(i + 1).padStart(2, '0')}</span><span class="nm">${s.name}</span><span class="sc">${sc.total.toFixed(0)}</span>
+        <span class="sub"><span>${s.gu}</span><span>${unitsShort(f.units)}세대</span><span class="${f.roi >= 0 ? '' : 'neg'}">수익률 ${pct(f.roi, 0)}</span></span>
         <span class="bar">${segs}</span></button></li>`;
     }).join('');
-    const top = order[0], s = siteById[top], sc = scores[top];
-    const best = W_META.filter(([k]) => state.w[k] > 0).map(([k, nm]) => [nm, sc[k]]).sort((a, b) => b[1] - a[1]).slice(0, 2);
-    $('pick').innerHTML = `현재 가중치로는 <b>${s.name}</b>(${sc.total.toFixed(0)}점)이 1순위입니다. 강점은 ${best.map(([n, v]) => `${n} ${v.toFixed(0)}`).join(', ')}.`;
+    const top = W_META.filter(([k]) => state.w[k] > 0).sort((a, b) => state.w[b[0]] - state.w[a[0]]).slice(0, 2).map(([, nm]) => nm);
+    $('wHint').textContent = top.length ? `${top.join('·')} 중심` : '가중치 없음';
     renderMap();
   }
+  const unitsShort = (u) => u >= 10000 ? fmt(u / 10000, 1) + '만' : fmt(u);
   function renderWeights() {
     $('weights').innerHTML = `<span class="label-sm">평가 가중치</span>` + W_META.map(([k, nm, cls, tip]) =>
       `<div class="w-row" title="${tip}"><span class="dot ${cls}"></span><label for="w-${k}">${nm}</label>
@@ -173,26 +191,118 @@ export function mount(root) {
   }
 
   // ---------- 지도 ----------
+  // 자치구 경계(SEOUL: 단순 등장방형 SVG 좌표) → 위경도 → 웹 메르카토르 월드 좌표
   const lng0 = 126.76, lat1 = 37.71, kcos = Math.cos(37.56 * Math.PI / 180), SX = SEOUL.W / ((127.19 - 126.76) * kcos);
-  const proj = (lng, lat) => [(lng - lng0) * kcos * SX, (lat1 - lat) * SX];
+  const svgToLL = (x, y) => [x / (kcos * SX) + lng0, lat1 - y / SX];
   const RIVER = [[126.795,37.596],[126.823,37.590],[126.862,37.574],[126.889,37.553],[126.903,37.543],[126.925,37.535],[126.937,37.530],[126.948,37.527],[126.958,37.517],[126.981,37.509],[126.996,37.514],[127.012,37.527],[127.020,37.536],[127.035,37.537],[127.054,37.536],[127.065,37.527],[127.083,37.519],[127.103,37.531],[127.118,37.540],[127.125,37.548],[127.135,37.560],[127.165,37.580],[127.185,37.587]];
-  function renderMap() {
-    const river = RIVER.map((c, i) => (i ? 'L' : 'M') + proj(c[0], c[1]).map(v => v.toFixed(1)).join(',')).join('');
-    const guP = SEOUL.gu.map(g => `<path class="gu" d="${g.d}"><title>${g.n}</title></path>`).join('');
-    const guL = SEOUL.gu.map(g => `<text class="gu-l" x="${g.c[0]}" y="${g.c[1]}">${g.n.replace('구', '')}</text>`).join('');
-    const pts = order.map((id, i) => {
-      const s = siteById[id]; const [x, y] = proj(s.lng, s.lat);
-      const r = 6 + Math.sqrt(evals[id].f.units) / 9;
-      return `<g class="pt${id === state.sel ? ' on' : ''}" data-id="${id}" tabindex="0" role="button" aria-label="${s.name}">
-        <circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}"></circle>
-        <text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}">${i + 1}</text><title>${s.name}</title></g>`;
-    }).join('');
-    $('map').innerHTML = `<svg viewBox="0 0 ${SEOUL.W} ${SEOUL.H}" role="img" aria-label="서울 후보지 위치">${guP}<path class="river" d="${river}" stroke-width="9"></path>${guL}${pts}</svg>`;
+  const LABEL_DIR = { yongsan: 'l', campkim: 'tr', smc: 'r', horse: 'tr', seoripul1: 'br', seoripul2: 'l', guryong: 'r', taereung: 'r' };
+  const wp = (lng, lat) => lngLatToWorld(lng, lat).map(v => v.toFixed(4)).join(',');
+  const GU = SEOUL.gu.map(g => {
+    const d = g.d.replace(/([ML])\s*([-\d.]+)[ ,]([-\d.]+)/g, (_, c, x, y) => c + wp(...svgToLL(+x, +y)));
+    const [lng, lat] = svgToLL(g.c[0], g.c[1]);
+    return { n: g.n, d, lng, lat };
+  });
+  let atlas = null, hoverId = null;
+  function initMap() {
+    atlas = createAtlas($('map'), { onSelect: (id) => select(id, true), onHover: (id) => { hoverId = id; } });
+    const river = RIVER.map((c, i) => (i ? 'L' : 'M') + wp(c[0], c[1])).join('');
+    const rw = 780 * worldPerMeter(37.53);
+    atlas.setVector(`<g class="v-gu">${GU.map(g => `<path d="${g.d}"/>`).join('')}</g>
+      <path class="v-river" d="${river}" style="stroke-width:${rw.toFixed(5)}"/>
+      <g class="v-foot" id="vFoot"></g>`);
+    atlas.setLabels(GU.map(g => ({ text: g.n, lng: g.lng, lat: g.lat, cls: 'gu' })));
+    cleanups.push(() => atlas.dispose());
+    const box = SITES.reduce((b, s) => { const [x, y] = lngLatToWorld(s.lng, s.lat); return [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)]; }, [Infinity, Infinity, -Infinity, -Infinity]);
+    requestAnimationFrame(() => atlas.fit(box, 70, 0));
   }
+  function renderMap() {
+    if (!atlas) return;
+    const umax = Math.max(...order.map(id => evals[id].f.units));
+    atlas.setPins(order.map((id, i) => {
+      const s = siteById[id], f = evals[id].f, sc = scores[id];
+      const r = 9 + Math.sqrt(f.units / umax) * 15;
+      return {
+        id, lng: s.lng, lat: s.lat, r: Math.round(r), on: id === state.sel, label: `${i + 1}위 ${s.name}, ${fmt(f.units)}세대, ${sc.total.toFixed(0)}점`,
+        html: `<i class="dot">${i + 1}</i><span class="tag d-${LABEL_DIR[id] || 'r'}"><b>${s.name}</b><small>${unitsShort(f.units)}세대 · ${sc.total.toFixed(0)}점</small></span>`,
+      };
+    }));
+    const foot = document.getElementById('vFoot');
+    if (foot) foot.innerHTML = order.map(id => {
+      const s = siteById[id], [x, y] = lngLatToWorld(s.lng, s.lat), r = Math.sqrt(s.area / Math.PI) * worldPerMeter(s.lat);
+      return `<circle class="${id === state.sel ? 'on' : ''}" cx="${x.toFixed(5)}" cy="${y.toFixed(5)}" r="${r.toFixed(6)}"/>`;
+    }).join('');
+  }
+
+  // ---------- 지도 위 선택 카드 ----------
+  function renderPick() {
+    const s = siteById[state.sel], { f, m } = evals[s.id], sc = scores[s.id], rank = order.indexOf(s.id) + 1;
+    const tw = Object.values(state.w).reduce((a, b) => a + b, 0) || 1;
+    const crit = W_META.map(([k, nm, cls]) => `<div class="cr"><span class="cn"><i class="${cls}"></i>${nm}</span><span class="ct"><i class="${cls}" style="width:${sc[k].toFixed(1)}%"></i></span><span class="cv">${sc[k].toFixed(0)}</span></div>`).join('');
+    $('pickCard').innerHTML = `<div class="pk-h"><span class="pk-rank">${String(rank).padStart(2, '0')}<small>/ ${order.length}</small></span>
+        <div><h3>${s.name}</h3><span class="pk-loc">${s.gu} ${s.dong}</span></div><span class="pk-score">${sc.total.toFixed(0)}<small>점</small></span></div>
+      <p class="pk-status">${s.status}</p>
+      <dl class="pk-kv">
+        <div><dt>세대수</dt><dd>${fmt(f.units)}</dd></div>
+        <div><dt>사업이익</dt><dd class="${f.profit >= 0 ? '' : 'neg'}">${money(f.profit)}</dd></div>
+        <div><dt>수익률</dt><dd class="${f.roi >= 0 ? '' : 'neg'}">${pct(f.roi)}</dd></div>
+        <div><dt>착공 목표</dt><dd>${s.start}</dd></div>
+        <div><dt>택지 면적</dt><dd>${s.area >= 1e6 ? fmt(s.area / 1e6, 2) + '㎢' : fmt(s.area / 1e4, 1) + 'ha'}</dd></div>
+        <div><dt>최고 층수</dt><dd>${m.floors}층</dd></div>
+      </dl>
+      <div class="pk-crit">${crit}</div>
+      <div class="pk-act"><button class="btn" type="button" data-launch>이 택지로 프로젝트 시작 <span class="ar">→</span></button><a class="chipbtn" href="#detail">자세히 검토</a></div>`;
+  }
+
+  // ---------- 비교: 평가 매트릭스 ----------
+  function renderMatrix() {
+    const tw = Object.values(state.w).reduce((a, b) => a + b, 0) || 1;
+    const head = `<div class="mx-row mx-head"><span class="mx-n">후보지</span>${W_META.map(([k, nm, cls]) => `<span class="mx-c"><i class="${cls}"></i>${nm}<small>×${state.w[k]}</small></span>`).join('')}<span class="mx-t">종합</span></div>`;
+    const rows = order.map((id, i) => {
+      const s = siteById[id], sc = scores[id];
+      const cells = W_META.map(([k, , cls]) => `<span class="mx-c"><span class="mx-track"><i style="width:${sc[k].toFixed(1)}%"></i></span><span class="mx-v">${sc[k].toFixed(0)}</span></span>`).join('');
+      const stack = W_META.map(([k, , cls]) => `<i class="${cls}" style="width:${(sc[k] * state.w[k] / tw).toFixed(2)}%"></i>`).join('');
+      return `<button type="button" class="mx-row${id === state.sel ? ' on' : ''}" data-id="${id}"><span class="mx-n"><span class="rk">${i + 1}</span>${s.name}</span>${cells}<span class="mx-t"><span class="mx-stack">${stack}</span><b>${sc.total.toFixed(0)}</b></span></button>`;
+    }).join('');
+    $('matrix').innerHTML = head + rows;
+  }
+
+  // ---------- 비교: 공급 규모 × 수익률 산점도 ----------
+  function renderScatter() {
+    const Wd = 560, Hd = 340, L = 46, Rr = 18, T = 14, Bm = 36;
+    const pts = order.map(id => ({ id, s: siteById[id], f: evals[id].f }));
+    const xs = pts.map(p => p.f.units), ys = pts.map(p => p.f.roi * 100);
+    const xmax = niceMax(Math.max(...xs) * 1.08), ylo = Math.min(-10, Math.floor(Math.min(...ys) / 10) * 10 - 5), yhi = Math.max(10, Math.ceil(Math.max(...ys) / 10) * 10 + 5);
+    // 가로축은 제곱근 눈금: 2만 세대와 2백 세대가 함께 읽히도록
+    const X = v => L + Math.sqrt(Math.max(0, v) / xmax) * (Wd - L - Rr), Y = v => T + (yhi - v) / (yhi - ylo) * (Hd - T - Bm);
+    const xt = [0, 500, 2000, 5000, 10000, 20000].filter(v => v <= xmax);
+    const yt = []; for (let v = Math.ceil(ylo / 10) * 10; v <= yhi; v += (yhi - ylo > 60 ? 20 : 10)) yt.push(v);
+    const amax = Math.max(...pts.map(p => p.s.area));
+    const g = [];
+    yt.forEach(v => g.push(`<line class="gl${v === 0 ? ' zero' : ''}" x1="${L}" x2="${Wd - Rr}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}"/><text class="tk" x="${L - 8}" y="${(Y(v) + 3.5).toFixed(1)}" text-anchor="end">${v > 0 ? '+' : ''}${v}%</text>`));
+    xt.forEach(v => g.push(`<line class="gl v" x1="${X(v).toFixed(1)}" x2="${X(v).toFixed(1)}" y1="${T}" y2="${Hd - Bm}"/><text class="tk" x="${X(v).toFixed(1)}" y="${Hd - Bm + 16}" text-anchor="middle">${v >= 10000 ? v / 10000 + '만' : fmt(v)}</text>`));
+    g.push(`<text class="ax" x="${Wd - Rr}" y="${Hd - 4}" text-anchor="end">세대수 →</text><text class="ax" x="${L - 40}" y="${T - 2}">↑ 수익률 (이익/총사업비)</text>`);
+    const placed = [];
+    const dots = pts.map((p, i) => {
+      const x = X(p.f.units), y = Y(p.f.roi * 100), r = 4 + Math.sqrt(p.s.area / amax) * 22;
+      let ly = y + 3.5, side = x > Wd * 0.72 ? -1 : 1;
+      for (const q of placed) if (Math.abs(q.y - ly) < 12 && Math.abs(q.x - x) < 120) ly = q.y + (ly >= q.y ? 12 : -12);
+      placed.push({ x, y: ly });
+      const lx = x + side * (r + 6);
+      return `<g class="pt${p.id === state.sel ? ' on' : ''}" data-id="${p.id}" tabindex="0" role="button" aria-label="${p.s.name}: ${fmt(p.f.units)}세대, 수익률 ${pct(p.f.roi)}">
+        <circle class="halo" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r + 6).toFixed(1)}"/>
+        <circle class="b" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(1)}"/><circle class="c" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2"/>
+        <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${side > 0 ? 'start' : 'end'}">${p.s.name}<tspan class="sub" dx="5">${pct(p.f.roi, 0)}</tspan></text>
+        <title>${p.s.name} · ${fmt(p.f.units)}세대 · 수익률 ${pct(p.f.roi)} · 면적 ${fmt(p.s.area)}㎡</title></g>`;
+    }).join('');
+    $('scatter').innerHTML = `<svg viewBox="0 0 ${Wd} ${Hd}" role="img" aria-label="후보지별 세대수와 수익률">${g.join('')}${dots}</svg>
+      <div class="note">가로축은 제곱근 눈금. 0% 선 위는 이익, 아래는 손실입니다.</div>`;
+  }
+  const niceMax = (v) => { const p = 10 ** Math.floor(Math.log10(v)); return Math.ceil(v / p * 2) / 2 * p; };
 
   // ---------- 가운데: 대지 정보 + 통계 ----------
   function renderHead() {
     const s = siteById[state.sel];
+    $('detTitle').textContent = `${s.name} 검토`;
     $('siteHead').innerHTML = `<div class="row1"><h2>${s.name}</h2><span class="loc">${s.gu} ${s.dong}</span></div>
       <div class="status">${s.status}</div>
       <div class="facts"><span class="fact">총면적 <b>${fmt(s.area)}㎡</b></span><span class="fact">발표 물량 <b>${fmt(s.plannedUnits)}호</b></span>
@@ -373,7 +483,7 @@ export function mount(root) {
       ['세대수', fmt(n.quantity.units)], ['공사기간', n.schedule.construction_months + '개월'], ['공사비', money(n.budget.construction_cost_eok * 1e4)],
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     $('json').value = JSON.stringify(o, null, 2);
-    renderNext(o);
+    renderNext();
   }
 
   // ---------- 3D ----------
@@ -386,20 +496,21 @@ export function mount(root) {
     catch (e) { $('warn3d').innerHTML = '<div class="warnbox">이 기기에서 WebGL을 쓸 수 없어 3D를 표시하지 못했습니다.</div>'; return; }
     renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(40, 1.6, 1, 20000);
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x445544, 0.55 * Math.PI); scene.add(hemi);
-    const sun = new THREE.DirectionalLight(0xffffff, 0.9 * Math.PI); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0005; scene.add(sun); scene.add(sun.target);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xcccccc }));
+    const hemi = new THREE.HemisphereLight(0xeef3f8, 0x9a9890, 0.75 * Math.PI); scene.add(hemi);
+    const sun = new THREE.DirectionalLight(0xfff3e6, 1.15 * Math.PI); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0005; scene.add(sun); scene.add(sun.target);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 1 }));
     ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
-    const site = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshLambertMaterial({ color: 0xeeeeee }));
+    const site = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 1 }));
     site.rotation.x = -Math.PI / 2; site.position.y = 0.05; site.receiveShadow = true; scene.add(site);
     const siteLine = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0x0b6e66 })); scene.add(siteLine);
     const northArrow = new THREE.Group(); scene.add(northArrow);
     const group = new THREE.Group(); scene.add(group);
     const box = new THREE.BoxGeometry(1, 1, 1); box.translate(0, 0.5, 0);
     const edges = new THREE.EdgesGeometry(box);
-    const mats = { res: new THREE.MeshLambertMaterial(), rental: new THREE.MeshLambertMaterial(), nonres: new THREE.MeshLambertMaterial() };
+    const mats = { res: new THREE.MeshStandardMaterial({ roughness: 0.8 }), rental: new THREE.MeshStandardMaterial({ roughness: 0.8 }), nonres: new THREE.MeshStandardMaterial({ roughness: 0.8 }) };
     const lineMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.75 });
     Object.assign(V, { ok: true, renderer, scene, camera, sun, hemi, ground, site, siteLine, group, box, edges, mats, lineMat, northArrow,
       orbit: { theta: -0.55, phi: 0.95, r: 800, tx: 0, ty: 0, tz: 0 }, extent: 500, need: true });
@@ -497,8 +608,8 @@ export function mount(root) {
     const d = V.extent * 2.5;
     V.sun.position.set(v[0] * d, Math.max(v[1], 0.02) * d, v[2] * d);
     V.sun.target.position.set(0, 0, 0);
-    V.sun.intensity = (alt > 0 ? 0.95 : 0) * Math.PI;
-    V.hemi.intensity = (alt > 0 ? 0.55 : 0.75) * Math.PI;
+    V.sun.intensity = (alt > 0 ? 1.15 : 0) * Math.PI;
+    V.hemi.intensity = (alt > 0 ? 0.75 : 0.95) * Math.PI;
     V.need = true;
   }
   function draw() {
@@ -516,7 +627,7 @@ export function mount(root) {
   // ---------- 갱신 ----------
   function refresh(opts = {}) {
     computeAll();
-    renderRank(); renderTable();
+    renderRank(); renderTable(); renderPick(); renderMatrix(); renderScatter();
     if (opts.site) { renderHead(); renderVars(); renderDossier(); } else syncVarValues();
     renderStats(); renderResult(); renderExport();
     rebuild3D(!!opts.site);
@@ -526,10 +637,20 @@ export function mount(root) {
   function schedule(site) { pendingSite = pendingSite || site; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; if (!alive) return; const s = pendingSite; pendingSite = false; refresh({ site: s }); }); }
 
   // 이벤트
-  function select(id) { if (!siteById[id] || id === state.sel) return; state.sel = id; schedule(true); }
+  function select(id, fromMap) {
+    if (!siteById[id]) return;
+    const s = siteById[id];
+    if (atlas) atlas.lookAt(s.lng, s.lat, Math.max(atlas.zoom, s.area > 5e5 ? 12.4 : 13.4));
+    if (id === state.sel) return;
+    state.sel = id; schedule(true);
+  }
   $('sites').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) select(b.dataset.id); });
-  $('map').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) select(b.dataset.id); });
-  $('map').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { const b = e.target.closest('[data-id]'); if (b) { e.preventDefault(); select(b.dataset.id); } } });
+  $('sites').addEventListener('pointerover', e => { const b = e.target.closest('[data-id]'); $('map').querySelectorAll('.at-pin').forEach(p => p.classList.toggle('hl', !!b && p.dataset.id === b.dataset.id)); });
+  $('sites').addEventListener('pointerleave', () => $('map').querySelectorAll('.at-pin.hl').forEach(p => p.classList.remove('hl')));
+  $('matrix').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) select(b.dataset.id); });
+  $('scatter').addEventListener('click', e => { const b = e.target.closest('[data-id]'); if (b) select(b.dataset.id); });
+  $('scatter').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { const b = e.target.closest('[data-id]'); if (b) { e.preventDefault(); select(b.dataset.id); } } });
+  root.addEventListener('click', e => { if (e.target.closest('[data-launch]')) launch(); });
   $('cmp').addEventListener('click', e => { const b = e.target.closest('tr[data-id]'); if (b) select(b.dataset.id); });
   $('weights').addEventListener('input', e => { const k = e.target.dataset.w; if (!k) return; state.w[k] = +e.target.value; $('wo-' + k).textContent = e.target.value; schedule(false); });
   $('vars').addEventListener('input', e => {
@@ -549,7 +670,7 @@ export function mount(root) {
   $('reset').addEventListener('click', () => { const s = siteById[state.sel]; state.params[s.id] = { ...s.p }; state.preset[s.id] = s.presets[0].key; state.g = { ...GLOBAL_DEFAULTS }; schedule(false); });
   $('allPlan').addEventListener('click', () => { SITES.forEach(s => { state.params[s.id] = { ...s.p, ...s.presets[0].p }; state.preset[s.id] = s.presets[0].key; }); schedule(false); });
   $('allPrivate').addEventListener('click', () => { SITES.forEach(s => { const pr = s.presets.find(x => x.key === 'private') || s.presets[s.presets.length - 1]; state.params[s.id] = { ...s.p, ...pr.p }; state.preset[s.id] = pr.key; }); schedule(false); });
-  root.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+  root.querySelectorAll('#view [data-view]').forEach(b => b.addEventListener('click', () => { setView(b.dataset.view); root.querySelectorAll('#view [data-view]').forEach(x => x.setAttribute('aria-pressed', String(x === b))); }));
   $('season').addEventListener('change', e => { state.season = +e.target.value; updateSun(); save(); });
   $('hour').addEventListener('input', e => { state.hour = +e.target.value; updateSun(); save(); });
   $('copy').addEventListener('click', () => {
@@ -566,27 +687,48 @@ export function mount(root) {
   // 시작
   $('season').value = String(state.season); $('hour').value = String(state.hour);
   renderWeights();
+  initMap();
   init3D();
   refresh({ site: true });
+  const offTheme = onThemeChange(() => atlas && atlas.theme()); cleanups.push(offTheme);
 
-  // ---------- 2단계로 넘기기 ----------
-  function renderNext(o) {
+  // ---------- 프로젝트 시작: 2단계로 넘기기 ----------
+  function handoffFor() {
     const s = siteById[state.sel], p = state.params[s.id], { f } = evals[s.id];
-    const box = $('nextCard');
     const pr = s.presets.find(x => x.key === state.preset[s.id]);
     const zoning = s.id === 'yongsan' ? 'gc' : 'semi';
     const mp = massParamsFromStage1({ siteId: s.id, units: f.units, avgUnit: p.avgUnit, rentalShare: p.rentalShare, maxFloors: p.maxFloors, zoning, resShare: p.resShare }, MASS_DEFAULTS);
-    box.innerHTML = `<div class="next-card"><b>2단계 매스 배치로 넘길 값</b>
-      <span>${s.name} · ${pr ? pr.label : '사용자 시나리오'} · 주거 <b class="mono">${fmt(mp.housingTarget)}</b>호 (1단계 ${fmt(f.units)}세대를 50호 단위로), 최고 ${mp.resMaxFloors}층, 평균 전용 ${p.avgUnit}㎡ → 59·84·114㎡ = ${mp.mix59}·${mp.mix84}·${mp.mix114}%, 공공임대 ${p.rentalShare}%</span>
-      <span><button class="btn" type="button" id="toMass">2단계 매스 배치로 →</button></span></div>`;
-    $('toMass').addEventListener('click', () => {
-      store.set({
-        handoff1: { siteId: s.id, siteName: s.name, preset: state.preset[s.id], presetLabel: pr ? pr.label : '사용자 시나리오', units: f.units, saleUnits: f.saleUnits, rentalUnits: f.rentalUnits,
-          avgUnit: p.avgUnit, rentalShare: p.rentalShare, far: p.far, maxFloors: p.maxFloors, profit: f.profit, roi: f.roi, at: new Date().toISOString(), stage1: o },
-        mass: mp, massFrom: 'stage1', site: { id: s.id, over: { netRatio: p.netRatio, resShare: p.resShare, units: f.units, maxFloors: p.maxFloors, far: p.far, avgUnit: p.avgUnit, rentalShare: p.rentalShare } },
-      });
-      location.hash = '#/mass';
+    return { s, p, f, pr, mp };
+  }
+  function renderNext() {
+    const { s, p, f, pr, mp } = handoffFor();
+    const items = [
+      ['택지', s.name, `${s.gu} ${s.dong}`],
+      ['시나리오', pr ? pr.label : '사용자 시나리오', `종합 ${scores[s.id].total.toFixed(0)}점 · ${order.indexOf(s.id) + 1}위`],
+      ['주거 목표', fmt(mp.housingTarget) + '호', `1단계 ${fmt(f.units)}세대를 50호 단위로`],
+      ['최고 층수', (mp.resMaxFloors || p.maxFloors) + '층', `용적률 ${fmt(p.far)}%`],
+      ['평형 구성', `${mp.mix59}·${mp.mix84}·${mp.mix114}%`, `59·84·114㎡ (평균 전용 ${p.avgUnit}㎡)`],
+      ['공공임대', p.rentalShare + '%', `임대 ${fmt(f.rentalUnits)}세대`],
+    ];
+    $('nextCard').innerHTML = `<div class="launch-card">
+      <div class="lc-l"><span class="label-sm">02 매스 배치로 넘길 값</span>
+        <dl class="lc-kv">${items.map(([k, v, sub]) => `<div><dt>${k}</dt><dd>${v}<small>${sub}</small></dd></div>`).join('')}</dl></div>
+      <div class="lc-r"><span class="label-sm">next · stage 02</span><b class="lc-t">매스 배치</b>
+        <p>실제 지도 위에 동을 배치하고 층수·평형·주동 형식을 바꿔 가며 일조·조망·인동간격을 검토합니다.</p>
+        <button class="btn big" type="button" data-launch>${withRo(s.name)} 프로젝트 시작 <span class="ar">→</span></button></div>
+    </div>`;
+  }
+  // '용산국제업무지구로', '태릉CC로', '부지로' (받침 있으면 '으로', ㄹ 받침은 '로')
+  function withRo(w) { const c = w.charCodeAt(w.length - 1); if (c < 0xac00 || c > 0xd7a3) return w + '로'; const j = (c - 0xac00) % 28; return w + (j && j !== 8 ? '으로' : '로'); }
+  function launch() {
+    const o = exportObj();
+    const { s, p, f, pr, mp } = handoffFor();
+    store.set({
+      handoff1: { siteId: s.id, siteName: s.name, preset: state.preset[s.id], presetLabel: pr ? pr.label : '사용자 시나리오', units: f.units, saleUnits: f.saleUnits, rentalUnits: f.rentalUnits,
+        avgUnit: p.avgUnit, rentalShare: p.rentalShare, far: p.far, maxFloors: p.maxFloors, profit: f.profit, roi: f.roi, at: new Date().toISOString(), stage1: o },
+      mass: mp, massFrom: 'stage1', site: { id: s.id, over: { netRatio: p.netRatio, resShare: p.resShare, units: f.units, maxFloors: p.maxFloors, far: p.far, avgUnit: p.avgUnit, rentalShare: p.rentalShare } },
     });
+    location.hash = '#/mass';
   }
   root.addEventListener('click', e => { const b = e.target.closest('[data-goto]'); if (b) select(b.dataset.goto); });
 

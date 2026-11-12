@@ -26,7 +26,7 @@ export function mount(root, arg) {
     <div class="actions"><a class="btn ghost" href="#/mass">← 02 매스</a><a class="btn" href="#/process">04 4D 공정 <span class="ar">→</span></a></div>
   </div>
   <div class="wrap p-sched">
-    <section class="s-sum" aria-label="요약"><div class="sec-title"><span class="n">03.1</span><h2>요약</h2><span class="hint" id="s-from"></span></div><div class="stats" id="s-stats" style="border:1px solid var(--ink);border-top-width:1px"></div></section>
+    <section class="s-sum" aria-label="요약"><div class="sec-title"><span class="n">03.1</span><h2>요약</h2><span class="hint" id="s-from"></span></div><div class="stats panel" id="s-stats"></div></section>
     <section class="s-bar" aria-label="동별 단면 바코드"><div class="sec-title"><span class="n">03.2</span><h2>동별 단면 바코드</h2><span class="hint">막대 하나가 동 하나, 가는 띠 하나가 층 하나입니다. 높이는 실제 층고 축척이고, 0선 아래는 블록 지하층입니다. 동을 누르면 오른쪽 분해도와 아래 표가 그 동으로 바뀝니다.</span></div>
       <div class="panel pad"><div class="mixleg" id="s-bar-leg" style="grid-template-columns:repeat(auto-fit,minmax(104px,max-content));margin-bottom:10px"></div><div class="barcode" id="s-bar"></div></div></section>
     <section class="panel pad s-iso" aria-label="분해 엑소노메트릭"><div class="sec-h"><h2><span class="n">03.3</span>층 구성 분해도</h2><span class="hint" id="s-iso-h"></span></div><div class="iso" id="s-iso"></div></section>

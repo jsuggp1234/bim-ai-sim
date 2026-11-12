@@ -8,10 +8,12 @@ import { buildContext } from './scene/context3d.js';
 import { createBim } from './scene/bim3d.js';
 import { FACADE_U } from './scene/facade.js';
 import { readPalette } from './scene/palette.js';
+import { createLook } from './scene/look.js';
 import { fallbackFor, analysisBoxes } from './ctxload.js';
 import { OSM_ATTRIB } from './osm.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
+const SUN_I = 4.6, MOON_I = 0.45;
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 export function createViewer(stage, { onPick, onView, hero = false, lite = false } = {}) {
@@ -27,7 +29,8 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0xffffff, 3600, 12000);
+  // 하늘·환경광·안개·톤 매핑·오클루전은 look이 맡는다
+  const look = createLook(renderer, scene, { lite: LITE });
   const persp = new THREE.PerspectiveCamera(32, 1.6, 2, 40000);
   const ortho = new THREE.OrthographicCamera(-1000, 1000, 600, -600, -20000, 40000);
   let camera = persp;
@@ -38,8 +41,9 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   controls.screenSpacePanning = false;
   controls.autoRotateSpeed = 0.35;
 
-  const hemi = new THREE.HemisphereLight(0xffffff, 0xd8d8d2, 1.45 * Math.PI); scene.add(hemi);
-  const sun = new THREE.DirectionalLight(0xfff8ee, 1.25 * Math.PI);
+  // 확산광은 하늘을 구운 환경광이 맡고, 반구광은 밤(어두운 화면)에만 약하게 보탠다
+  const hemi = new THREE.HemisphereLight(0xffffff, 0xd8d8d2, 0); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xfff4e6, SUN_I);
   sun.castShadow = true;
   const ms = Math.min(LITE ? 2048 : 4096, renderer.capabilities.maxTextureSize || 2048);
   sun.shadow.mapSize.set(ms, ms);
@@ -91,7 +95,7 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     mode = m; agg = a;
     if (!gen) return;
     const prog = !!(build && build.floor);
-    if (prog) bim.paint(null);
+    if (prog || m === 'real') bim.paint(null);
     else if (m === 'model' || m === 'ctx') bim.paint(() => P.model);
     else if (m === 'use' || !agg) {
       // 용도 색을 외벽 바탕색과 섞어 모형처럼 (창 무늬가 보이게)
@@ -132,8 +136,9 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     const up = w[1] > 0;
     sun.position.set(w[0] * 6000, Math.max(w[1], 0.02) * 6000, w[2] * 6000);
     sun.target.position.set(0, 0, 0);
-    sun.intensity = (up ? 1.25 : 0) * Math.PI;
-    hemi.intensity = (up ? 1.45 : 1.8) * Math.PI;
+    sunDir.set(w[0], Math.max(w[1], 0.02), w[2]).normalize(); sunUp = up;
+    lightLevels();
+    scheduleSky();
     dirty = true;
     return w;
   }
@@ -283,12 +288,25 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   }
 
   // ---------- 테마 ----------
+  const sunDir = new THREE.Vector3(-0.4, 0.6, 0.5).normalize();
+  let sunUp = true, skyT = 0;
+  // 밝은 화면은 낮(해 + 하늘빛), 어두운 화면은 밤(푸른 달빛 + 창 불빛)
+  function lightLevels() {
+    if (P.dark) { sun.intensity = MOON_I; sun.color.set(0x9fb4d8); hemi.intensity = 0.55; }
+    else { sun.intensity = sunUp ? SUN_I : 0; sun.color.set(0xfff4e6); hemi.intensity = sunUp ? 0 : 0.4; }
+  }
+  function scheduleSky() {
+    clearTimeout(skyT);
+    skyT = setTimeout(() => { look.applyTheme(P, sunDir, sunUp); dirty = true; }, 90);
+  }
   function applyTheme() {
     P = readPalette();
-    scene.background = P.scene.clone(); scene.fog.color.copy(P.scene);
+    scene.background = null;
+    look.applyTheme(P, sunDir, sunUp);
+    lightLevels();
     FACADE_U.uGlass.value.copy(P.glass); FACADE_U.uFilm.value.copy(P.film); FACADE_U.uInterior.value.copy(P.interior);
     FACADE_U.uLit.value.copy(P.lit); FACADE_U.uFrame.value.copy(P.frame); FACADE_U.uNight.value = P.dark ? 1 : 0;
-    hemi.color.set(P.dark ? 0x8d96a3 : 0xffffff); hemi.groundColor.set(P.dark ? 0x24272c : 0xd9d6cf);
+    hemi.color.set(P.dark ? 0x6f7f99 : 0xdfe9f2); hemi.groundColor.set(P.dark ? 0x1a1d22 : 0xcfcac2);
     lineMat.color.copy(P.accent);
     if (ctx3d) ctx3d.update(P);
     bim.update(P);
@@ -304,6 +322,7 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     if (!w || !h) return;
     const pr = renderer.getPixelRatio();
     if (canvas.width !== Math.round(w * pr) || canvas.height !== Math.round(h * pr)) renderer.setSize(w, h, false);
+    look.setSize(w, h, pr);
     renderAt(w / h);
     updateLabels(w, h);
     compassG.setAttribute('transform', `rotate(${(controls.getAzimuthalAngle() * 180 / Math.PI).toFixed(1)})`);
@@ -317,7 +336,7 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     const dist = camera.position.distanceTo(controls.target);
     persp.near = Math.max(0.5, Math.min(25, dist / 250)); persp.aspect = asp; persp.updateProjectionMatrix();
     ortho.left = -orthoHalf * asp; ortho.right = orthoHalf * asp; ortho.top = orthoHalf; ortho.bottom = -orthoHalf; ortho.updateProjectionMatrix();
-    renderer.render(scene, camera);
+    look.render(camera);
   }
   function frame() {
     if (!alive) return;
@@ -348,7 +367,7 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
         camera.updateProjectionMatrix(); controls.update();
       } else setView(kind);
       const pr = renderer.getPixelRatio();
-      renderer.setPixelRatio(1); renderer.setSize(w, h, false);
+      renderer.setPixelRatio(1); renderer.setSize(w, h, false); look.setSize(w, h, 1);
       renderAt(w / h);
       const url = canvas.toDataURL(type, q);
       renderer.setPixelRatio(pr);
@@ -369,7 +388,8 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   requestAnimationFrame(frame);
 
   function dispose() {
-    alive = false; ro.disconnect(); controls.dispose();
+    alive = false; ro.disconnect(); controls.dispose(); clearTimeout(skyT);
+    look.dispose();
     if (ctx3d) ctx3d.dispose();
     bim.dispose();
     renderer.dispose(); renderer.forceContextLoss();
