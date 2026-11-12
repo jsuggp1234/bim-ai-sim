@@ -1,14 +1,14 @@
 // 단계 사이 계산을 한곳에서: 2단계 배치 → 3단계 물량 → 4단계 공정 → 5단계 예산
-import { DEFAULTS as MASS_D, generate } from './yongsan/massing.js';
-import { quantities } from './yongsan/quantities.js';
-import { schedule, P4_DEFAULTS } from './yongsan/process.js';
-import { estimate, P5_DEFAULTS } from './yongsan/cost.js';
-import { store } from './store.js';
+import { DEFAULTS as MASS_D, generate } from './sim/massing.js';
+import { quantities } from './sim/quantities.js';
+import { schedule, P4_DEFAULTS } from './sim/process.js';
+import { estimate, P5_DEFAULTS } from './sim/cost.js';
+import { store, currentSite } from './store.js';
 
 let memo = {};
 export function pipeline(over = {}) {
   const s = store.get();
-  const mp = { ...MASS_D, ...(s.mass || {}), ...(over.mass || {}) };
+  const mp = { ...MASS_D, ...(s.mass || {}), ...(over.mass || {}), site: currentSite(s) };
   const pp = { ...P4_DEFAULTS, ...(s.proc || {}), ...(over.proc || {}) };
   const cp = { ...P5_DEFAULTS, ...(s.cost || {}), ...(over.cost || {}) };
   const km = JSON.stringify(mp), kp = JSON.stringify(pp), kc = JSON.stringify(cp);

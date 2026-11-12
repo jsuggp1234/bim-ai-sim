@@ -3,12 +3,12 @@ import * as THREE from 'three';
 import { SITES, GLOBAL_DEFAULTS, GLOBAL_META, SITE_META, PRICE_SOURCES, evaluate, sensitivity, scoreSite } from '../stage1/engine.js';
 import { SEOUL } from '../stage1/seoulmap.js';
 import { store, massParamsFromStage1 } from '../store.js';
-import { DEFAULTS as MASS_DEFAULTS } from '../yongsan/massing.js';
+import { DEFAULTS as MASS_DEFAULTS } from '../sim/massing.js';
 
 export const title = '1단계 택지 선정';
 
 const HEAD = `<div class="page-h">
-  <div><span class="label-sm">Stage 01 / 05 · Site selection</span><h1>서울 공동주택 택지 사업성 비교</h1>
+  <div><span class="label-sm">stage 01 / 05 · site selection</span><h1>서울 공동주택 택지 사업성 비교 <span class="dim">(후보지 8곳)</span></h1>
   <p>개발이 거론되거나 논란 중인 서울 택지 8곳을 같은 기준으로 비교합니다. 변수를 바꾸면 세대수, 사업성, 순위가 바로 다시 계산됩니다. 용산국제업무지구를 고르면 2단계 상세 매스 배치로 넘어갈 수 있습니다.</p></div>
   <div class="actions"><a class="btn ghost" href="#/">처음 화면</a><a class="btn" href="#/mass">02 매스 배치 <span class="ar">→</span></a></div>
 </div>`;
@@ -573,21 +573,17 @@ export function mount(root) {
   function renderNext(o) {
     const s = siteById[state.sel], p = state.params[s.id], { f } = evals[s.id];
     const box = $('nextCard');
-    if (s.id !== 'yongsan') {
-      box.innerHTML = `<div class="next-card off"><b>2단계 상세 매스 배치</b><span>현재는 용산국제업무지구만 상세 매스(블록·동·층고·일조·조망)를 지원합니다. 다른 후보지는 단순 매스와 사업성까지 비교할 수 있습니다.</span>
-        <span><button class="chipbtn" type="button" data-goto="yongsan">용산국제업무지구 선택</button></span></div>`;
-      return;
-    }
     const pr = s.presets.find(x => x.key === state.preset[s.id]);
-    const mp = massParamsFromStage1({ units: f.units, avgUnit: p.avgUnit, rentalShare: p.rentalShare }, MASS_DEFAULTS);
+    const zoning = s.id === 'yongsan' ? 'gc' : 'semi';
+    const mp = massParamsFromStage1({ siteId: s.id, units: f.units, avgUnit: p.avgUnit, rentalShare: p.rentalShare, maxFloors: p.maxFloors, zoning, resShare: p.resShare }, MASS_DEFAULTS);
     box.innerHTML = `<div class="next-card"><b>2단계 매스 배치로 넘길 값</b>
-      <span>${pr ? pr.label : '사용자 시나리오'} · 주거 <b class="mono">${fmt(mp.housingTarget)}</b>호 (1단계 ${fmt(f.units)}세대를 100호 단위로), 평균 전용 ${p.avgUnit}㎡ → 59·84·114㎡ = ${mp.mix59}·${mp.mix84}·${mp.mix114}%, 공공임대 ${p.rentalShare}%</span>
+      <span>${s.name} · ${pr ? pr.label : '사용자 시나리오'} · 주거 <b class="mono">${fmt(mp.housingTarget)}</b>호 (1단계 ${fmt(f.units)}세대를 50호 단위로), 최고 ${mp.resMaxFloors}층, 평균 전용 ${p.avgUnit}㎡ → 59·84·114㎡ = ${mp.mix59}·${mp.mix84}·${mp.mix114}%, 공공임대 ${p.rentalShare}%</span>
       <span><button class="btn" type="button" id="toMass">2단계 매스 배치로 →</button></span></div>`;
     $('toMass').addEventListener('click', () => {
       store.set({
         handoff1: { siteId: s.id, siteName: s.name, preset: state.preset[s.id], presetLabel: pr ? pr.label : '사용자 시나리오', units: f.units, saleUnits: f.saleUnits, rentalUnits: f.rentalUnits,
           avgUnit: p.avgUnit, rentalShare: p.rentalShare, far: p.far, maxFloors: p.maxFloors, profit: f.profit, roi: f.roi, at: new Date().toISOString(), stage1: o },
-        mass: mp, massFrom: 'stage1',
+        mass: mp, massFrom: 'stage1', site: { id: s.id, over: { netRatio: p.netRatio, resShare: p.resShare, units: f.units, maxFloors: p.maxFloors, far: p.far, avgUnit: p.avgUnit, rentalShare: p.rentalShare } },
       });
       location.hash = '#/mass';
     });

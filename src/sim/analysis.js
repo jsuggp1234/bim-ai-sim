@@ -1,6 +1,6 @@
 // 일조·조망 분석 (순수 함수, 웹 워커에서 실행)
 // 일조: 동지 진태양시 08~16시 10분 간격. 기준 = 09~15시 연속 2시간 이상 또는 08~16시 합계 4시간 이상
-import { dirToSite, RIVER_TARGETS, NAMSAN, CONTEXT } from './plan.js';
+// 조망: plan.views.water(수변 표본점)·plan.views.peak(산·랜드마크 한 점). 택지마다 다르다.
 
 export const LAT = 37.53;
 const STEP_MIN = 10;
@@ -12,8 +12,8 @@ export function sunWorld(declDeg, solarHour, latDeg = LAT) {
   const U = Math.sin(f) * Math.sin(d) + Math.cos(f) * Math.cos(d) * Math.cos(H);
   return [E, U, -N]; // x 동, y 위, z 남
 }
-export function sunAltAz(declDeg, solarHour) {
-  const [x, y, z] = sunWorld(declDeg, solarHour);
+export function sunAltAz(declDeg, solarHour, latDeg = LAT) {
+  const [x, y, z] = sunWorld(declDeg, solarHour, latDeg);
   const alt = Math.asin(y), az = (Math.atan2(x, -z) * 180 / Math.PI + 360) % 360; // 북에서 시계방향
   return { alt: alt * 180 / Math.PI, az };
 }
@@ -49,11 +49,11 @@ function packBoxes(list) {
   return arr;
 }
 
-export function sunSteps(decl) {
+export function sunSteps(decl, plan) {
   const steps = [];
   for (let m = 8 * 60; m <= 16 * 60; m += STEP_MIN) {
-    const h = m / 60, w = sunWorld(decl, h);
-    steps.push({ h, s: dirToSite(w), inCore: h >= 9 - 1e-9 && h <= 15 + 1e-9 });
+    const h = m / 60, w = sunWorld(decl, h, plan.lat || LAT);
+    steps.push({ h, s: plan.dirToSite(w), inCore: h >= 9 - 1e-9 && h <= 15 + 1e-9 });
   }
   return steps;
 }
@@ -75,37 +75,39 @@ function sunAt(faces, y, steps, boxes, n) {
   return { total: total * STEP_MIN, cont: best * STEP_MIN };
 }
 
-function viewAt(faces, y, boxes, n) {
+function viewAt(faces, y, boxes, n, views) {
   let river = 0, cand = 0, namsan = false;
+  const targets = views.water ? views.water.targets : [], PK = views.peak ? views.peak.pt : null;
   for (const f of faces) {
-    for (const t of RIVER_TARGETS) {
+    for (const t of targets) {
       const du = t[0] - f[0], dv = t[1] - f[1], dy = t[2] - y, L = Math.hypot(du, dv, dy), Lh = Math.hypot(du, dv);
       if ((du * f[2] + dv * f[3]) / Lh < 0.5) continue; // 창 정면 ±60°
       cand++;
       if (!hitAny(boxes, n, f[0], f[1], y, du / L, dv / L, dy / L, L, -1)) river++;
     }
-    if (!namsan) {
-      const du = NAMSAN[0] - f[0], dv = NAMSAN[1] - f[1], dy = NAMSAN[2] - y, L = Math.hypot(du, dv, dy), Lh = Math.hypot(du, dv);
+    if (!namsan && PK) {
+      const du = PK[0] - f[0], dv = PK[1] - f[1], dy = PK[2] - y, L = Math.hypot(du, dv, dy), Lh = Math.hypot(du, dv);
       if ((du * f[2] + dv * f[3]) / Lh > 0.34 && !hitAny(boxes, n, f[0], f[1], y, du / L, dv / L, dy / L, L, -1)) namsan = true;
     }
   }
   return { river, cand, namsan };
 }
 
-// units: [{faces:[[u,v,nu,nv],...], y}]  ctxSamples: [{faces, y, bid}]
-export function analyze({ projectBoxes, units, ctxSamples, decl = -23.44 }) {
-  const ctxBoxes = CONTEXT.map(c => ({ u0: c.u0, u1: c.u1, v0: c.v0, v1: c.v1, y0: 0, y1: c.y1 }));
+// units: [{faces:[[u,v,nu,nv],...], y}]  ctxSamples: [{faces, y, bid}]  context: 주변 건물 [{u0,u1,v0,v1,y1} 또는 {cu,cv,w,d,a,y1}]
+export function analyze({ projectBoxes, units, ctxSamples, context, plan, decl = -23.44 }) {
+  const ctxBoxes = (context || plan.CONTEXT).map(c => (c.cu != null ? { cu: c.cu, cv: c.cv, w: c.w, d: c.d, a: c.a || 0, y0: 0, y1: c.y1 } : { u0: c.u0, u1: c.u1, v0: c.v0, v1: c.v1, y0: 0, y1: c.y1 }));
   const all = packBoxes([...projectBoxes, ...ctxBoxes]);
   const nAll = projectBoxes.length + ctxBoxes.length;
   const onlyCtx = packBoxes(ctxBoxes);
-  const steps = sunSteps(decl);
+  const steps = sunSteps(decl, plan);
+  const views = plan.views || {};
   const n = units.length;
   const total = new Uint16Array(n), cont = new Uint16Array(n), river = new Uint8Array(n), riverCand = new Uint8Array(n), namsan = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     const u = units[i];
     const s = sunAt(u.faces, u.y, steps, all, nAll);
     total[i] = s.total; cont[i] = s.cont;
-    const v = viewAt(u.faces, u.y, all, nAll);
+    const v = viewAt(u.faces, u.y, all, nAll, views);
     river[i] = Math.min(255, v.river); riverCand[i] = Math.min(255, v.cand); namsan[i] = v.namsan ? 1 : 0;
   }
   // 주변 주거 일조 영향: 사업 전(주변 건물만) vs 사업 후
@@ -141,14 +143,22 @@ export function unitSamples(bldgs) {
   return units;
 }
 
-// 주변 주거 건물의 남측 창면(3층 간격, 폭 방향 3점)
-export function contextSamples() {
+// 주변 주거 건물의 남측 창면(3층 간격, 폭 방향 3점). 회전 상자는 남쪽을 더 많이 향한 긴 면을 쓴다
+export function contextSamples(context) {
   const out = [];
-  CONTEXT.forEach((c, ci) => {
+  (context || []).forEach((c, ci) => {
     if (c.use !== 'res') return;
-    for (let fl = 1; fl <= c.floors; fl += 3) {
+    const floors = c.floors || Math.max(1, Math.round(c.y1 / 2.9));
+    let pts;
+    if (c.cu != null) {
+      const ca = Math.cos(c.a || 0), sa = Math.sin(c.a || 0);
+      // 로컬 +y 면의 바깥 법선 (-sa, ca), -y 면은 반대. 남쪽(+v)을 더 향한 면을 고른다
+      const sgn = ca >= 0 ? 1 : -1, nu = -sa * sgn, nv = ca * sgn;
+      pts = [0.2, 0.5, 0.8].map(t => { const lx = (t - 0.5) * c.w, ly = sgn * (c.d / 2 + 0.3); return [c.cu + lx * ca - ly * sa, c.cv + lx * sa + ly * ca, nu, nv]; });
+    } else pts = [0.2, 0.5, 0.8].map(fu => [c.u0 + (c.u1 - c.u0) * fu, c.v1 + 0.3, 0, 1]);
+    for (let fl = 1; fl <= floors; fl += 3) {
       const y = (fl - 1) * 2.9 + 1.2;
-      [0.2, 0.5, 0.8].forEach(fu => out.push({ bid: ci, y, faces: [[c.u0 + (c.u1 - c.u0) * fu, c.v1 + 0.3, 0, 1]] }));
+      pts.forEach(f => out.push({ bid: ci, y, faces: [f] }));
     }
   });
   return out;

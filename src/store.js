@@ -1,7 +1,8 @@
 // 단계 사이에 넘기는 값과 각 단계의 설정을 한곳에 보관한다 (브라우저 저장소)
+import { resolveSite } from './sim/sites.js';
 const KEY = 'bim-sim-pipeline-v1';
 const listeners = new Set();
-const blank = () => ({ handoff1: null, mass: null, massFrom: null, proc: null, cost: null, seen3: false });
+const blank = () => ({ handoff1: null, site: null, useMap: true, mass: null, massFrom: null, proc: null, cost: null, seen3: false });
 
 function load() {
   try {
@@ -37,9 +38,28 @@ export function mixForAverage(avgUnit, officetelShare) {
   return { mix59: r[0], mix84: r[1], mix114: r[2], aptAvg: t };
 }
 
-// 1단계 결과 → 2단계 변수
+// 1단계 결과 → 2단계 변수 (택지 성격: 최고 층수·용도지역·비주거 비율을 함께 넘긴다)
 export function massParamsFromStage1(h, defaults) {
-  const housingTarget = clamp(Math.round(h.units / 100) * 100, 2000, 14000);
-  const mix = mixForAverage(h.avgUnit, defaults.officetelShare);
-  return { ...defaults, housingTarget, mix59: mix.mix59, mix84: mix.mix84, mix114: mix.mix114, rentalShare: clamp(Math.round(h.rentalShare), 0, 60) };
+  const housingTarget = clamp(Math.round(h.units / 50) * 50, 100, 30000);
+  const yongsan = !h.siteId || h.siteId === 'yongsan';
+  const officetelShare = yongsan ? defaults.officetelShare : (h.resShare != null && h.resShare < 100 ? 30 : 0);
+  const mix = mixForAverage(h.avgUnit, officetelShare);
+  const out = { ...defaults, housingTarget, officetelShare, mix59: mix.mix59, mix84: mix.mix84, mix114: mix.mix114, rentalShare: clamp(Math.round(h.rentalShare), 0, 100) };
+  if (!yongsan && h.maxFloors) {
+    const mf = clamp(Math.round(h.maxFloors), 7, 130);
+    Object.assign(out, { resMaxFloors: mf, riverFrontMax: clamp(Math.round(mf * 0.75), 5, mf), skylineWest: 80, typology: mf <= 15 ? 'slab' : 'tower', podiumRes: mf <= 15 ? 1 : 2 });
+    if (h.zoning) out.resZone = h.zoning;
+  }
+  return out;
+}
+
+// 지금 고른 택지 (선택이 없으면 1단계에서 넘긴 택지, 그것도 없으면 용산)
+export function currentSite(s = state) {
+  const sel = s.site || (s.handoff1 && s.handoff1.siteId ? { id: s.handoff1.siteId } : null);
+  return resolveSite(sel);
+}
+// 택지 기본값으로 시작하는 2단계 변수
+export function paramsForSite(site, defaults) {
+  if (site.id === 'yongsan') return { ...defaults };
+  return massParamsFromStage1({ siteId: site.id, units: site.units, avgUnit: site.avgUnit, rentalShare: site.rentalShare, maxFloors: site.maxFloors, zoning: site.zoning, resShare: site.resShare }, defaults);
 }

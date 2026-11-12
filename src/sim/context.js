@@ -1,7 +1,9 @@
 // 광역 맥락(화면을 채우는 배경): 한강 양안·여의도·노량진·흑석·이촌·원효로·마포·서울역·용산공원·남산
-// 실제 건물 데이터(OpenStreetMap)를 이 환경에서 받을 수 없어, 알려진 지리를 바탕으로 구역마다 건물 유형과 층수를 정해 절차적으로 만든다.
-// 일조·조망 분석에는 쓰지 않는다(분석은 plan.js의 가까운 맥락만 사용).
-import { CONTEXT, NAMSAN } from './plan.js';
+// 지도(OpenStreetMap)를 받지 못할 때 쓰는 용산 대체 맥락. 알려진 지리를 바탕으로 구역마다 건물 유형과 층수를 정해 절차적으로 만든다.
+import { makePlan } from './plan.js';
+import { siteFrom } from './sites.js';
+const YP = makePlan(siteFrom('yongsan'));
+const CONTEXT = YP.CONTEXT, NAMSAN = YP.views.peak.pt;
 
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 

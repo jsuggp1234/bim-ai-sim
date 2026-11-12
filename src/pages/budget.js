@@ -1,6 +1,6 @@
 // 5단계: 5D 예산 — 층별 물량 × 공종 단가, 4D 공정에 얹은 월별 기성과 누계 S커브
-import { P5_DEFAULTS, P5_META } from '../yongsan/cost.js';
-import { dateAt, ym } from '../yongsan/process.js';
+import { P5_DEFAULTS, P5_META } from '../sim/cost.js';
+import { dateAt, ym } from '../sim/process.js';
 import { SITES, GLOBAL_DEFAULTS, evaluate } from '../stage1/engine.js';
 import { store } from '../store.js';
 import { pipeline, fmt, won, tip, download, csv } from '../pipeline.js';
@@ -31,7 +31,7 @@ export function mount(root) {
 
   root.innerHTML = `
   <div class="page-h">
-    <div><span class="label-sm">Stage 05 / 05 · 5D cost</span><h1>5D 예산과 현금흐름</h1>
+    <div><span class="label-sm">stage 05 / 05 · 5d cost</span><h1>5D 예산과 현금흐름 <span class="dim">(${R.gen.plan.site.name})</span></h1>
     <p>3단계 층별 물량(바닥면적·외벽·굴토·흙막이·지하층)에 공종별 단가를 곱해 직접공사비를 만들고, 4단계 공정의 작업 기간에 나눠 얹어 월별 기성과 누계 S커브를 그립니다. 단가는 2026년 기준이며 작업 시점까지 물가상승을 반영합니다.</p></div>
     <div class="actions"><a class="btn ghost" href="#/process">← 04 공정</a><a class="btn ghost" href="#/">처음 화면</a></div>
   </div>
@@ -61,11 +61,12 @@ export function mount(root) {
   // ---------- 1단계 기준 ----------
   function stage1() {
     const h = store.get().handoff1;
-    if (h && h.stage1 && h.siteId === 'yongsan') {
+    const sid = R.gen.plan.site.id;
+    if (h && h.stage1 && h.siteId === sid) {
       const n = h.stage1.next_stage_inputs;
       return { label: `1단계 ${h.presetLabel}`, cost: n.budget.construction_cost_eok * 1e4, gfa: n.quantity.gfa_total_m2, months: n.schedule.construction_months, unit: n.budget.unit_cost_manwon_per_py };
     }
-    const s = SITES.find(x => x.id === 'yongsan'), pr = s.presets[0];
+    const s = SITES.find(x => x.id === sid) || SITES.find(x => x.id === 'yongsan'), pr = s.presets[0];
     const e = evaluate(s, { ...s.p, ...pr.p }, GLOBAL_DEFAULTS);
     return { label: `1단계 기본값 (${pr.label})`, cost: e.f.cost.construction, gfa: e.f.gfaTotal, months: e.f.constMonths, unit: GLOBAL_DEFAULTS.constUnit };
   }
@@ -218,7 +219,7 @@ export function mount(root) {
       const { E, S } = R;
       const rows = [['월', '연월', ...GROUPS.map(g => g.name + '_만원'), '합계_만원', '누계_만원', '누계_%']];
       E.flow.forEach(f => { const o = {}; Object.entries(f.by).forEach(([c, v]) => { const g = groupOf(c); if (g) o[g.key] = (o[g.key] || 0) + v; }); rows.push([f.m + 1, ym(dateAt(S.t0, f.m * M)), ...GROUPS.map(g => Math.round(o[g.key] || 0)), Math.round(f.total), Math.round(f.cum), (f.cum / E.total * 100).toFixed(2)]); });
-      download('yongsan-5d-cashflow.csv', csv(rows), 'text/csv;charset=utf-8');
+      download(`${R.gen.plan.site.id}-5d-cashflow.csv`, csv(rows), 'text/csv;charset=utf-8');
     }
     if (e.target.id === 'b-csv-i') {
       const { E, gen } = R;
@@ -226,7 +227,7 @@ export function mount(root) {
       E.items.forEach(it => { const b = it.bi != null ? gen.bldgs[it.bi].id : it.block + ' (블록)'; const k = `${it.block}|${b}|${it.cat}`; agg.set(k, (agg.get(k) || 0) + it.amount); });
       const rows = [['블록', '동', '공종', '공종 그룹', '직접공사비_만원']];
       [...agg.entries()].forEach(([k, v]) => { const [bl, b, c] = k.split('|'); rows.push([bl, b, c, groupOf(c).name, Math.round(v)]); });
-      download('yongsan-5d-items.csv', csv(rows), 'text/csv;charset=utf-8');
+      download(`${R.gen.plan.site.id}-5d-items.csv`, csv(rows), 'text/csv;charset=utf-8');
     }
     if (e.target.id === 'b-json') {
       const { E, S, mp, pp, cp } = R; const r = (v) => Math.round(v);
@@ -235,7 +236,7 @@ export function mount(root) {
         schedule: { start: ym(S.t0), end: ym(dateAt(S.t0, S.end)), months: S.months },
         by_category: Object.fromEntries(Object.entries(E.byCat).map(([k, v]) => [k, r(v)])), by_block: Object.fromEntries(Object.entries(E.byBlock).map(([k, v]) => [k, r(v)])),
         monthly: E.flow.map(f => ({ month: f.m + 1, ym: ym(dateAt(S.t0, f.m * M)), total: r(f.total), cumulative: r(f.cum) })) };
-      download('yongsan-5d-cost.json', JSON.stringify(o, null, 2), 'application/json');
+      download(`${R.gen.plan.site.id}-5d-cost.json`, JSON.stringify(o, null, 2), 'application/json');
     }
   });
 

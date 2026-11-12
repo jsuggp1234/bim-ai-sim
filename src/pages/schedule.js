@@ -1,6 +1,5 @@
 // 3단계: 동·층별 일람표 (층고·FL·면적·세대) — 공정·예산 산정 물량의 입력
-import { USE_LABEL, FORMS } from '../yongsan/massing.js';
-import { ZONES } from '../yongsan/plan.js';
+import { USE_LABEL, FORMS } from '../sim/massing.js';
 import { store } from '../store.js';
 import { pipeline, fmt, download, csv, tip } from '../pipeline.js';
 
@@ -22,7 +21,7 @@ export function mount(root, arg) {
 
   root.innerHTML = `
   <div class="page-h">
-    <div><span class="label-sm">Stage 03 / 05 · Floor schedule</span><h1>동·층별 일람표</h1>
+    <div><span class="label-sm">stage 03 / 05 · floor schedule</span><h1>동·층별 일람표 <span class="dim">(${gen.plan.site.name})</span></h1>
     <p>2단계 매스 배치안의 모든 동을 층 단위로 펼쳤습니다. 층고, 바닥 레벨(FL), 바닥면적, 세대수, 외벽 면적과 지하 굴토 물량이 4단계 공정과 5단계 예산의 입력이 됩니다. 2단계에서 변수를 바꾸면 이 표도 바뀝니다.</p></div>
     <div class="actions"><a class="btn ghost" href="#/mass">← 02 매스</a><a class="btn" href="#/process">04 4D 공정 <span class="ar">→</span></a></div>
   </div>
@@ -97,7 +96,7 @@ export function mount(root, arg) {
     const body = list.map(b => {
       const typ = typLine(b), ref = b.floors.filter(f => f.use === 'refuge');
       const open = ui.open.has(b.id);
-      const main = `<tr class="b${open ? ' open' : ''}${gen.bldgs.indexOf(b) === ui.sel ? ' sel' : ''}" data-b="${b.id}" id="row-${b.id}" tabindex="0" aria-expanded="${open}"><td class="mono">${b.id}</td><td>${b.block} · ${ZONES[b.zone].name}</td><td>${KIND[b.kind]}</td>
+      const main = `<tr class="b${open ? ' open' : ''}${gen.bldgs.indexOf(b) === ui.sel ? ' sel' : ''}" data-b="${b.id}" id="row-${b.id}" tabindex="0" aria-expanded="${open}"><td class="mono">${b.id}</td><td>${b.block} · ${gen.zones[b.zone].name}</td><td>${KIND[b.kind]}</td>
         <td>${b.kind === 'apt' ? `${b.formName || ''} · ${b.typeName}` : b.typeName || '—'}</td>
         <td>${b.kind === 'basement' ? '—' : b.storeys + '층'}</td><td>${b.kind === 'basement' ? 'B' + b.basementLv : '—'}</td><td>${b.kind === 'basement' ? '−' + fmt(-b.floors[b.floors.length - 1].y0, 1) : fmt(b.height, 1)}</td>
         <td>${fmt(b.gfa)}</td><td>${b.units ? fmt(b.units) : '—'}</td><td>${fmt(typ.area, 0)}</td><td>${fmt(typ.h, 2)}</td><td>${b.kind === 'basement' ? '—' : fmt(b.floors[0].h, 2)}</td>
@@ -122,13 +121,13 @@ export function mount(root, arg) {
   // 내려받기
   $('s-csv-floor').addEventListener('click', () => {
     const rows = [['동', '블록', '존', '동 용도', '층', '층 용도', '층고_m', 'FL_m', '바닥면적_m2', '세대', '외벽면적_m2']];
-    gen.bldgs.forEach(b => b.floors.forEach(f => rows.push([b.id, b.block, ZONES[b.zone].name, KIND[b.kind], f.name, USE_LABEL[f.use] || f.use, f.h.toFixed(2), f.y0.toFixed(2), f.area.toFixed(1), f.units, b.kind === 'basement' ? 0 : Q.facadeOf(b, f).toFixed(1)])));
-    download('yongsan-floors.csv', csv(rows), 'text/csv;charset=utf-8');
+    gen.bldgs.forEach(b => b.floors.forEach(f => rows.push([b.id, b.block, gen.zones[b.zone].name, KIND[b.kind], f.name, USE_LABEL[f.use] || f.use, f.h.toFixed(2), f.y0.toFixed(2), f.area.toFixed(1), f.units, b.kind === 'basement' ? 0 : Q.facadeOf(b, f).toFixed(1)])));
+    download(`${gen.plan.site.id}-floors.csv`, csv(rows), 'text/csv;charset=utf-8');
   });
   $('s-csv-bldg').addEventListener('click', () => {
     const rows = [['동', '블록', '존', '용도', '형식', '평형', '지상층', '지하층', '높이_m', '연면적_m2', '세대', '외벽면적_m2', '건축면적_m2']];
-    gen.bldgs.forEach(b => rows.push([b.id, b.block, ZONES[b.zone].name, KIND[b.kind], b.formName || '', b.typeName || '', b.kind === 'basement' ? 0 : b.storeys, b.basementLv, b.height.toFixed(1), b.gfa.toFixed(0), b.units, Q.facadeOfBldg(b).toFixed(0), ((b.rect.u1 - b.rect.u0) * (b.rect.v1 - b.rect.v0)).toFixed(1)]));
-    download('yongsan-buildings.csv', csv(rows), 'text/csv;charset=utf-8');
+    gen.bldgs.forEach(b => rows.push([b.id, b.block, gen.zones[b.zone].name, KIND[b.kind], b.formName || '', b.typeName || '', b.kind === 'basement' ? 0 : b.storeys, b.basementLv, b.height.toFixed(1), b.gfa.toFixed(0), b.units, Q.facadeOfBldg(b).toFixed(0), ((b.rect.u1 - b.rect.u0) * (b.rect.v1 - b.rect.v0)).toFixed(1)]));
+    download(`${gen.plan.site.id}-buildings.csv`, csv(rows), 'text/csv;charset=utf-8');
   });
   $('s-json').addEventListener('click', () => {
     const r = (v, d = 2) => Math.round(v * 10 ** d) / 10 ** d;
@@ -143,7 +142,7 @@ export function mount(root, arg) {
         rect_site_m: { u0: r(b.rect.u0), u1: r(b.rect.u1), v0: r(b.rect.v0), v1: r(b.rect.v1) }, height_m: r(b.height), storeys: b.storeys, units: b.units, gfa_m2: r(b.gfa, 0),
         floors: b.floors.map(f => ({ name: f.name, use: f.use, h: r(f.h), fl: r(f.y0), area: r(f.area, 1), units: f.units })) })),
     };
-    download('yongsan-schedule.json', JSON.stringify(o, null, 2), 'application/json');
+    download(`${gen.plan.site.id}-schedule.json`, JSON.stringify(o, null, 2), 'application/json');
   });
 
   // ---------- 단면 바코드 ----------

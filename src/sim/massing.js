@@ -1,20 +1,25 @@
-// 용산국제업무지구 매스 배치 엔진
+// 매스 배치 엔진 (택지 공통)
 // 블록마다 주동 형식(탑상·Y자·판상·ㄱ자·V자·ㄷ자)으로 동을 배치하고, 높이 계획(서측 저층 → 랜드마크, 한강 앞열 제한,
 // 동별 높이 리듬)과 인동간격(건축법 시행령 제86조 제3항)을 지키도록 층수를 정한다. 층마다 층고·면적·세대수를 기록한다.
-import { BLOCKS, ZONES, CONTEXT, toWorld } from './plan.js';
+import { makePlan } from './plan.js';
+import { resolveSite } from './sites.js';
+
+// 현재 계산 중인 대지 계획 (generate가 정한다)
+let PL = makePlan(resolveSite(null));
+let FRONT = new Set();
 
 export const DEFAULTS = {
-  housingTarget: 6000,  // 국제업무지구 내 주거 물량(아파트+오피스텔)
-  officetelShare: 30,   // 주거 물량 중 오피스텔 비율(%) — 업무복합존에 배치
+  housingTarget: 6000,  // 주거 물량(아파트+오피스텔)
+  officetelShare: 30,   // 주거 물량 중 오피스텔 비율(%) — 복합 블록에 배치 (복합 블록이 없으면 0)
   rentalShare: 30,      // 아파트 중 공공임대 비율(%) — 동·층에 섞어 배치(소셜믹스)
   mix59: 30, mix84: 50, mix114: 20, // 아파트 세대 구성(%)
   typology: 'tower',    // 주동 형식: tower | y | slab | l | v | court | mixed
-  resZone: 'gc',        // 업무지원존 용도지역: gc 일반상업(법 61조② 적용 제외) | semi 준주거(시행령 86조③ 적용)
+  resZone: 'gc',        // 주거 블록 용도지역: gc 일반상업(법 61조② 적용 제외) | semi 준주거·주거지역(시행령 86조③ 적용)
   sideWin: 0,           // 탑상·Y자형 측면 채광창 (1 있음: 측면도 가목 0.5H 적용, 0 0.5㎡ 미만 창만: 측벽으로 보아 4m)
   resMaxFloors: 55,     // 주거 최고 층수 (스카이라인 정점)
-  skylineWest: 70,      // 서측 끝 높이 비율(%) — 동쪽 랜드마크로 갈수록 100%
+  skylineWest: 70,      // 스카이라인 낮은 끝 높이 비율(%) — 초점(랜드마크·복합 블록)으로 갈수록 100%
   heightVar: 15,        // 같은 열 동별 높이 차(%) — 스카이라인 리듬
-  riverFrontMax: 45,    // 한강변 앞열 최고 층수
+  riverFrontMax: 45,    // 수변 앞열 최고 층수
   southRatio: 65,       // 남측 열 높이 / 북측 열 높이(%) — 남저북고
   spacingCoef: 0.5,     // 인동간격 계수(가목, × 마주보는 건물 높이)
   podiumRes: 2,         // 주거 블록 근린생활·커뮤니티 포디움 층수
@@ -31,22 +36,22 @@ export const DEFAULTS = {
 };
 
 export const META = {
-  housingTarget: { label: '주거 물량 (아파트+오피스텔)', unit: '호', min: 2000, max: 14000, step: 100, group: 'plan' },
-  officetelShare: { label: '오피스텔 비율', unit: '%', min: 0, max: 60, step: 1, group: 'plan', note: '업무복합존 남측 타워에 배치' },
-  rentalShare: { label: '공공임대 비율 (아파트 중)', unit: '%', min: 0, max: 60, step: 1, group: 'plan', note: '소셜믹스: 같은 동에 섞어 배치' },
+  housingTarget: { label: '주거 물량 (아파트+오피스텔)', unit: '호', min: 100, max: 30000, step: 50, group: 'plan' },
+  officetelShare: { label: '오피스텔 비율', unit: '%', min: 0, max: 60, step: 1, group: 'plan', note: '복합 블록 남측 타워에 배치' },
+  rentalShare: { label: '공공임대 비율 (아파트 중)', unit: '%', min: 0, max: 100, step: 1, group: 'plan', note: '소셜믹스: 같은 동에 섞어 배치' },
   mix59: { label: '전용 59㎡ 비율', unit: '%', min: 0, max: 100, step: 1, group: 'res' },
   mix84: { label: '전용 84㎡ 비율', unit: '%', min: 0, max: 100, step: 1, group: 'res' },
   mix114: { label: '전용 114㎡ 비율', unit: '%', min: 0, max: 100, step: 1, group: 'res' },
   podiumRes: { label: '주거 포디움 층수', unit: '층', min: 0, max: 4, step: 1, group: 'res' },
-  resMaxFloors: { label: '주거 최고 층수 (정점)', unit: '층', min: 15, max: 80, step: 1, group: 'height' },
-  skylineWest: { label: '서측 끝 높이 비율', unit: '%', min: 30, max: 100, step: 1, group: 'height', note: '서부이촌동 쪽을 낮추고 랜드마크 쪽으로 높아지는 스카이라인' },
-  riverFrontMax: { label: '한강변 앞열 최고 층수', unit: '층', min: 15, max: 80, step: 1, group: 'height', note: '2023년 35층 일률 규제 폐지 이후 경관심의로 관리' },
-  southRatio: { label: '남측 열 높이 비율', unit: '%', min: 30, max: 100, step: 1, group: 'height', note: '한강 쪽 앞열을 낮춰 뒷열의 일조·조망 확보 (남저북고)' },
+  resMaxFloors: { label: '주거 최고 층수 (정점)', unit: '층', min: 7, max: 80, step: 1, group: 'height' },
+  skylineWest: { label: '스카이라인 낮은 끝 비율', unit: '%', min: 30, max: 100, step: 1, group: 'height', note: '대지 끝을 낮추고 랜드마크·복합 블록 쪽으로 높아지는 스카이라인' },
+  riverFrontMax: { label: '수변 앞열 최고 층수', unit: '층', min: 5, max: 80, step: 1, group: 'height', note: '수변에 면한 행. 서울 한강변은 2023년 35층 일률 규제 폐지 이후 경관심의로 관리' },
+  southRatio: { label: '남측 열 높이 비율', unit: '%', min: 30, max: 100, step: 1, group: 'height', note: '남쪽 열을 낮춰 뒷열의 일조·조망 확보 (남저북고)' },
   heightVar: { label: '동별 높이 차', unit: '%', min: 0, max: 40, step: 1, group: 'height', note: '같은 열 안에서 높고 낮은 동을 번갈아 둠' },
   spacingCoef: { label: '인동간격 계수 (가목)', unit: '×H', min: 0.25, max: 1.2, step: 0.05, group: 'law', note: '시행령 0.5배 이상 범위에서 조례. 준주거에서는 0.5 미만으로 내릴 수 없음' },
-  intlFar: { label: '국제업무존 용적률', unit: '%', min: 400, max: 1700, step: 10, group: 'office', note: '발표 계획: 최대 1,700%' },
+  intlFar: { label: '국제업무존 용적률', unit: '%', min: 400, max: 1700, step: 10, group: 'office', note: '용산 발표 계획: 최대 1,700%' },
   landmarkFloors: { label: '랜드마크 층수', unit: '층', min: 50, max: 120, step: 1, group: 'office' },
-  mixedFar: { label: '업무복합존 용적률', unit: '%', min: 300, max: 1500, step: 10, group: 'office' },
+  mixedFar: { label: '복합 블록 용적률', unit: '%', min: 150, max: 1500, step: 10, group: 'office' },
   officeMaxFloors: { label: '업무 타워 최고 층수', unit: '층', min: 20, max: 90, step: 1, group: 'office' },
   hRes: { label: '주거 기준층 층고', unit: 'm', min: 2.8, max: 3.6, step: 0.05, group: 'h' },
   hResLobby: { label: '주거 1층 로비 층고', unit: 'm', min: 4, max: 9, step: 0.1, group: 'h' },
@@ -266,14 +271,12 @@ function placeForm(F, uc, vc) {
 const rectOf = (parts) => ({ u0: Math.min(...parts.map(q => q.u0)), u1: Math.max(...parts.map(q => q.u1)), v0: Math.min(...parts.map(q => q.v0)), v1: Math.max(...parts.map(q => q.v1)) });
 
 // ---------- 높이 계획 ----------
-const U_WEST = -575;
-const landmarkU = () => { const b = BLOCKS.find(x => x.id === 'A1'); return (b.lot.u0 + b.lot.u1) / 2; };
-// 서측 끝(sw) → 랜드마크(1.0)로 선형 상승
+// 대지 끝(sw) → 초점(랜드마크·복합 블록, 1.0)으로 선형 상승
 export function skylineAt(u, p) {
-  const sw = p.skylineWest / 100, k = clamp((u - U_WEST) / (landmarkU() - U_WEST), 0, 1);
+  const f = PL.focalU, span = Math.max(f - PL.SITE.u0, PL.SITE.u1 - f, 1);
+  const sw = p.skylineWest / 100, k = clamp(1 - Math.abs(u - f) / span, 0, 1);
   return sw + (1 - sw) * k;
 }
-const RIVER_BLOCKS = new Set(BLOCKS.filter(b => b.row === 'S').map(b => b.id));
 
 // ---------- 인동간격 ----------
 // 두 부분이 마주보는 관계: 축(NS/EW), 거리, 북(서)쪽 부분의 면, 남(동)쪽 부분의 면
@@ -291,7 +294,7 @@ function facing(A, B) {
 }
 // 마주보는 두 동의 축이 남동~남서 사이인지 (나목 적용 조건)
 function axisSouthward(P, Q) {
-  const [x, z] = toWorld(Q.cu - P.cu, Q.cv - P.cv);
+  const [x, z] = PL.toWorld(Q.cu - P.cu, Q.cv - P.cv);
   return z > 0 && Math.abs(Math.atan2(x, z)) <= 45 * DEG + 1e-9;
 }
 // 요구 거리와 그 거리를 정하는 건물: 반환 [{rule, req, limits: 'P'|'Q'|null}]
@@ -356,8 +359,8 @@ function enforce(mods, pairs, ht, coef, minF = 3) {
 
 // 1호: 채광창 면에서 인접 대지경계선(도로·공원 건너편이면 중심선)까지 거리의 4배(준주거) 이하
 function boundaryLines(block) {
-  const L = block.lot, others = BLOCKS.filter(b => b.id !== block.id).map(b => b.lot)
-    .concat(CONTEXT.map(c => ({ u0: c.u0, u1: c.u1, v0: c.v0, v1: c.v1 })));
+  const L = block.lot, others = PL.BLOCKS.filter(b => b.id !== block.id).map(b => b.lot)
+    .concat(PL.CONTEXT.map(c => ({ u0: c.u0, u1: c.u1, v0: c.v0, v1: c.v1 })));
   const near = (dir) => {
     let best = null;
     for (const o of others) {
@@ -401,7 +404,7 @@ function housingBlock(block, unitsByType, p, warnings, ht) {
   const sum = a => a.reduce((x, y) => x + y, 0);
   const wts = types.map(t => t.target / ((t.N.upf + t.S.upf) / 2));
   const rowW = (list, row) => sum(list.map(t => t[row].w)) + SIDE_GAP * Math.max(0, list.length - 1);
-  const riverFront = RIVER_BLOCKS.has(block.id);
+  const riverFront = FRONT.has(block.id);
 
   // 한 열에 동을 고르게 분산 (실제 폭 기준)
   const place = (list, row) => {
@@ -553,7 +556,7 @@ function officeBlock(block, p, opts, warnings) {
   if (opts.officetelUnits > 0) {
     const plate = OFFICETEL.upf * OFFICETEL.area / (p.floorEff / 100);
     let cap = Math.round(Math.max(p.resMaxFloors, 30) * g);
-    if (RIVER_BLOCKS.has(block.id)) cap = Math.min(cap, Math.max(p.riverFrontMax, 20));
+    if (FRONT.has(block.id)) cap = Math.min(cap, Math.max(p.riverFrontMax, 12));
     let n = 1, F;
     for (; n <= 3; n++) { F = 1 + Math.ceil(opts.officetelUnits / n / OFFICETEL.upf); F += refugeLevels(F, p.hResLobby + F * p.hOfficetel).length; if (F <= cap) break; }
     n = Math.min(n, 3);
@@ -636,16 +639,19 @@ function basement(block, bldgs, p) {
 export function generate(pIn) {
   const p = { ...DEFAULTS, ...pIn };
   if (!TYPOLOGIES[p.typology]) p.typology = 'tower';
+  PL = makePlan(p.site || resolveSite(null));
+  FRONT = new Set(PL.BLOCKS.filter(b => b.front).map(b => b.id));
+  const BLOCKS = PL.BLOCKS;
   const ht = heightTable(p);
   const warnings = [];
   const mixSum = (p.mix59 + p.mix84 + p.mix114) || 1;
-  const officetelTotal = Math.round(p.housingTarget * p.officetelShare / 100);
-  const aptTotal = p.housingTarget - officetelTotal;
   const supp = BLOCKS.filter(b => b.zone === 'supp'), mixed = BLOCKS.filter(b => b.zone === 'mixed');
+  const officetelTotal = mixed.length ? Math.round(p.housingTarget * p.officetelShare / 100) : 0;
+  const aptTotal = p.housingTarget - officetelTotal;
   // 아파트: 블록 면적 × 높이 계획 계수(스카이라인·한강 앞열)에 비례 배분
   const wOf = (b) => {
     const g = skylineAt((b.lot.u0 + b.lot.u1) / 2, p);
-    const front = RIVER_BLOCKS.has(b.id) ? Math.min(1, p.riverFrontMax / Math.max(1, p.resMaxFloors * g * p.southRatio / 100)) : 1;
+    const front = FRONT.has(b.id) ? Math.min(1, p.riverFrontMax / Math.max(1, p.resMaxFloors * g * p.southRatio / 100)) : 1;
     return b.area * g * (1 + p.southRatio / 100 * front) / 2;
   };
   const wSum = supp.reduce((s, b) => s + wOf(b), 0);
@@ -665,7 +671,7 @@ export function generate(pIn) {
     bldgs.push(...officeBlock(b, p, { far: p.mixedFar, officetelUnits: share, zone: 'mixed' }, warnings));
   });
   BLOCKS.filter(b => b.zone === 'intl').forEach(b => {
-    bldgs.push(...officeBlock(b, p, { far: p.intlFar, officetelUnits: 0, landmark: b.id === 'A1', zone: 'intl' }, warnings));
+    bldgs.push(...officeBlock(b, p, { far: p.intlFar, officetelUnits: 0, landmark: b.id === PL.landmarkBlock, zone: 'intl' }, warnings));
   });
   BLOCKS.forEach(b => { const inb = bldgs.filter(x => x.block === b.id); if (inb.length) bldgs.push(basement(b, inb, p)); });
 
@@ -697,7 +703,7 @@ export function generate(pIn) {
   }
   const totals = summarize(bldgs, blocks, p);
   const violations = spacingCheck(bldgs, p);
-  return { p, bldgs, blocks, totals, warnings, violations, sky };
+  return { p, plan: PL, zones: PL.ZONES, site: PL.site, bldgs, blocks, totals, warnings, violations, sky };
 }
 
 export function summarize(bldgs, blocks, p) {
@@ -717,6 +723,7 @@ export function summarize(bldgs, blocks, p) {
   });
   t.units = t.apt + t.officetel;
   t.rental = Math.round(t.apt * (p.rentalShare || 0) / 100);
+  const ZONES = PL.ZONES;
   const zoneArea = Object.values(ZONES).reduce((s, z) => s + z.area, 0);
   t.lotArea = zoneArea;
   t.far = t.gfaAbove / zoneArea * 100;
@@ -773,7 +780,7 @@ export function spacingCheck(bldgs, p) {
   if (law) {
     const lineCache = new Map();
     apts.forEach(r => {
-      const bl = BLOCKS.find(b => b.id === r.block);
+      const bl = PL.blockById.get(r.block);
       if (!lineCache.has(bl.id)) lineCache.set(bl.id, boundaryLines(bl));
       const D = rule1Dist(r.parts, lineCache.get(bl.id));
       if (r.height > 4 * D + 1e-6) out.push({ a: r.id, b: '대지경계', rule: '1호', gap: D, req: r.height / 4, scope: 'law', where: 'boundary', dir: '경계' });

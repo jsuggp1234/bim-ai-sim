@@ -1,9 +1,10 @@
 // 매스 엔진 기본 검사: node --test tests/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generate, refugeLevels } from '../src/yongsan/massing.js';
-import { analyze, unitSamples, contextSamples, projectBoxes, meets } from '../src/yongsan/analysis.js';
+import { generate, refugeLevels } from '../src/sim/massing.js';
+import { analyze, unitSamples, contextSamples, projectBoxes, meets } from '../src/sim/analysis.js';
 import { mixForAverage } from '../src/store.js';
+import { fallbackFor, analysisBoxes } from '../src/sim/ctxload.js';
 
 test('발표안 6,000호를 경고 없이 배치한다', () => {
   const g = generate({});
@@ -46,7 +47,8 @@ test('일조 분석: 동지 기준 판정과 결과 길이', () => {
   assert.equal(meets(230, 110), false);
   const g = generate({});
   const units = unitSamples(g.bldgs);
-  const r = analyze({ projectBoxes: projectBoxes(g), units, ctxSamples: contextSamples() });
+  const near = analysisBoxes(fallbackFor(g.plan), g.plan);
+  const r = analyze({ projectBoxes: projectBoxes(g), units, ctxSamples: contextSamples(near), context: near, plan: g.plan });
   assert.equal(r.total.length, units.length);
   assert.ok(r.ctx.length > 0);
 });

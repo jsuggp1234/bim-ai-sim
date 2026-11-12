@@ -1,10 +1,10 @@
 // 4D 공정·5D 예산 엔진 검사
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generate } from '../src/yongsan/massing.js';
-import { quantities } from '../src/yongsan/quantities.js';
-import { schedule } from '../src/yongsan/process.js';
-import { estimate } from '../src/yongsan/cost.js';
+import { generate } from '../src/sim/massing.js';
+import { quantities } from '../src/sim/quantities.js';
+import { schedule } from '../src/sim/process.js';
+import { estimate } from '../src/sim/cost.js';
 
 const gen = generate({});
 const Q = quantities(gen);
@@ -21,7 +21,7 @@ test('공정: 층 상태는 시간이 지나면 되돌아가지 않는다', () =
   const bi = [...S.blds.keys()][0], r = S.blds.get(bi);
   let prev = 0;
   for (let t = 0; t <= S.end + 10; t += 20) { const st = S.stateAt(t)(bi, r.floors[0]); assert.ok(st >= prev); prev = st; }
-  assert.equal(prev, 3);
+  assert.equal(prev, 6); // 준공
 });
 
 test('예산: 월별 기성 합계 = 총공사비, 평당 공사비가 상식 범위', () => {
