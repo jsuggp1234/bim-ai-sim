@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>BIM 건설 시뮬레이터</title>
-<meta name="description" content="서울 공동주택 택지 선정부터 용산국제업무지구 매스 배치, 일조·조망 분석, 층별 일람표까지 이어지는 BIM·AI 건설 시뮬레이션">
+<title>용산 BIM·AI 건설 시뮬레이터</title>
+<meta name="description" content="서울 공동주택 택지 선정부터 용산국제업무지구 매스 배치, 일조·조망·인동간격 검토, 층별 일람표, 4D 공정, 5D 예산까지 이어지는 BIM·AI 건설 시뮬레이션">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b6e66'/%3E%3Cpath d='M7 25V14h5v11zm7 0V7h5v18zm7 0V11h4v14z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23111'/%3E%3Cpath d='M8 25V15h5v10zm6 0V7h5v18zm6 0V12h4v13z' fill='%23fff'/%3E%3Crect x='14' y='7' width='5' height='3' fill='%23eb6834'/%3E%3C/svg%3E">
 <script>
   // 저장된 테마를 첫 페인트 전에 적용
   try { const t = localStorage.getItem('bim-sim-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
@@ -17,16 +17,17 @@
 <body>
 <a class="skip" href="#page">본문으로 건너뛰기</a>
 <header class="top">
-  <a class="brand" href="#/site">
-    <span class="eyebrow">BIM·AI 건설 시뮬레이션</span>
-    <span class="brand-t">서울 공동주택 기획 시뮬레이터</span>
+  <a class="brand" href="#/" aria-label="처음 화면">
+    <span class="mk" aria-hidden="true"><svg viewBox="0 0 14 14"><path d="M1 13V7h3v6zm4 0V1h4v12zm5 0V5h3v8z" fill="currentColor"/></svg></span>
+    <span class="bt"><b>YONGSAN · BIM SIM</b><span>건설 시뮬레이터</span></span>
   </a>
   <nav class="steps" id="steps" aria-label="시뮬레이션 단계"></nav>
   <button class="theme-btn" id="themeBtn" type="button" aria-label="화면 테마 바꾸기"></button>
 </header>
 <main id="page" tabindex="-1"></main>
 <footer class="foot">
-  <span>모든 수치는 공개 자료와 가정에 기반한 시뮬레이션입니다. 실제 인허가·설계 값과 다를 수 있습니다.</span>
+  <span>모든 수치는 공개 자료와 가정에 기반한 시뮬레이션입니다. 실제 인허가·설계·공사비와 다를 수 있습니다.</span>
+  <span class="mono">BIM · AI CONSTRUCTION SIMULATOR — 01 SITE / 02 MASS / 03 SCHEDULE / 04 4D / 05 5D</span>
 </footer>
 <script type="module" src="/src/main.js"></script>
 </body>

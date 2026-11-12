@@ -12,10 +12,17 @@ test('발표안 6,000호를 경고 없이 배치한다', () => {
   assert.equal(g.violations.length, 0);
 });
 
-test('세 가지 주동 형식 모두 목표 물량을 채운다', () => {
-  for (const typology of ['tower', 'mixed', 'slab']) {
+test('탑상·혼합·ㄷ자 형식은 발표안 6,000호를 채우고, 모든 형식이 법정 인동간격을 지킨다', () => {
+  for (const typology of ['tower', 'mixed', 'court']) {
     const g = generate({ typology });
     assert.ok(g.totals.units >= 6000, `${typology}: ${g.totals.units}`);
+  }
+  for (const typology of ['tower', 'y', 'slab', 'l', 'v', 'court', 'mixed']) {
+    for (const resZone of ['gc', 'semi']) {
+      const g = generate({ typology, resZone });
+      assert.ok(g.totals.units > 3000, `${typology}: ${g.totals.units}`);
+      assert.equal(g.violations.filter(v => v.scope === 'law').length, 0, `${typology}/${resZone}`);
+    }
   }
 });
 

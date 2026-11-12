@@ -18,27 +18,35 @@ export function sunAltAz(declDeg, solarHour) {
   return { alt: alt * 180 / Math.PI, az };
 }
 
-// boxes: Float64Array [u0,u1,v0,v1,y0,y1]*n
+// boxes: Float64Array [cu, cv, hw, hd, cos, sin, y0, y1]*n — 수평으로 회전한 상자(OBB)
+const BS = 8;
 function hitAny(boxes, n, ou, ov, oy, du, dv, dy, tMax, minTop) {
   for (let i = 0; i < n; i++) {
-    const k = i * 6;
-    if (boxes[k + 5] <= minTop) continue;
+    const k = i * BS;
+    if (boxes[k + 7] <= minTop) continue;
+    const c = boxes[k + 4], s = boxes[k + 5], hw = boxes[k + 2], hd = boxes[k + 3];
+    const px = ou - boxes[k], pz = ov - boxes[k + 1];
+    const lx = px * c + pz * s, lz = -px * s + pz * c, dx = du * c + dv * s, dz = -du * s + dv * c;
     let t0 = 1e-3, t1 = tMax, a, b, tmp;
-    if (Math.abs(du) < 1e-12) { if (ou < boxes[k] || ou > boxes[k + 1]) continue; }
-    else { a = (boxes[k] - ou) / du; b = (boxes[k + 1] - ou) / du; if (a > b) { tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) continue; }
-    if (Math.abs(dv) < 1e-12) { if (ov < boxes[k + 2] || ov > boxes[k + 3]) continue; }
-    else { a = (boxes[k + 2] - ov) / dv; b = (boxes[k + 3] - ov) / dv; if (a > b) { tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) continue; }
-    if (Math.abs(dy) < 1e-12) { if (oy < boxes[k + 4] || oy > boxes[k + 5]) continue; }
-    else { a = (boxes[k + 4] - oy) / dy; b = (boxes[k + 5] - oy) / dy; if (a > b) { tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) continue; }
+    if (Math.abs(dx) < 1e-12) { if (lx < -hw || lx > hw) continue; }
+    else { a = (-hw - lx) / dx; b = (hw - lx) / dx; if (a > b) { tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) continue; }
+    if (Math.abs(dz) < 1e-12) { if (lz < -hd || lz > hd) continue; }
+    else { a = (-hd - lz) / dz; b = (hd - lz) / dz; if (a > b) { tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) continue; }
+    if (Math.abs(dy) < 1e-12) { if (oy < boxes[k + 6] || oy > boxes[k + 7]) continue; }
+    else { a = (boxes[k + 6] - oy) / dy; b = (boxes[k + 7] - oy) / dy; if (a > b) { tmp = a; a = b; b = tmp; } if (a > t0) t0 = a; if (b < t1) t1 = b; if (t0 > t1) continue; }
     return true;
   }
   return false;
 }
 
+// 상자 목록: {cu,cv,w,d,a,y0,y1} 또는 축 정렬 {u0,u1,v0,v1,y0,y1}
 function packBoxes(list) {
-  const a = new Float64Array(list.length * 6);
-  list.forEach((b, i) => a.set([b.u0, b.u1, b.v0, b.v1, b.y0, b.y1], i * 6));
-  return a;
+  const arr = new Float64Array(list.length * BS);
+  list.forEach((b, i) => {
+    if (b.cu != null) arr.set([b.cu, b.cv, b.w / 2, b.d / 2, Math.cos(b.a || 0), Math.sin(b.a || 0), b.y0, b.y1], i * BS);
+    else arr.set([(b.u0 + b.u1) / 2, (b.v0 + b.v1) / 2, (b.u1 - b.u0) / 2, (b.v1 - b.v0) / 2, 1, 0, b.y0, b.y1], i * BS);
+  });
+  return arr;
 }
 
 export function sunSteps(decl) {
@@ -118,14 +126,13 @@ export function unitSamples(bldgs) {
   const o = 0.3;
   bldgs.forEach((b, bi) => {
     if (b.kind !== 'apt' && b.kind !== 'officetel') return;
-    const { u0, u1, v0, v1 } = b.rect, w = u1 - u0, d = v1 - v0;
-    const S = (fu) => [u0 + w * fu, v1 + o, 0, 1], N = (fu) => [u0 + w * fu, v0 - o, 0, -1];
-    const E = (fv) => [u1 + o, v0 + d * fv, 1, 0], W = (fv) => [u0 - o, v0 + d * fv, -1, 0];
-    let layout;
-    if (b.form === 'slab') layout = Array.from({ length: b.upf }, (_, k) => [S((k + 0.5) / b.upf), N((k + 0.5) / b.upf)]);
-    else if (b.upf === 4) layout = [[S(0.25), W(0.75)], [S(0.75), E(0.75)], [N(0.75), E(0.25)], [N(0.25), W(0.25)]];
-    else if (b.upf === 6) layout = [[S(1 / 6), W(0.75)], [S(0.5)], [S(5 / 6), E(0.75)], [N(5 / 6), E(0.25)], [N(0.5)], [N(1 / 6), W(0.25)]];
-    else layout = [[S(1 / 8)], [S(3 / 8)], [S(5 / 8)], [S(7 / 8)], [N(1 / 8)], [N(3 / 8)], [N(5 / 8)], [N(7 / 8)], [E(0.5)], [W(0.5)]];
+    let layout = b.layout;
+    if (!layout) {
+      const { u0, u1, v0, v1 } = b.rect, w = u1 - u0, d = v1 - v0;
+      const S = (fu) => [u0 + w * fu, v1 + o, 0, 1], N = (fu) => [u0 + w * fu, v0 - o, 0, -1];
+      const E = (fv) => [u1 + o, v0 + d * fv, 1, 0], W = (fv) => [u0 - o, v0 + d * fv, -1, 0];
+      layout = [[S(1 / 8)], [S(3 / 8)], [S(5 / 8)], [S(7 / 8)], [N(1 / 8)], [N(3 / 8)], [N(5 / 8)], [N(7 / 8)], [E(0.5)], [W(0.5)]];
+    }
     b.floors.forEach((f, fi) => {
       if (!f.units) return;
       for (let k = 0; k < f.units && k < layout.length; k++) units.push({ b: bi, f: fi, k, y: f.y0 + 1.2, faces: layout[k] });
@@ -147,8 +154,25 @@ export function contextSamples() {
   return out;
 }
 
+// 사업지 상자: 동의 부분마다, 층 축소율(s)이 같은 구간별로 나눈다. 옥탑은 코어 위 정사각형
+export function buildingBoxes(b) {
+  const out = [];
+  if (b.kind === 'basement') return out;
+  const fl = b.floors.filter(f => !f.roof);
+  let i = 0;
+  while (i < fl.length) {
+    let j = i; while (j + 1 < fl.length && (fl[j + 1].s || 1) === (fl[i].s || 1)) j++;
+    const s = fl[i].s || 1;
+    b.parts.forEach(q => out.push({ cu: q.cu, cv: q.cv, w: q.w * s, d: q.d * s, a: q.a, y0: fl[i].y0, y1: fl[j].y1 }));
+    i = j + 1;
+  }
+  const ph = b.floors.find(f => f.roof);
+  if (ph && ph.area > 0) { const e = Math.sqrt(ph.area); out.push({ cu: b.core.u, cv: b.core.v, w: e, d: e, a: 0, y0: ph.y0, y1: ph.y1 }); }
+  return out;
+}
 export function projectBoxes(gen) {
-  const list = gen.bldgs.filter(b => b.kind !== 'basement').map(b => ({ ...b.rect, y0: 0, y1: b.height }));
+  const list = [];
+  gen.bldgs.forEach(b => list.push(...buildingBoxes(b)));
   gen.sky.forEach(s => list.push({ u0: s.u0, u1: s.u1, v0: s.vc - 4, v1: s.vc + 4, y0: s.y0, y1: s.y1 }));
   return list;
 }

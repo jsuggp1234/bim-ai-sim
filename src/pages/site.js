@@ -8,8 +8,9 @@ import { DEFAULTS as MASS_DEFAULTS } from '../yongsan/massing.js';
 export const title = '1단계 택지 선정';
 
 const HEAD = `<div class="page-h">
-  <div><span class="label-sm">1단계 · 매스·기획설계</span><h1>서울 공동주택 택지 사업성 비교</h1>
+  <div><span class="label-sm">Stage 01 / 05 · Site selection</span><h1>서울 공동주택 택지 사업성 비교</h1>
   <p>개발이 거론되거나 논란 중인 서울 택지 8곳을 같은 기준으로 비교합니다. 변수를 바꾸면 세대수, 사업성, 순위가 바로 다시 계산됩니다. 용산국제업무지구를 고르면 2단계 상세 매스 배치로 넘어갈 수 있습니다.</p></div>
+  <div class="actions"><a class="btn ghost" href="#/">처음 화면</a><a class="btn" href="#/mass">02 매스 배치 <span class="ar">→</span></a></div>
 </div>`;
 
 const BODY = `<div class="p-site">
@@ -31,7 +32,7 @@ const BODY = `<div class="p-site">
     <div class="stage" id="stage">
       <canvas id="cv" aria-label="선택한 후보지의 3D 매스 모델. 드래그로 회전, 휠로 확대"></canvas>
       <div class="ov tl" id="legend3d">
-        <span class="lg"><i style="background:var(--sale)"></i>분양</span>
+        <span class="lg"><i style="background:var(--model)"></i>분양</span>
         <span class="lg"><i style="background:var(--rental)"></i>공공임대·장기전세</span>
         <span class="lg"><i style="background:var(--nonres)"></i>업무·상업</span>
       </div>
@@ -399,7 +400,7 @@ export function mount(root) {
     const box = new THREE.BoxGeometry(1, 1, 1); box.translate(0, 0.5, 0);
     const edges = new THREE.EdgesGeometry(box);
     const mats = { res: new THREE.MeshLambertMaterial(), rental: new THREE.MeshLambertMaterial(), nonres: new THREE.MeshLambertMaterial() };
-    const lineMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.35 });
+    const lineMat = new THREE.LineBasicMaterial({ transparent: true, opacity: 0.75 });
     Object.assign(V, { ok: true, renderer, scene, camera, sun, hemi, ground, site, siteLine, group, box, edges, mats, lineMat, northArrow,
       orbit: { theta: -0.55, phi: 0.95, r: 800, tx: 0, ty: 0, tz: 0 }, extent: 500, need: true });
     applyTheme();
@@ -433,8 +434,8 @@ export function mount(root) {
     V.ground.material.color = c('--ground');
     V.site.material.color = c('--site');
     V.siteLine.material.color = c('--accent');
-    V.mats.res.color = c('--sale'); V.mats.rental.color = c('--rental'); V.mats.nonres.color = c('--nonres');
-    V.lineMat.color = c('--ink');
+    V.mats.res.color = c('--model'); V.mats.rental.color = c('--rental'); V.mats.nonres.color = c('--nonres');
+    V.lineMat.color = c('--edge');
     V.northArrow.children.forEach(ch => { if (ch.material) ch.material.color = c('--ink'); });
     V.need = true;
   }

@@ -1,7 +1,7 @@
 // 단계 사이에 넘기는 값과 각 단계의 설정을 한곳에 보관한다 (브라우저 저장소)
 const KEY = 'bim-sim-pipeline-v1';
 const listeners = new Set();
-const blank = () => ({ handoff1: null, mass: null, massFrom: null });
+const blank = () => ({ handoff1: null, mass: null, massFrom: null, proc: null, cost: null, seen3: false });
 
 function load() {
   try {
