@@ -64,9 +64,9 @@ function followRoi(sc, wpId, p, base) {
   const win = winFor(sc, wpId), t = win.s + clamp(p, 0, 1) * (win.e - win.s);
   const top = frontAt(sc, wpId, t), G = sc.G;
   const tight = wpId === 'form' || wpId === 'conc';
-  const h = tight ? Math.max(40, Math.min(70, G.H * 0.5)) : Math.max(70, Math.min(120, G.H * 0.6));
+  const h = tight ? Math.max(40, Math.min(70, G.H * 0.5)) : Math.max(60, Math.min(90, G.H * 0.45));
   const w = h * (VW - 28) / (VH - 90);
-  const cx = tight ? (G.bx0 + G.bx1) / 2 + 6 : clamp((base.x0 + base.x1) / 2, base.x0 + w / 2, base.x1 - w / 2);
+  const cx = tight ? (G.bx0 + G.bx1) / 2 + 6 : clamp((G.bx0 + G.bx1) / 2 + 4, base.x0 + w / 2, Math.max(base.x0 + w / 2, base.x1 - w / 2));
   const e0 = clamp(top - h * (tight ? 0.72 : 0.62), -(G.depth + 7), Math.max(-(G.depth + 7), G.H + 16 - h));
   let r = { x0: cx - w / 2, x1: cx + w / 2, e0, e1: e0 + h };
   // 넓고 낮은 건물(공장·물류)은 기준층 확대 대신 건물 전체 폭 + 펌프·반입구까지
@@ -264,7 +264,8 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
     if (-a < eMinV) return;
     g.rect(xl, -a, xr, -Math.min(b, -eMinV + 2), `st st-${k}`);
     g.rect(xl, -a, xr, -Math.min(b, -eMinV + 2), `stp`); g.out[g.out.length - 1] = g.out[g.out.length - 1].replace('class="stp"', `class="stp" fill="url(#bp-${k === 'soil' ? 'fill' : k})"`);
-    if (-a - 0.4 > eMinV + 1 && b - a > 1.2) g.text(xMax - 8 / cam.s, -a, nm, 'st-lab', 'end', 11);
+    const va = Math.max(a, 0.5), vb = Math.min(b, -cam.ew(VH - 44)); // 화면 아래 시간축 띠 위까지
+    if ((vb - va) * cam.s >= 16) g.text(xMax - 8 / cam.s, -(va + vb) / 2, nm, 'st-lab', 'end', 3.5);
   });
   // 조사 전 미지 지반 (안개)
   if (surveyP < 1 || wpId === 'survey') {
@@ -305,7 +306,7 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
     g.rect(x0, -b - sdy, x1, h - sdy, 'nb');
     for (let e = 3.2; e < h - 1; e += 3.2) g.line(x0 + 1.2, e - sdy, x1 - 1.2, e - sdy, 'nb-l');
     g.rect(x0 - 0.6, -b - 0.8 - sdy, x1 + 0.6, -b - sdy, 'nb-f');
-    g.text(Math.min(x1 - 6, Math.max((x0 + x1) / 2, cam.xw(44))), h - sdy, nb.urban ? '인접 건물' : '인접 시설', 'nb-t', 'middle', 13);
+    g.text(Math.min(x1 - 6, Math.max((x0 + x1) / 2, cam.xw(44))), Math.min(h - sdy, cam.ew(NARROW ? 66 : 48)), nb.urban ? '인접 건물' : '인접 시설', 'nb-t', 'middle', 13);
     if (g.X(x1) < 12) g.P(`<text class="nb-pt" x="20" y="${(g.Y(0) - 8).toFixed(1)}">← ${nb.urban ? '인접 건물' : '인접 시설'} ${Math.round(-x1)}m</text>`);
     if (settleNow > 0.3) {
       const pts = []; for (let x = x0 - 6; x <= 0; x += 1) pts.push([x, -b - 1.2 - sdy * Math.max(0, 1 - (-x) / (sc.mv.zone || 20)) * 2.2]);
@@ -317,7 +318,7 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
     // 도로
     g.rect(pw + 7, -0.6, pw + 31, 0, 'road'); g.text(pw + 31, 0, '도로', 'road-t', 'end', -3);
     g.line(pw + 5, 0, pw + 5, 3.4, 'gate'); g.text(pw + 5, 3.8, 'GATE', 'gate-t', 'middle', -2);
-    at.road = [pw + 19, 2]; at.gate = [pw + 5, 3.6];
+    at.road = [pw + 19, 2]; at.gate = [pw + 5, 3.6]; at.truck = [pw + 12, 4.6];
   }
   // 플랜트 맥락 (연돌·탱크)
   if (G.stack && !isUnder(wpId)) { const sx = pw + 22; g.rect(sx - 1.6, 0, sx + 1.6, G.stack, 'ctx'); g.text(sx, G.stack + 1, '연돌', 'ctx-t', 'middle', -4); }

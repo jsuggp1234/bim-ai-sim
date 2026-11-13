@@ -396,6 +396,13 @@ export function vsBaseline(R, wpId) {
   return { opt: bOpt, days: r0(a.end - b.end), cost: a.total - b.total, q: a.q - b.q, s: a.s - b.s };
 }
 
+// 두 문장이 같은 이야기인지 (글자 2-gram 겹침)
+const grams = (t) => { const c = t.replace(/[^가-힣A-Za-z0-9]/g, ''), g = new Set(); for (let i = 0; i < c.length - 1; i++) g.add(c.slice(i, i + 2)); return g; };
+export function similar(a, b) {
+  const A = grams(a), B = grams(b); if (!A.size || !B.size) return false;
+  let n = 0; B.forEach(x => { if (A.has(x)) n++; });
+  return n / Math.min(A.size, B.size) >= 0.5;
+}
 // ---------- 한 공종의 종합 판정 ----------
 export function wpImpact(R, wpId, G = sectionGeom(R.gen, R.d)) {
   const items = checks(wpId, R, G);
@@ -407,6 +414,10 @@ export function wpImpact(R, wpId, G = sectionGeom(R.gen, R.d)) {
     const dl = Object.entries(r.delta).map(([k, v]) => [k, Math.round(v)]).filter(([, v]) => v !== 0);
     if (!dl.length) return;
     const s = dl.reduce((a, [, v]) => a + v, 0);
+    const score = '평가 점수 ' + dl.map(([k, v]) => `${KN[k]} ${v > 0 ? '+' : ''}${v}`).join(' · ');
+    // 현장 판정과 같은 이야기면 따로 늘어놓지 않고 점수만 덧붙인다
+    const dup = items.find(x => similar(x.t + ' ' + (x.d || ''), r.why));
+    if (dup) { if (!/평가 점수/.test(dup.d || '')) dup.d = (dup.d ? dup.d + ' · ' : '') + score; return; }
     items.push({ kind: s >= 0 ? 'pro' : 'con', sev: s <= -25 ? 3 : s < 0 ? 2 : 1, with: null, t: r.why, d: '평가 점수 ' + dl.map(([k, v]) => `${KN[k]} ${v > 0 ? '+' : ''}${v}`).join(' · '), src: 'rule' });
   });
   // 위험: 이 공종을 전통 공법으로 했을 때보다 줄었나 늘었나

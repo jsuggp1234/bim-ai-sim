@@ -10,6 +10,9 @@ import { head, sub, dot, hbar, escH } from '../ui/sys.js';
 import { wpImpact, delta, vsBaseline, sectionGeom, wpLabel, optName } from '../sim/impact.js';
 import { makeScene, frame, roiFor, lerpRoi, winFor } from '../ui/buildsim.js';
 
+// 받침 있으면 '이', 없으면 '가'
+const josaIGa = (w) => { const c = String(w).trim().slice(-1).charCodeAt(0); return c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28 ? '이' : '가'; };
+
 export const title = '04 공법·재료';
 const PRESETS = [
   ['balance', '균형', PRIO_DEFAULT],
@@ -155,7 +158,7 @@ export function mount(root) {
       }).join('')}</div>
       <div class="wz-go">
         <button type="button" class="btn ${st === 'next' ? 'acc' : 'ghost'} big" id="wz-go">${goLabel}</button>
-        <span class="note">${st === 'next' ? (last ? '확정하면 05 4D·간섭 단계가 열립니다.' : `확정하면 ${Lof(ui.cur + 1).wp.code} ${Lof(ui.cur + 1).wp.name}이(가) 열립니다.`) : '이미 확정한 공종입니다. 바꾸면 뒤 공종 판정이 다시 계산됩니다.'}</span>
+        <span class="note">${st === 'next' ? (last ? '확정하면 05 4D·간섭 단계가 열립니다.' : `확정하면 ${Lof(ui.cur + 1).wp.code} ${Lof(ui.cur + 1).wp.name}${josaIGa(Lof(ui.cur + 1).wp.name)} 열립니다.`) : '이미 확정한 공종입니다. 바꾸면 뒤 공종 판정이 다시 계산됩니다.'}</span>
       </div>`;
     fillDeltas();
   }
