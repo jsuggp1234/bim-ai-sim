@@ -90,7 +90,8 @@ export const CATS = [
 const DAY = 86400000;
 // 공법 효과 기본값 (공법 단계를 거치지 않았을 때: 전통 공법 묶음과 같은 값)
 export const FX_DEFAULT = { surveyDays: 35, unc: 1, improveDays: 0, wallRate: 150, excavK: 0.85, baseCycK: 1, overlap: 0, waterDays: 25, foundDaysK: 1.1, structCycK: 1.15,
-  coreAhead: false, winterK: 1, craneR: 60, skinCycK: 1.15, mepCycK: 1.1, finSave: 0, lagCut: 0 };
+  coreAhead: false, winterK: 1, craneR: 60, skinCycK: 1.15, mepCycK: 1.13, finSave: 0, lagCut: 0,
+  prepDays: 18, pourCap: 1, hoistK: 1, finCycK: 1.1, roofDays: 25, commK: 1, landK: 1 };
 export function parseYM(s) { const [y, m] = String(s).split('-').map(Number); return new Date(Date.UTC(y || 2028, (m || 1) - 1, 1)); }
 export const dateAt = (t0, d) => new Date(t0.getTime() + d * DAY);
 export const ym = (dt) => `${dt.getUTCFullYear()}.${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -164,7 +165,7 @@ export function schedule(gen, Q, pIn) {
     let s1 = s0;
     let improve = null;
     if (fx.improveDays > 0) { improve = add({ block: bl.id, cat: 'improve', name: '지반 개량', start: s0, end: s0 + fx.improveDays }); s1 = improve.end; }
-    const prep = add({ block: bl.id, cat: 'prep', name: '착공·가설 (울타리·현장 사무실)', start: s1, end: C.after(s1, 18) });
+    const prep = add({ block: bl.id, cat: 'prep', name: '착공·가설 (울타리·현장 사무실)', start: s1, end: C.after(s1, fx.prepDays || 18) });
     const wallW = base ? base.retainWall / fx.wallRate : 20;
     const wall = add({ block: bl.id, cat: 'wall', name: '흙막이·차수', start: prep.end, end: Math.max(C.after(prep.end, wallW), C.after(prep.end, fx.waterDays || 0)) });
     const eS = C.after(prep.end, (wall.end - prep.end) * 0.45 / 1.3);
@@ -172,7 +173,7 @@ export function schedule(gen, Q, pIn) {
     const earth = add({ block: bl.id, cat: 'earth', name: '굴착·지보·잔토 반출', start: eS, end: Math.max(wall.end, C.after(eS, base ? base.volume / exRate : 20)) });
     // 매트 기초: 하루 타설 한도(pourCap, ㎥)로 나눠 치므로 물량이 크면 기초 기간이 늘어난다
     const matVol = base ? base.foot * (d_matT(gen, bl.id)) : 0;
-    const pourCap = p.pourCap || 2500, pourDays = Math.ceil(matVol / pourCap);
+    const pourCap = Math.round((p.pourCap || 2500) * (fx.pourCap || 1)), pourDays = Math.ceil(matVol / pourCap);
     const foundDur = Math.max((25 + (base ? base.foot / 900 : 0)) * fx.foundDaysK, pourDays * 1.15 + 10);
     const found = add({ block: bl.id, cat: 'found', name: '기초 (말뚝·매트)', start: earth.end, end: C.after(earth.end, foundDur), matVol, pourDays, pourCap });
     const nB = base ? base.levels : 0;
@@ -207,16 +208,17 @@ export function schedule(gen, Q, pIn) {
         return out;
       };
       const big = (fl[0] && fl[0].area > 6000) ? Math.min(3, Math.sqrt(fl[0].area / 6000)) : 1; // 넓은 층은 한 층 작업이 길다
-      const tMep = follow(lag(p.mepLagFl), p.mepPerFl * fx.mepCycK * big);
+      const hoistEff = 1 + ((fx.hoistK || 1) - 1) * Math.min(1, F / 20); // 수직 운송: 층이 많을수록 설비·마감 속도에 영향
+      const tMep = follow(lag(p.mepLagFl), p.mepPerFl * fx.mepCycK * hoistEff * big);
       const tWin = follow(lag(p.facadeLagFl), p.winPerFl * fx.skinCycK * big);
-      const finPer = p.finPerFl * (1 - fx.finSave) * big;
+      const finPer = p.finPerFl * (1 - fx.finSave) * (fx.finCycK || 1) * hoistEff * big;
       const tFin = follow(lag(p.finishLagFl), finPer, 10).map(([a, e], i) => { const s2 = Math.max(a, tWin[i][1], tMep[i][1]); return [s2, Math.max(e, C.after(s2, finPer))]; });
       for (let i = 1; i < F; i++) if (tFin[i][1] < tFin[i - 1][1]) tFin[i][1] = tFin[i - 1][1];
       const mepS = tMep[0][0], mepE = Math.max(tMep[F - 1][1], C.after(sEnd, 40));
-      const skinS = tWin[0][0], skinE = Math.max(tWin[F - 1][1], C.after(sEnd, 30));
+      const skinS = tWin[0][0], skinE = Math.max(tWin[F - 1][1], C.after(sEnd, 30), C.after(sEnd, 12 + (fx.roofDays || 25))); // 지붕 방수는 골조 완료 후
       const finS = tFin[0][0], finE = Math.max(tFin[F - 1][1], C.after(sEnd, 60));
       const commDays = b.kind === 'landmark' ? 110 : b.kind === 'podium' ? 40 : ['fab', 'dhall', 'turbine', 'furnace', 'gmp'].includes(b.kind) ? 150 : ['column', 'tank', 'stack', 'rack', 'hrsg'].includes(b.kind) ? 60 : 70;
-      const commE = C.after(finE, commDays);
+      const commE = C.after(finE, commDays * (fx.commK || 1));
       const rec = { bi, id: b.id, block: bl.id, kind: b.kind, structStart: st, structEnd: sEnd, fEnd, fForm, tMep, tWin, tFin,
         floors: fl.map(f => b.floors.indexOf(f)), skinS, skinE, mepS, mepE, finS, finE, commS: finE, commE, F };
       blds.set(bi, rec);
@@ -227,7 +229,7 @@ export function schedule(gen, Q, pIn) {
       add({ block: bl.id, bi, bldg: b.id, cat: 'comm', name: `${b.id} ${['fab', 'dhall', 'turbine', 'furnace', 'gmp', 'column', 'tank', 'stack', 'hrsg'].includes(b.kind) ? '시운전·성능 시험' : '승강기·시운전·사용승인'}`, start: finE, end: commE });
       blockEnd = Math.max(blockEnd, commE);
     });
-    const land = add({ block: bl.id, cat: 'land', name: '조경·외부 공사', start: Math.max(bstr.end, blockEnd - 200), end: blockEnd });
+    const land = add({ block: bl.id, cat: 'land', name: '조경·외부 공사', start: Math.max(bstr.end, blockEnd - 200), end: C.after(blockEnd, Math.max(0, ((fx.landK || 1) - 1) * 120)) });
     bstate.set(bl.id, { prep, wall, earth, found, bstr, baseFl, land, nB, improve });
     bsum.push({ id: bl.id, zone: bl.zone, start: s0, baseEnd: bstr.end, topping: towers.length ? Math.max(...towers.map(x => blds.get(x.bi).structEnd)) : bstr.end, end: Math.max(blockEnd, land.end), towers: towers.length });
   });

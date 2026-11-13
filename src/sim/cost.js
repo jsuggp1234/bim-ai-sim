@@ -71,7 +71,8 @@ function liftCount(b) {
 }
 
 // 공법 효과가 없을 때 (전통 공법)
-const MFX0 = { retainK: 0.85, foundK: 1.0, structCostK: 1.05, concCostK: 1, skinK: 0.85, mepK: 1, finSave: 0, improveCost: 0, waterCost: 6, qaCostPct: 0, unc: 1, surveyDays: 35 };
+const MFX0 = { retainK: 0.85, foundK: 1.0, structCostK: 1.05, concCostK: 1, skinK: 0.85, mepK: 1, finSave: 0, improveCost: 0, waterCost: 6, qaCostPct: 0, unc: 1, surveyDays: 35,
+  bwpK: 1, finK: 1, roofK: 1, liftK: 1, landC: 1, prepK: 1 };
 export function estimate(gen, Q, S, pIn) {
   const p = { ...P5_DEFAULTS, ...pIn };
   const m = { ...MFX0, ...(S.fx || {}) };
@@ -85,7 +86,7 @@ export function estimate(gen, Q, S, pIn) {
     if (m.waterCost > 0) push('geo', bs.retainWall * m.waterCost, { block: bs.block, acts: ['wall'] });
     push('earth', bs.volume * p.earth + bs.retainWall * p.retain * m.retainK / 0.85, { block: bs.block, acts: ['wall', 'earth'] });
     push('found', bs.foot * p.found * m.foundK, { block: bs.block, acts: ['found'] });
-    push('base', bs.area * (p.structBase * m.concCostK + p.finBase + p.mepBase) * (bs.hB1 >= 7.5 ? 1.6 : 1), { block: bs.block, acts: ['base'], use: 'parking' });
+    push('base', bs.area * (p.structBase * m.concCostK + p.finBase + p.mepBase) * (bs.hB1 >= 7.5 ? 1.6 : 1) * (1 + (m.bwpK - 1) * 0.15), { block: bs.block, acts: ['base'], use: 'parking' });
   });
   // 동·층
   gen.bldgs.forEach((b, bi) => {
@@ -100,7 +101,7 @@ export function estimate(gen, Q, S, pIn) {
         const cyl = b.shape === 'cyl' || b.shape === 'rack';
         push('struct', f.area * X.st * hr * (cyl ? 1 : m.structCostK / 1.05) * m.concCostK, { block: b.block, bi, fi, use: f.use });
         push('skin', Q.facadeOf(b, f) * X.sk * (cyl ? 1 : m.skinK / 0.85), { block: b.block, bi, acts: ['skin'], use: f.use });
-        push('fin', f.area * X.fn * (1 - m.finSave * 0.3), { block: b.block, bi, acts: ['fin'], use: f.use });
+        push('fin', f.area * X.fn * (1 - m.finSave * 0.3) * m.finK, { block: b.block, bi, acts: ['fin'], use: f.use });
         push('mep', f.area * X.mp * m.mepK, { block: b.block, bi, acts: ['mep'], use: f.use });
         if (X.eq) push('equip', f.area * X.eq, { block: b.block, bi, acts: ['mep', 'comm'], use: f.use });
         return;
@@ -110,16 +111,18 @@ export function estimate(gen, Q, S, pIn) {
       push('struct', f.area * st * hr * m.structCostK / 1.05 * m.concCostK, { block: b.block, bi, fi, use: f.use });
       push('skin', Q.facadeOf(b, f) * (X0 ? 110 : skinU) * (b.kind === 'landmark' ? hr : 1) * m.skinK / 0.85, { block: b.block, bi, acts: ['skin'], use: f.use });
       const fin = f.use === 'res' ? p.finRes : f.use === 'officetel' ? p.finOfficetel : f.use === 'office' ? p.finOffice : f.use === 'mech' ? p.finBase : p.finRetail;
-      push('fin', f.area * fin, { block: b.block, bi, acts: ['fin'], use: f.use });
+      push('fin', f.area * fin * m.finK, { block: b.block, bi, acts: ['fin'], use: f.use });
       push('mep', f.area * (res ? p.mepRes : p.mepOffice) * (f.use === 'mech' ? 1.8 : 1) * m.mepK, { block: b.block, bi, acts: ['mep'], use: f.use });
     });
-    push('lift', liftCount(b) * (p.liftBase + p.liftPerFl * b.storeys) * 1e4, { block: b.block, bi, acts: ['comm'], use: b.kind === 'apt' ? 'res' : b.kind === 'officetel' ? 'officetel' : 'office' });
+    // 지붕 방수·마감 (만원/㎡ 지붕 면적)
+    if (b.foot > 0) push('skin', b.foot * 9 * m.roofK, { block: b.block, bi, acts: ['skin'], use: (b.floors.filter(f => f.lv > 0).slice(-2)[0] || {}).use });
+    push('lift', liftCount(b) * (p.liftBase + p.liftPerFl * b.storeys) * 1e4 * m.liftK, { block: b.block, bi, acts: ['comm'], use: b.kind === 'apt' ? 'res' : b.kind === 'officetel' ? 'officetel' : 'office' });
   });
   // 품질·안전 기술: 직접비의 일정 비율
   if (m.qaCostPct > 0) { const d0 = items.reduce((s2, x) => s2 + x.amount, 0); push('qa', d0 * m.qaCostPct / 100, { block: '*', acts: [] }); }
   gen.blocks.forEach(bl => {
     const ext = Math.max(0, bl.area - gen.bldgs.filter(x => x.block === bl.id && x.kind !== 'basement').reduce((s, x) => s + x.foot, 0));
-    push('land', ext * p.landscape, { block: bl.id, acts: ['land'] });
+    push('land', ext * p.landscape * m.landC, { block: bl.id, acts: ['land'] });
   });
   const direct = items.reduce((s, x) => s + x.amount, 0);
 
@@ -153,7 +156,7 @@ export function estimate(gen, Q, S, pIn) {
     spread(it.amount * (x - 1), s, e, 'esc');
   });
   // 간접비: 가설·공통은 직접비에 비례, 관리비·이윤·예비비도 비례, 설계·감리는 30%를 착공 전(0월)에
-  const temp = direct * p.temp / 100;
+  const temp = direct * p.temp / 100 * (1 + (m.prepK - 1) * 0.3);
   const sub = direct + esc + temp;
   const over = sub * p.overhead / 100;
   const design = (sub + over) * p.design / 100;

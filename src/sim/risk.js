@@ -110,7 +110,7 @@ export const RISKS = [
   },
   {
     id: 'RSK-06', cat: 'safe', name: '고소작업 추락', en: 'FALL FROM HEIGHT', when: ['struct', 'skin'],
-    levers: [['form', 'acs'], ['skin', 'unitcw'], ['qa', 'vision'], ['qa', 'wear']],
+    levers: [['form', 'acs'], ['skin', 'unitcw'], ['hoist', 'jump'], ['qa', 'vision'], ['qa', 'wear']],
     f(c, fx) {
       const { d } = c;
       const why = [`최고 높이 ${Math.round(d.maxH)}m`];
@@ -121,6 +121,9 @@ export const RISKS = [
       if (sk === 'unitcw' || sk === 'pcpanel') { p -= 0.4; mit.push('외장 유닛을 안쪽에서 설치'); }
       if (fm === 'acs' || fm === 'gang') { p -= 0.5; mit.push('작업대 일체형 거푸집 (안전 난간)'); }
       if (id(fx, 'frame') === 'modular' || id(fx, 'frame') === 'pc') { p -= 0.4; mit.push('공장 제작으로 고소 작업 감소'); }
+      if (id(fx, 'insul') === 'outer' && d.maxH > 40) { p += 0.3; why.push('외단열 미장: 외부 달비계 작업'); }
+      if (id(fx, 'hoist') === 'jump') { p -= 0.25; mit.push('점프 엘리베이터: 외부 호이스트 개구부 감소'); }
+      if (id(fx, 'steel') === 'block') { p -= 0.2; mit.push('대블록 지상 조립: 고소 접합 감소'); }
       if (has(fx, 'vision')) { p -= 0.6; mit.push('AI 비전: 안전고리 미체결 탐지'); }
       if (has(fx, 'wear')) { p -= 0.3; mit.push('웨어러블 추락 감지'); }
       return { p, i: 5, why, mit, days: [7, 20, 60], cost: [0.05, 0.2, 0.6], crit: 0.6 };
@@ -145,13 +148,18 @@ export const RISKS = [
   },
   {
     id: 'RSK-08', cat: 'safe', name: '공사 중 화재', en: 'FIRE DURING WORKS', when: ['fin', 'mep', 'comm'],
-    levers: [['qa', 'vision'], ['qa', 'twin']],
+    levers: [['insul', 'sandwich'], ['insul', 'inner'], ['steel', 'robot'], ['qa', 'vision'], ['qa', 'twin']],
     f(c, fx) {
       const { u } = c;
       const hot = ['logistics', 'battery', 'chem', 'dc', 'power'].includes(u.id);
       const why = [hot ? '가연성 단열재·대공간·용접 작업 많은 용도' : '마감·설비 단계 용접·절단 작업'];
       const mit = [];
       let p = 1.2 + (hot ? 1.2 : 0) + (id(fx, 'skin') === 'metal' ? 0.4 : 0);
+      if (id(fx, 'insul') === 'spray') { p += 0.9; why.push('우레탄 뿜칠 단열 + 용접·절단 화기 (물류창고 화재 유형)'); }
+      if (id(fx, 'steel') === 'weld') { p += 0.3; why.push('철골 현장 용접 불티'); }
+      if (id(fx, 'steel') === 'robot') { p -= 0.15; mit.push('로봇 용접: 불티 차폐·작업 시간 단축'); }
+      if (id(fx, 'elec') === 'renew') { p += 0.3; why.push('ESS 배터리 반입·충전 시험'); }
+      if (id(fx, 'paint') === 'eco') { p -= 0.1; mit.push('무VOC 도료: 가연성 증기 감소'); }
       if (has(fx, 'vision')) { p -= 0.6; mit.push('AI 비전: 연기·불꽃 조기 탐지'); }
       if (has(fx, 'twin')) { p -= 0.3; mit.push('화기 작업 실시간 관리'); }
       return { p, i: 4.5, why, mit, days: [15, 45, 150], cost: [0.3, 1.2, 5], crit: 0.9 };
@@ -188,14 +196,14 @@ export const RISKS = [
   },
   {
     id: 'RSK-11', cat: 'qual', name: '동절기 콘크리트 강도 부족', en: 'WINTER CONCRETING', when: ['struct', 'base'],
-    levers: [['conc', 'high'], ['qa', 'iot']],
+    levers: [['conc', 'high'], ['pour', 'winter'], ['qa', 'iot']],
     f(c, fx) {
       const { ex } = c;
       if (ex.winter < 0.05) return null;
       const why = [`골조 기간의 ${Math.round(ex.winter * 100)}%가 12~2월`];
       const mit = [];
       let p = 1 + 4.5 * ex.winter * (fx.winterK || 1);
-      if ((fx.winterK || 1) < 1) mit.push('조강·고강도 배합 (한중 대응)');
+      if ((fx.winterK || 1) < 1) mit.push(id(fx, 'pour') === 'winter' ? '보온·가열 양생 체계 (한중 콘크리트)' : '조강·고강도 배합 (한중 대응)');
       if (has(fx, 'iot')) { p -= 0.8; mit.push('IoT 강도 센서: 해체 시점 실측'); }
       return { p, i: 3, why, mit, days: [5, 15, 45], cost: [0.1, 0.3, 1], crit: 0.7 };
     },
@@ -246,7 +254,7 @@ export const RISKS = [
   },
   {
     id: 'RSK-15', cat: 'time', name: '숙련 인력 수급 부족', en: 'LABOUR SHORTAGE', when: ['struct', 'fin'],
-    levers: [['frame', 'pc'], ['frame', 'modular'], ['mep', 'prefab']],
+    levers: [['frame', 'pc'], ['frame', 'modular'], ['mep', 'prefab'], ['rebar', 'cage'], ['part', 'module'], ['plumb', 'pod'], ['paint', 'robot']],
     f(c, fx) {
       const { site, d } = c;
       const l = (site.a && site.a.l) ?? 60;
@@ -256,6 +264,9 @@ export const RISKS = [
       const fr = id(fx, 'frame');
       if (fr === 'modular' || fr === 'pc' || fr === 'module') { p -= 0.9; mit.push('공장 제작 (OSC)으로 현장 인력 감소'); }
       if (id(fx, 'mep') === 'prefab' || id(fx, 'mep') === 'spool') { p -= 0.4; mit.push('설비 프리팹'); }
+      const osc = [['rebar', ['cage', 'mesh'], '선조립 철근'], ['part', ['module', 'dry'], '건식·프리팹 칸막이'], ['plumb', ['pod'], '욕실 유닛'], ['paint', ['robot'], '도장 로봇'], ['floor', ['dryondol'], '건식 온돌']].filter(([w, os]) => os.includes(id(fx, w)));
+      if (osc.length) { p -= Math.min(0.7, osc.length * 0.18); mit.push(osc.map(x => x[2]).join('·')); }
+      if (id(fx, 'part') === 'block' || id(fx, 'floor') === 'wet') { p += 0.3; why.push('습식 조적·방통 숙련공 의존'); }
       return { p, i: 3, why, mit, days: [10, 30, 90], cost: [0.2, 0.6, 1.5], crit: 0.6 };
     },
   },
@@ -288,21 +299,24 @@ export const RISKS = [
   },
   {
     id: 'RSK-18', cat: 'qual', name: '시공 결함·하자 (누수·균열)', en: 'DEFECTS', when: ['struct', 'skin', 'fin'],
-    levers: [['qa', 'scan'], ['qa', 'vision'], ['qa', 'iot']],
+    levers: [['bwp', 'pre'], ['roof', 'hybrid'], ['qa', 'scan'], ['qa', 'vision'], ['qa', 'iot']],
     f(c, fx) {
-      const { u } = c;
+      const { u, d } = c;
       const q = (fx.index && fx.index.quality) || 70;
       const why = [`공법 품질 지수 ${q}`];
       const mit = [];
       let p = 1 + (100 - q) / 12 - (fx.rework || 0) * 2;
       if (fx.rework) mit.push('편차 검측·간섭검토로 재시공 감소');
+      if (d && d.depth > 0.5 && fx.leak != null) { p += (fx.leak - 0.7) * 1.6; if (fx.leak <= 0.6) mit.push('구체 일체 방수 (지하 누수 경로 차단)'); else if (fx.leak >= 0.85) why.push('지하 외벽 방수 이음·내방수 의존'); }
+      if (id(fx, 'roof') === 'urethane' && d && d.tall) { p += 0.3; why.push('고층 노출 도막 방수'); }
+      if (id(fx, 'floor') === 'wet') { p += 0.2; why.push('습식 방통 균열·들뜸'); }
       if (has(fx, 'vision')) { p -= 0.4; mit.push('AI 비전 균열·누수 자동 분류'); }
       return { p, i: ['housing', 'mixed', 'hospital'].includes(u.id) ? 3.5 : 3, why, mit, days: [0, 10, 30], cost: [0.2, 0.8, 2], crit: 0.3 };
     },
   },
   {
     id: 'RSK-19', cat: 'qual', name: '진동·청정도 기준 미달 (정밀 시설)', en: 'PRECISION CRITERIA', when: ['struct', 'mep', 'comm'],
-    levers: [['qa', 'scan'], ['qa', 'twin'], ['found', 'bored']],
+    levers: [['comm', 'perf'], ['qa', 'scan'], ['qa', 'twin'], ['found', 'bored']],
     f(c, fx) {
       const { u, d } = c;
       if (!['fab', 'bio', 'dc', 'hospital', 'lab'].includes(u.id)) return null;
@@ -312,12 +326,14 @@ export const RISKS = [
       if (has(fx, 'scan')) { p -= 0.5; mit.push('레이저 스캔 평탄도 검측'); }
       if (has(fx, 'twin')) { p -= 0.4; mit.push('진동·온습도 디지털 트윈'); }
       if (['bored', 'piledraft', 'steel'].includes(fx.foundId)) { p -= 0.3; mit.push('강성 큰 말뚝 기초'); }
+      if (['clean', 'crac'].includes(id(fx, 'hvac'))) { p -= 0.3; mit.push('전용 공조 (청정도·항온항습)'); }
+      if (id(fx, 'comm') === 'perf') { p -= 0.4; mit.push('성능 검증 시운전'); }
       return { p, i: u.id === 'fab' ? 5 : 4, why, mit, days: [10, 40, 120], cost: [0.3, 1, 3], crit: 0.9 };
     },
   },
   {
     id: 'RSK-20', cat: 'time', name: '시운전·성능시험 지연', en: 'COMMISSIONING', when: ['comm'],
-    levers: [['qa', 'twin'], ['mep', 'hookup']],
+    levers: [['comm', 'perf'], ['comm', 'digital'], ['qa', 'twin'], ['mep', 'hookup']],
     f(c, fx) {
       const { u } = c;
       if (!['fab', 'dc', 'chem', 'power', 'water', 'battery', 'bio', 'hospital'].includes(u.id)) return null;
@@ -326,12 +342,15 @@ export const RISKS = [
       let p = 2.5 + (u.gen === 'plant' ? 0.5 : 0);
       if (has(fx, 'twin')) { p -= 0.5; mit.push('가상 시운전 (디지털 트윈)'); }
       if (id(fx, 'mep') === 'hookup') { p -= 0.3; mit.push('훅업 전문 공정'); }
+      const cm = id(fx, 'comm');
+      if (cm === 'perf') { p -= 0.6; mit.push('성능 검증 시운전 계획'); } else if (cm === 'digital') { p -= 0.4; mit.push('디지털 커미셔닝 (BEMS 데이터 검증)'); } else if (cm === 'tab') { p -= 0.25; mit.push('TAB·통합 시운전'); } else if (cm === 'std') { p += 0.3; why.push('공종별 단독 시운전만 계획'); }
+      if (id(fx, 'elec') === 'dual') { p -= 0.15; mit.push('이중 수전: 정전 시험 중단 감소'); }
       return { p, i: 4, why, mit, days: [15, 45, 150], cost: [0.2, 0.6, 2], crit: 1 };
     },
   },
   {
     id: 'RSK-21', cat: 'ext', name: '인허가·민원 지연', en: 'PERMITS & COMPLAINTS', when: ['survey', 'prep', 'wall', 'earth'],
-    levers: [['excav', 'splitter'], ['plan', 'bim4d']],
+    levers: [['prep', 'sound'], ['excav', 'splitter'], ['plan', 'bim4d']],
     f(c, fx) {
       const { site, cond, u } = c;
       const pol = (site.a && site.a.pol) ?? 65;
@@ -339,6 +358,7 @@ export const RISKS = [
       const mit = [];
       let p = 1 + (100 - pol) / 30 + (cond.noise === 'high' ? 1 : 0) + (u.gen === 'plant' ? 0.5 : 0);
       if (fx.plan === 'bim4d' || fx.plan === 'ai') { p -= 0.3; mit.push('4D 시뮬레이션으로 주민 설명·심의 대응'); }
+      if ((fx.noiseCut || 0) >= 8 && cond.noise !== 'low') { p -= 0.6; mit.push('고차단 방음벽·소음 전광판 공개'); } else if (id(fx, 'prep') === 'std' && cond.noise === 'high') { p += 0.3; why.push('3m 가설 울타리만으로 소음·분진 대응'); }
       return { p, i: 3, why, mit, days: [15, 45, 150], cost: [0.1, 0.3, 1], crit: 1 };
     },
   },

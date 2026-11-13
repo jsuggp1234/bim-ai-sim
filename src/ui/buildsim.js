@@ -5,6 +5,8 @@
 import { sectionGeom, wpWindows, wallMove, anchorLen, craneX, ppv, ppvLimit } from '../sim/impact.js';
 import { WP_BY_ID } from '../sim/methods.js';
 import { dateAt, ym } from '../sim/process.js';
+import { MORE } from '../sim/wps-more.js';
+import { drawSite, drawBwp, drawBuilding, drawEnvelope, drawStructDetail, drawPour, drawSystems, detailInset } from './buildsim-more.js';
 
 // 화면 크기: 데스크톱 16:9, 휴대폰은 세로형 (frame(opts.narrow)로 바뀐다)
 export let VW = 960, VH = 540;
@@ -14,8 +16,13 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 const f1 = (v) => Math.round(v * 10) / 10;
 const n2 = (v) => Math.round(v * 100) / 100;
-const UNDER = new Set(['survey', 'improve', 'wall', 'support', 'water', 'excav', 'found', 'base']);
+const UNDER = new Set(['survey', 'improve', 'wall', 'support', 'water', 'excav', 'found', 'bwp', 'base']);
 export const isUnder = (wp) => UNDER.has(wp);
+// 땅 높이에서 보는 공종 (가설 울타리·조경): 건물 꼭대기까지 넣지 않고 지표 부근을 크게
+const GROUND = new Set(['prep', 'land']);
+// 건물 안을 보는 공종: 외장을 입면 대신 단면(양끝 띠)으로 그려 속이 보이게
+const CUT = new Set(['glaz', 'mep', 'hvac', 'plumb', 'fire', 'elec', 'ict', 'elev', 'part', 'floor', 'ceil', 'paint', 'comm', 'insul', 'hoist']);
+const codeOf = (id) => (WP_BY_ID[id] ? WP_BY_ID[id].code : '');
 
 // ---------- 장면 ----------
 export function makeScene(R, known) {
@@ -50,20 +57,52 @@ export function roiFor(sc, wpId) {
   // 인접 시설이 멀면(비도심) 화면을 다 쓰지 않도록 왼쪽을 자르고, 화면 밖 표시로 거리를 알린다
   const x0 = nb.urban ? nb.x0 - 5 : Math.max(nb.x0 - 5, -45), x1 = G.pw + 34;
   if (UNDER.has(wpId)) return { x0, x1, e0: -sc.dv, e1: Math.max(20, Math.min(nb.h + 3, 28)) };
+  if (GROUND.has(wpId)) return { x0, x1, e0: -Math.max(6, Math.min(G.depth + 4, 16)), e1: Math.max(nb.h + 6, 22) };
   const top = Math.max(G.H + Math.max(16, G.H * 0.14), (G.stack || 0) + 8, nb.h + 6);
   return { x0, x1, e0: -(G.depth + 7), e1: top };
 }
 // 지상 공종: 작업 전선(골조 최상층 · 외장 · 설비)을 따라가는 카메라. 거푸집·타설은 기준층을 크게
-const FOLLOW = new Set(['frame', 'form', 'conc', 'lift', 'skin', 'mep', 'plan', 'qa']);
+const FOLLOW = new Set(['frame', 'form', 'conc', 'lift', 'skin', 'mep', 'plan', 'qa', 'rebar', 'pour', 'steel', 'glaz', 'insul', 'roof', 'hvac', 'plumb', 'fire', 'elec', 'ict', 'part', 'floor', 'ceil', 'paint']);
+// 기준층을 크게 (거푸집·철근·타설·지붕) / 방 하나 크기로 (칸막이·바닥·천장·도장: 층 구성과 작업자가 보이게)
+const TIGHT = new Set(['form', 'conc', 'rebar', 'pour']);
+const ROOM = new Set(['part', 'floor', 'ceil', 'paint']);
+// 확대 시점: 몇 개 층 높이(n)를 어디에 맞춰(at) 보여 줄지
+//  room: 지금 층 하나 + 위아래 (층 구성·칸막이·작업자) · facade: 오른쪽 외벽 (창호·단열 층)
+//  roof: 지붕층 (방수층·옥상 설비) · mep: 코어 주변 5개 층 (배관·덕트·간선, 시작은 지하 기계실)
+const ZOOM = {
+  part: { n: 3.1, at: 'room' }, floor: { n: 3.1, at: 'room' }, ceil: { n: 3.1, at: 'room' }, paint: { n: 3.1, at: 'room' },
+  glaz: { n: 3.4, at: 'facade' }, insul: { n: 3.4, at: 'facade' }, roof: { n: 3.4, at: 'roof' },
+  hvac: { n: 5.5, at: 'mep' }, plumb: { n: 5.5, at: 'mep' }, fire: { n: 5.5, at: 'mep' }, elec: { n: 5.5, at: 'mep' }, ict: { n: 5.5, at: 'mep' },
+};
+export const MEPSUB = new Set(['hvac', 'plumb', 'fire', 'elec', 'ict']);
+const FRONT = { skin: 1, glaz: 1, insul: 1, mep: 1, hvac: 1, plumb: 1, fire: 1, elec: 1, ict: 1, part: 1, floor: 1, ceil: 1, paint: 1 };
 function frontAt(sc, wpId, t) {
-  const k = wpId === 'skin' ? 'skin' : wpId === 'mep' ? 'mep' : 'frame';
-  const fl = prog(sc, k, t) * sc.NF, n = clamp(Math.ceil(fl) - 1, 0, sc.NF - 1);
+  if (wpId === 'roof') return sc.floors[sc.NF - 1].e1;
+  const k = FRONT[wpId] ? wpId : 'frame';
+  // 창호·단열은 외장이 붙은 층까지만 (외장보다 앞서 갈 수 없다)
+  const pr = wpId === 'glaz' || wpId === 'insul' ? Math.min(prog(sc, k, t), prog(sc, 'skin', t)) : prog(sc, k, t);
+  const fl = pr * sc.NF, n = clamp(Math.ceil(fl) - 1, 0, sc.NF - 1);
   return fl <= 0 ? 0 : sc.floors[n].e1;
 }
+// 기준층 층고 (포디움 제외)
+const typFloorH = (sc) => { const G = sc.G, pod = G.podium ? G.podium.h : 0, up = sc.floors.filter(f => f.e0 >= pod - 0.1); return up.length ? Math.max(2.8, Math.min(6, (up[up.length - 1].e1 - up[0].e0) / up.length)) : 4; };
 function followRoi(sc, wpId, p, base) {
   const win = winFor(sc, wpId), t = win.s + clamp(p, 0, 1) * (win.e - win.s);
   const top = frontAt(sc, wpId, t), G = sc.G;
-  const tight = wpId === 'form' || wpId === 'conc';
+  const Z = ZOOM[wpId];
+  if (Z) {
+    const fh = typFloorH(sc);
+    const h = Math.max(Z.at === 'mep' ? 20 : 12, fh * Z.n), w = h * (VW - 28) / (VH - 90), bw = G.bx1 - G.bx0;
+    let cx, e0;
+    if (Z.at === 'room') { cx = bw < w * 0.9 ? (G.bx0 + G.bx1) / 2 : G.bx0 - w * 0.1 + w / 2; e0 = Math.max(-2, top - h * 0.7); }
+    else if (Z.at === 'facade') { cx = G.bx1 - w * 0.62 + w / 2; e0 = Math.max(-2, top - h * 0.7); }
+    else if (Z.at === 'roof') { cx = bw < w * 0.8 ? (G.bx0 + G.bx1) / 2 : G.bx1 - w * 0.7 + w / 2; e0 = top - h * 0.5; }
+    else { cx = (G.core.x0 + G.core.x1) / 2 + 1; e0 = Math.max(-(G.depth + 3), top - h * 0.7); }
+    const r = { x0: cx - w / 2, x1: cx + w / 2, e0, e1: e0 + h };
+    const k = clamp(p * 6, 0, 1);
+    return lerpRoi(base, r, 1 - Math.pow(1 - k, 3));
+  }
+  const tight = TIGHT.has(wpId);
   const h = tight ? Math.max(40, Math.min(70, G.H * 0.5)) : Math.max(60, Math.min(90, G.H * 0.45));
   const w = h * (VW - 28) / (VH - 90);
   const cx = tight ? (G.bx0 + G.bx1) / 2 + 6 : clamp((G.bx0 + G.bx1) / 2 + 4, base.x0 + w / 2, Math.max(base.x0 + w / 2, base.x1 - w / 2));
@@ -127,6 +166,15 @@ export function winFor(sc, wpId) {
   if (!w) return { s: 0, e: 1, skip: true };
   return { s: w.s, e: Math.max(w.s + 1, w.e) };
 }
+export const progAt = (sc, k, t) => prog(sc, k, t);
+// 3D 시점: 2D 카메라가 보는 범위(미터)를 그대로 쓴다
+export function focusOf(sc, wpId, p) {
+  const base = roiFor(sc, wpId);
+  if (FOLLOW.has(wpId) && (TIGHT.has(wpId) || ZOOM[wpId] || sc.G.H > 60)) return followRoi(sc, wpId, Math.max(p, 0.2), base);
+  if (UNDER.has(wpId)) return underRoi(sc, wpId, Math.max(p, 0.2), base);
+  return base;
+}
+export { CUT as CUT_WPS, UNDER as UNDER_WPS };
 function prog(sc, k, t) {
   const W = sc.W;
   let w = W[k];
@@ -229,7 +277,7 @@ const EQ = {
 export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
   NARROW = !!opts.narrow; [VW, VH] = NARROW ? NARROW_VB : [960, 540]; TOP = NARROW ? 70 : 52;
   const full = roi;
-  if (!opts.noFollow && FOLLOW.has(wpId) && (wpId === 'form' || wpId === 'conc' || sc.G.H > 60 || NARROW)) roi = followRoi(sc, wpId, p, roi);
+  if (!opts.noFollow && FOLLOW.has(wpId) && (TIGHT.has(wpId) || ZOOM[wpId] || sc.G.H > 60 || NARROW)) roi = followRoi(sc, wpId, p, roi);
   else if (!opts.noFollow && UNDER.has(wpId)) roi = underRoi(sc, wpId, p, roi);
   const cam = camera(roi, UNDER.has(wpId));
   const g = pen(cam, wpId);
@@ -320,6 +368,10 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
     g.line(pw + 5, 0, pw + 5, 3.4, 'gate'); g.text(pw + 5, 3.8, 'GATE', 'gate-t', 'middle', -2);
     at.road = [pw + 19, 2]; at.gate = [pw + 5, 3.6]; at.truck = [pw + 12, 4.6];
   }
+  // 세부 공종 그리기 맥락 (buildsim-more.js)
+  const flNow = structP * sc.NF;
+  const c = { sc, wpId, tau, T, P, K, F, at, eMinV, eMaxV, fl: flNow, EQ, g, TOP, VW, VH, NARROW };
+  drawSite(g, c);
   // 플랜트 맥락 (연돌·탱크)
   if (G.stack && !isUnder(wpId)) { const sx = pw + 22; g.rect(sx - 1.6, 0, sx + 1.6, G.stack, 'ctx'); g.text(sx, G.stack + 1, '연돌', 'ctx-t', 'middle', -4); }
 
@@ -519,6 +571,7 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
       g.rect(th, -depth + 0.25 + 1.5, pw - th, -depth - 0.35 + 1.5, `slab${c}`);
     }
   }
+  drawBwp(g, c);
 
   // ---- 지상 골조 ----
   const st = sc.W.frame, nf0 = sc.NF;
@@ -526,12 +579,20 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
   const fl = structP * nf0;
   if (K('frame') && structP > 0) drawFrame(g, sc, fl, coreAhead, F('frame'), at, wpId, T);
   else if (!K('frame') && (UNDER.has(wpId) ? false : true) && wpId !== 'frame') ghostBuilding(g, sc);
-  // ---- 외장 ----
-  if (K('skin') && skinP > 0) drawSkin(g, sc, skinP * nf0, fl, F('skin'), at, wpId);
+  // ---- 실내: 바닥 구성 · 천장 · 칸막이 · 도장 ----
+  drawBuilding(g, c);
+  // ---- 외장 (실내 공종은 단면으로) ----
+  if (K('skin') && skinP > 0) drawSkin(g, sc, skinP * nf0, fl, F('skin'), at, wpId, CUT.has(wpId));
+  drawEnvelope(g, c);
   // ---- 설비 ----
+  const dimSys = MEPSUB.has(wpId) || ROOM.has(wpId);
+  if (dimSys) g.P('<g class="dim">');
   if (K('mep') && mepP > 0) drawMep(g, sc, mepP * nf0, F('mep'), at, T);
+  if (dimSys) g.P('</g>');
+  drawSystems(g, c);
   // ---- 거푸집·타설 사이클 (현재 층) ----
-  if (K('frame') && structP > 0 && structP < 1) drawCycle(g, sc, fl, coreAhead, wpId, at, T);
+  if (K('frame') && structP > 0 && structP < 1) drawCycle(g, sc, fl, coreAhead, wpId, at, T, c);
+  drawStructDetail(g, c);
   // ---- 양중 ----
   const needCrane = (structP > 0 && structP < 1) || (wpId === 'lift') || (skinP > 0 && skinP < 1 && ['unitcw', 'pcpanel', 'metal'].includes(ids.skin));
   if (needCrane && !UNDER.has(wpId)) drawCrane(g, sc, fl, K('lift'), F('lift'), at, T, wpId);
@@ -544,7 +605,8 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
   if (!UNDER.has(wpId)) { g.line(nb.x1, 0, nb.x1, Math.max(G.H + 20, eMaxV), 'nb-proj'); g.text(nb.x1 - 0.5, Math.min(eMaxV - 4 / cam.s * 14, G.H + 14), '인접 대지 ←', 'nb-pt', 'end', 0); }
   // HUD 띠: ROI 밖으로 넘친 형상이 제목·시간축과 겹치지 않게
   g.P(`<rect class="hud-bg" x="0" y="0" width="${VW}" height="${NARROW ? 64 : 44}"/><rect class="hud-bg" x="0" y="${VH - 40}" width="${VW}" height="40"/>`);
-  if (roi !== full && !UNDER.has(wpId)) minimap(g, sc, full, roi, fl);
+  if (roi !== full && !UNDER.has(wpId) && !GROUND.has(wpId)) minimap(g, sc, full, roi, fl);
+  if (MORE[wpId]) detailInset(g, c);
   // ---- 판정 표식 ----
   const fall = [[pw * 0.5, sc.G.H * 0.5]];
   marks.forEach((m, i) => {
@@ -571,7 +633,7 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
   g.P(`<text class="hud-s" x="${tx0}" y="${ty - 18}">착공 ${ym(sc.t0)}</text><text class="hud-s" x="${tx1}" y="${ty - 18}" text-anchor="end">준공 ${ym(dateAt(sc.t0, sc.end))} · ${sc.R.S.months}개월</text>`);
   if (opts.paused) g.P(`<text class="hud-s" x="${VW / 2}" y="${ty - 18}" text-anchor="middle">일시정지</text>`);
 
-  return { svg: `<svg viewBox="0 0 ${VW} ${VH}" class="bsim" role="img" aria-label="${esc(wp.name)} 시공 시뮬레이션: ${esc(o)}, 착공 후 ${Math.round(tau)}일">${g.out.join('')}</svg>`, tau, date: dt };
+  return { at, svg: `<svg viewBox="0 0 ${VW} ${VH}" class="bsim" role="img" aria-label="${esc(wp.name)} 시공 시뮬레이션: ${esc(o)}, 착공 후 ${Math.round(tau)}일">${g.out.join('')}</svg>`, tau, date: dt };
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -585,7 +647,7 @@ function boreXs(sc) {
 function ghostBuilding(g, sc) {
   const { G } = sc;
   g.rect(G.bx0, 0, G.bx1, G.H, 'ghost-b');
-  g.text((G.bx0 + G.bx1) / 2, G.H + 1, '골조 미정 (L09)', 'eq-lab ghost', 'middle', -3);
+  g.text((G.bx0 + G.bx1) / 2, G.H + 1, `골조 미정 (${codeOf('frame')})`, 'eq-lab ghost', 'middle', -3);
 }
 
 function drawFrame(g, sc, fl, coreAhead, c, at, wpId, T) {
@@ -612,6 +674,7 @@ function drawFrame(g, sc, fl, coreAhead, c, at, wpId, T) {
     if (k === 'module') { const m = Math.max(2, Math.round(bw / 12)); for (let j = 0; j < m; j++) g.rect(x0 + bw * j / m + 0.6, f.e0 + 0.3, x0 + bw * (j + 1) / m - 0.6, f.e1 - 0.3, `mod${c}`); continue; }
     g.rect(x0, f.e1 + 0.18, x1, f.e1 - 0.32, `slab${c}`);
     if (k === 'rcwall') { g.rect(x0, f.e0, x0 + 0.5, f.e1, `wallp${c}`); g.rect(x1 - 0.5, f.e0, x1, f.e1, `wallp${c}`); for (let j = 1; j < bays; j++) if (j % 2) g.rect(colX[j] - 0.15, f.e0, colX[j] + 0.15, f.e1, `wallp${c}`); }
+    else if (g.s > 12) colX.forEach(x => { const st2 = k === 'steel' || k === 'hybrid' || k === 'stick', w = st2 ? 0.25 : k === 'src' ? 0.5 : 0.4; g.rect(x - w, f.e0 + 0.18, x + w, f.e1 - 0.32, `colr${st2 ? ' steel' : ''}${c}`); });
     else colX.forEach(x => g.line(x, f.e0, x, f.e1, `col${k === 'src' ? ' thick' : ''}${k === 'steel' || k === 'hybrid' || k === 'stick' ? ' steel' : ''}${c}`));
     if ((k === 'steel' || (k === 'hybrid' && i % 10 === 9)) && i % 3 === 1) { g.line(colX[0], f.e0, colX[1], f.e1, `brace${c}`); g.line(colX[0], f.e1, colX[1], f.e0, `brace${c}`); }
     if (k === 'pc' && i % 1 === 0) colX.forEach(x => g.line(x - 0.5, f.e0 + 0.6, x + 0.5, f.e0 + 0.6, 'joint'));
@@ -623,10 +686,10 @@ function drawFrame(g, sc, fl, coreAhead, c, at, wpId, T) {
   if (n > 0) g.text(x1 + 1.2, top, `${n}F`, 'fl-t', 'start', 3);
 }
 
-function drawCycle(g, sc, fl, coreAhead, wpId, at, T) {
+function drawCycle(g, sc, fl, coreAhead, wpId, at, T, ctx) {
   const { G, ids } = sc, n = Math.floor(fl), fr = fl - n;
   if (n >= sc.NF) return;
-  const f = sc.floors[n], x0 = G.bx0, x1 = G.bx1, bw = x1 - x0, c = wpId === 'form' || wpId === 'conc' ? ' acc' : '';
+  const f = sc.floors[n], x0 = G.bx0, x1 = G.bx1, bw = x1 - x0, c = wpId === 'form' || wpId === 'conc' || wpId === 'rebar' || wpId === 'pour' ? ' acc' : '';
   const k = ids.form, known = sc.known.has('form');
   const stage = fr < 0.35 ? 0 : fr < 0.6 ? 1 : fr < 0.78 ? 2 : 3;
   // 거푸집
@@ -653,8 +716,9 @@ function drawCycle(g, sc, fl, coreAhead, wpId, at, T) {
   if (stage >= 3 && pc) g.rect(x0, f.e1 + 0.12, x0 + bw * clamp((fr - 0.78) / 0.15, 0, 1), f.e1, `pour${c}`);
   const lab = (pc ? ['PC 기둥 세우기', 'PC 보 거치', 'HCS 슬래브 깔기', '접합부 토핑'] : ['거푸집', '철근 배근', '타설', '양생 · 탈형'])[stage];
   g.text(x0 - 1, f.e1, `${n + 1}F ${lab}`, `cy-t${c}`, 'end', 3);
-  // 펌프
-  if (sc.known.has('conc') && stage === (pc ? 3 : 2)) {
+  // 펌프 (타설 공법을 고른 뒤에는 그 장비로)
+  if (sc.known.has('pour') && (stage === (pc ? 3 : 2) || wpId === 'pour')) drawPour(g, ctx, f, [x0 + bw * 0.5, f.e1 + 0.5]);
+  else if (sc.known.has('conc') && stage === (pc ? 3 : 2)) {
     const target = [x0 + bw * 0.5, f.e1 + 0.5];
     if (f.e1 < 46) EQ.pump(g, G.pw + 12, 0, target, wpId === 'conc' ? 'acc' : '');
     else { g.line(G.core.x1 + 0.4, 0, G.core.x1 + 0.4, f.e1, `pipe${c}`); g.rect(G.pw + 9, 0, G.pw + 15, 2, `eq${c}`); g.line(G.pw + 9, 1, G.core.x1 + 0.4, 1, `pipe${c}`); g.line(G.core.x1 + 0.4, f.e1 + 1, x0 + bw * 0.25, f.e1 + 3, `eq-m${c}`); g.text(G.pw + 12, 3, '고압 펌프', 'eq-lab', 'middle', -3); }
@@ -679,9 +743,15 @@ function concInset(g, sc, T) {
   void T;
 }
 
-function drawSkin(g, sc, sf, fl, c, at, wpId) {
+function drawSkin(g, sc, sf, fl, c, at, wpId, cut) {
   const { G, ids } = sc, x0 = G.bx0, x1 = G.bx1, bw = x1 - x0, k = ids.skin;
   const n = Math.min(Math.floor(sf), Math.floor(fl));
+  if (cut) {
+    // 단면: 외장은 건물 양끝의 얇은 띠 (속이 보이게)
+    const th = k === 'wet' ? 0.3 : k === 'unitcw' || k === 'cw' ? 0.25 : 0.2;
+    if (n > 0) { const top = sc.floors[n - 1].e1; g.rect(x0 - th, 0, x0, top, `skin sk-${k}${c}`); g.rect(x1, 0, x1 + th, top, `skin sk-${k}${c}`); }
+    return;
+  }
   for (let i = 0; i < n; i++) {
     const f = sc.floors[i];
     const m = Math.max(2, Math.round(bw / (k === 'unitcw' ? 1.5 : 3)));
@@ -718,7 +788,7 @@ function drawCrane(g, sc, fl, known, c, at, T, wpId) {
   const R = fx.craneR || 60, cx = sc.crX;
   const H = Math.max(top + 14, 24);
   const loadE = lerp(1, top + 3, 0.5 + 0.5 * Math.sin(T * 0.7));
-  if (!known) { EQ.tower(g, cx, 0, H, R, R * 0.3, 0.2, 0.5, null, '', true, '양중 장비 미정 (L12)'); return; }
+  if (!known) { EQ.tower(g, cx, 0, H, R, R * 0.3, 0.2, 0.5, null, '', true, `양중 장비 미정 (${codeOf('lift')})`); return; }
   const k = ids.lift;
   if (k === 'tower') {
     const slew = T * 0.45, r = EQ.tower(g, cx, 0, H, R, R * 0.3, slew, 0.55 + 0.25 * Math.sin(T * 0.9), loadE, c.trim(), false, `타워크레인 R=${R}m`);

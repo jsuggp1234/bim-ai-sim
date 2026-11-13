@@ -8,12 +8,14 @@ import { generate, DEFAULTS } from '../src/sim/massing.js';
 import { generateX, XDEF } from '../src/sim/massx.js';
 import { quantities } from '../src/sim/quantities.js';
 import { paramsForSite } from '../src/store.js';
-import { siteConditions, derive, resolveMethods, PRIO_DEFAULT, WPS } from '../src/sim/methods.js';
+import { siteConditions, derive, resolveMethods, PRIO_DEFAULT, WPS, GROUPS, BASELINE, baseOpt } from '../src/sim/methods.js';
 import { schedule, P4_DEFAULTS } from '../src/sim/process.js';
 import { estimate, P5_DEFAULTS } from '../src/sim/cost.js';
 import { detect } from '../src/sim/clash.js';
 import { wpImpact, vsBaseline, delta, sectionGeom, wpWindows, wallMove, ppv, ppvLimit, pileNoise, anchorLen, WP_ORDER } from '../src/sim/impact.js';
-import { makeScene, frame, roiFor, winFor } from '../src/ui/buildsim.js';
+import { makeScene, frame, roiFor, winFor, focusOf } from '../src/ui/buildsim.js';
+import { plan3d } from '../src/ui/build3d.js';
+import { MORE } from '../src/sim/wps-more.js';
 
 globalThis.performance ??= { now: () => Date.now() };
 
@@ -33,11 +35,13 @@ const R = (id) => { if (!cache.has(id)) cache.set(id, mk(id)); return cache.get(
 const WP_IDS = new Set(WPS.map(w => w.id));
 const OPT_OK = (wp, opt) => WPS.find(w => w.id === wp)?.opts.some(o => o.id === opt);
 
-test('확정 순서는 지반조사부터 16개 공종 전부', () => {
-  assert.equal(WP_ORDER.length, 16);
+test('확정 순서는 지반조사부터 37개 공종 전부, 묶음 6개가 순서를 빈틈없이 덮는다', () => {
+  assert.equal(WP_ORDER.length, 37);
   assert.equal(WP_ORDER[0], 'survey');
   assert.equal(WP_ORDER[1], 'improve');
   assert.deepEqual(new Set(WP_ORDER), WP_IDS);
+  assert.deepEqual(GROUPS.flatMap(g => g.ids), WP_ORDER);
+  WPS.forEach((w, i) => { assert.equal(w.code, 'L' + String(i + 1).padStart(2, '0')); assert.ok(GROUPS.find(g => g.k === w.grp), w.id); });
 });
 
 test('용도마다 단면 형상과 공종 재생 창이 유효하다', () => {
@@ -135,4 +139,29 @@ test('시뮬레이션은 아직 확정하지 않은 공종을 확정된 것처�
   const exA = frame(known, 'excav', 0.6, 0, roiFor(known, 'excav')).svg;
   const exB = frame(makeScene(r, WP_ORDER.slice(0, 5)), 'excav', 0.6, 0, roiFor(known, 'excav')).svg;
   assert.notEqual(exA, exB, '굴착 공법을 아직 고르지 않으면 장비가 다르게(흐리게) 그려져야 한다');
+});
+
+test('세부 공종(가설~시운전): 상세도 창이 그려지고, 확대 시점이 유한하다', () => {
+  ['office', 'housing', 'fab', 'logistics'].forEach(id => {
+    const r = R(id), sc = makeScene(r, WPS.map(w => w.id));
+    Object.keys(MORE).forEach(wp => {
+      const f = frame(sc, wp, 0.55, 1.3, roiFor(sc, wp), []);
+      assert.ok(f.svg.includes('class="inset"'), `${id} ${wp}: 상세도 없음`);
+      assert.ok(!/NaN|undefined|Infinity/.test(f.svg), `${id} ${wp}`);
+      assert.ok(f.at && typeof f.at === 'object');
+      const roi = focusOf(sc, wp, 0.5);
+      assert.ok([roi.x0, roi.x1, roi.e0, roi.e1].every(Number.isFinite) && roi.x1 > roi.x0 && roi.e1 > roi.e0, `${id} ${wp} focus`);
+    });
+  });
+});
+
+test('3D 장면 치수: 용도마다 평면 깊이·층 바닥 범위가 유효하다', () => {
+  USES_T.forEach(id => {
+    const r = R(id), sc = makeScene(r, WPS.map(w => w.id)), D = plan3d(sc);
+    assert.ok(D.ok, id);
+    assert.ok(D.bd >= 12 && D.pd >= D.bd && D.Z > D.pd / 2 && D.xr > D.xl, id);
+    assert.equal(D.fp.length, sc.NF, id);
+    D.fp.forEach(f => assert.ok(f.x1 > f.x0 && f.z1 > f.z0, id));
+    assert.ok(D.colX.length >= 3 && D.colZ.length >= 3, id);
+  });
 });

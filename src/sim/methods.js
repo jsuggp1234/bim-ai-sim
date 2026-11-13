@@ -2,6 +2,8 @@
 // 기준 점수(0~100: 높을수록 유리)는 국내 시공 사례를 바탕으로 한 상대 비교값이다. 현장 조건 규칙이 점수를 더하고 빼며 그 이유를 남긴다.
 import { GROUND } from './kr-sites.js';
 import { useOf } from './uses.js';
+import { MORE, ORDER, GROUPS, TRAD } from './wps-more.js';
+export { GROUPS };
 
 export const PRIO = { time: { name: '공기', en: 'TIME' }, cost: { name: '비용', en: 'COST' }, quality: { name: '품질', en: 'QUALITY' }, safety: { name: '안전', en: 'SAFETY' }, env: { name: '환경', en: 'ENV' } };
 export const PRIO_DEFAULT = { time: 25, cost: 25, quality: 20, safety: 20, env: 10 };
@@ -22,7 +24,7 @@ export function siteConditions(site, gen, Q) {
   const adj = urban ? 12 : (site.kinds || []).some(k => ['industrial', 'chem', 'port', 'energy', 'logistics'].includes(k)) ? 80 : 35;
   const noise = (a.b ?? 40) < 30 ? 'high' : (a.b ?? 40) > 65 ? 'low' : 'mid';
   const rockDepth = g === 'R' ? 4 : g === 'W' ? 14 : g === 'S' ? 28 : 45;
-  return { ground: g, gw: a.gw ?? 7, adj, noise, rockDepth };
+  return { ground: g, gw: a.gw ?? 7, adj, noise, rockDepth, reg: site.reg || 'SEL' };
 }
 // 매스·조건에서 파생되는 값
 export function derive(cond, gen, Q, site) {
@@ -46,7 +48,7 @@ export function derive(cond, gen, Q, site) {
 // ---------- 작업 패키지와 공법 ----------
 // b: 기준 점수 {time, cost, quality, safety, env}, fx: 공정·예산 효과, how: 시공 순서, rule(c, d) → [[점수 보정 {}, 이유], …] 또는 { no: 사유 }
 const O = (id, name, b, extra = {}) => ({ id, name, b, ...extra });
-export const WPS = [
+const CORE = [
   {
     id: 'survey', code: 'L01', name: '지반조사', en: 'SITE INVESTIGATION', phase: 'survey',
     desc: '시추·시험으로 지층과 지하수를 파악해 흙막이·기초 설계의 불확실성을 줄입니다.',
@@ -191,7 +193,7 @@ export const WPS = [
     rule(c, d, o, sel) {
       const r = [];
       if (d.belowGW < 0.5) return o.id === 'none' ? [[{ quality: 20, safety: 15 }, `지하수면(GL−${c.gw}m)이 굴착 바닥보다 깊습니다`]] : { no: '지하수면 위 굴착' };
-      const wt = (WPS[2].opts.find(x => x.id === sel.wall) || { fx: {} }).fx.watertight ?? 0.5;
+      const wt = (CORE_BY.wall.opts.find(x => x.id === sel.wall) || { fx: {} }).fx.watertight ?? 0.5;
       if (o.id === 'none') r.push([{ safety: -40 * (1 - wt), quality: -30 * (1 - wt) }, wt >= 0.9 ? '벽체가 차수벽이라 굴착 중 유입은 적습니다' : `지하수면 아래 ${d.belowGW.toFixed(0)}m를 차수 없이 파면 유입·보일링 위험이 큽니다`]);
       if (o.id === 'dewater') { if (c.adj < 25) r.push([{ safety: -25, env: -10 }, '지하수위를 낮추면 인접 건물이 침하합니다']); else r.push([{ cost: 6 }, '주변 건물이 멀어 양수가 가장 단순합니다']); }
       if ((o.id === 'grout' || o.id === 'jsp') && wt < 0.5) r.push([{ quality: 12, safety: 10 }, '투수성 벽체(H-Pile·CIP)의 틈을 막아야 합니다']);
@@ -461,10 +463,21 @@ export const WPS = [
     },
   },
 ];
+const CORE_BY = Object.fromEntries(CORE.map(w => [w.id, w]));
+// 전체 공종: 기초 이전 + 기초 이후 세부 공종을 확정 순서대로 (코드 L01~L37, 묶음 grp)
+const GRP_OF = Object.fromEntries(GROUPS.flatMap(g => g.ids.map(id => [id, g.k])));
+export const WPS = ORDER.map((id, i) => Object.assign(CORE_BY[id] || MORE[id], { code: 'L' + String(i + 1).padStart(2, '0'), grp: GRP_OF[id] }));
 export const WP_BY_ID = Object.fromEntries(WPS.map(w => [w.id, w]));
 
-// 기준선 (전통 공법 묶음) — 효과 비교용
-export const BASELINE = { survey: 'spt', improve: 'none', wall: 'cip', support: 'strut', water: 'grout', excav: 'normal', found: 'phc', base: 'bottomup', frame: 'rcframe', form: 'conv', conc: 'normal', lift: 'tower', skin: 'wet', mep: 'conv', plan: 'cpm', qa: [] };
+// 기준선 (전통 공법 묶음) — 효과 비교용. 목록이면 이 현장에서 쓸 수 있는 첫 번째 공법
+export const BASELINE = { survey: 'spt', improve: 'none', wall: 'cip', support: 'strut', water: 'grout', excav: 'normal', found: 'phc', base: 'bottomup', frame: 'rcframe', form: 'conv', conc: 'normal', lift: 'tower', skin: 'wet', mep: 'conv', plan: 'cpm', qa: [], ...TRAD };
+// 평가된 공종(L: resolveMethods 목록의 한 줄)에서 전통 공법 하나를 고른다
+export function baseOpt(L) {
+  const b = BASELINE[L.wp.id];
+  if (L.wp.multi || !Array.isArray(b)) return b;
+  return b.find(id => L.ev.find(e => e.o.id === id && e.ok)) || b[0];
+}
+export const isTrad = (wpId, optId) => { const b = BASELINE[wpId]; return Array.isArray(b) ? b.includes(optId) : b === optId; };
 
 // 한 공종의 공법 평가 (sel: 지금까지 고른 다른 공종)
 function evalWP(wp, cond, d, prio, sel) {
@@ -494,12 +507,14 @@ export function resolveMethods(cond, d, picks = {}, prio = PRIO_DEFAULT) {
       sel[wp.id] = chosen;
     } else {
       rec = okList.length ? okList[0].o.id : wp.opts[0].id;
-      const p = picks[wp.id];
+      let p = picks[wp.id];
+      if (Array.isArray(p)) p = p.find(id => ev.find(e => e.o.id === id && e.ok)) || null; // 후보 목록 (기준선)
       chosen = p && ev.find(e => e.o.id === p && e.ok) ? p : rec;
       sel[wp.id] = chosen;
     }
-    const user = wp.multi ? Array.isArray(picks[wp.id]) : !!(picks[wp.id] && picks[wp.id] === chosen && chosen !== rec);
-    const invalid = !wp.multi && picks[wp.id] && !ev.find(e => e.o.id === picks[wp.id] && e.ok);
+    const pk = picks[wp.id], listPick = !wp.multi && Array.isArray(pk);
+    const user = wp.multi ? Array.isArray(pk) : !!(pk && !listPick && pk === chosen && chosen !== rec);
+    const invalid = !wp.multi && !listPick && pk && !ev.find(e => e.o.id === pk && e.ok);
     out.push({ wp, ev, rec, chosen, user, invalid: invalid ? picks[wp.id] : null });
   });
   return { list: out, sel, fx: effects(out, d), prio };
@@ -532,6 +547,37 @@ export function effects(list, d) {
   fx.rework = qa.reduce((a, o) => a + (o.fx.rework || 0), 0);
   fx.qaCostPct = qa.reduce((a, o) => a + (o.fx.qcost || 0), 0); // % of direct
   fx.qa = qa.map(o => o.id);
+  // ---- 기초 이후 세부 공종 ----
+  const P = (id) => pick(id) || { id: null, fx: {} }, g = (o, k, v = 1) => (o.fx[k] ?? v);
+  const pr = P('prep'), bw = P('bwp'), rb = P('rebar'), po = P('pour'), st = P('steel'), ho = P('hoist'), gl = P('glaz'), ins = P('insul'), rf = P('roof'),
+    hv = P('hvac'), pb = P('plumb'), fi = P('fire'), el = P('elec'), ic = P('ict'), el2 = P('elev'), pa = P('part'), fl = P('floor'), ce = P('ceil'), pt = P('paint'), la = P('land'), cm = P('comm');
+  const steelFrame = ['hybrid', 'steel', 'src', 'truss', 'module', 'stick'].includes(fr.id);
+  // 가설: 착공 준비 기간, 가설비(공통 가설 %)
+  fx.prepDays = g(pr, 'prepDays', 18); fx.prepK = g(pr, 'prepK'); fx.noiseCut = g(pr, 'noiseCut', 0);
+  // 지하 방수: 지하층 사이클·지하 공사비·누수 지수
+  fx.baseCycK *= g(bw, 'bwpCyc'); fx.bwpK = g(bw, 'bwpK'); fx.leak = g(bw, 'leak');
+  // 골조: 철근·타설·철골이 층 사이클과 골조 단가를 바꾼다
+  fx.rebCyc = g(rb, 'rebCyc'); fx.pourCyc = g(po, 'pourCyc'); fx.steelCyc = steelFrame ? g(st, 'steelCyc') : 1;
+  fx.structCycK *= fx.rebCyc * fx.pourCyc * fx.steelCyc;
+  fx.structCostK *= (1 + (g(rb, 'rebK') - 1) * 0.35) * (steelFrame ? 1 + (g(st, 'steelK') - 1) * 0.4 : 1);
+  fx.pourCap = g(po, 'pourCap'); fx.winterK *= 1 - g(po, 'winterCut', 0);
+  // 수직 운송: 설비·마감 층 작업 속도
+  fx.hoistK = g(ho, 'hoistK'); fx.liftEarly = !!ho.fx.liftEarly;
+  // 외피: 창호·단열이 외장 단가, 지붕이 외피 종료 시점
+  fx.skinK *= (1 + (g(gl, 'glazK') - 1) * 0.45) * (1 + (g(ins, 'insK') - 1) * 0.15);
+  fx.uval = g(gl, 'uval', 1.4); fx.pv = !!(gl.fx.pv || rf.fx.pv);
+  fx.roofDays = g(rf, 'roofDays', 25); fx.roofK = g(rf, 'roofK');
+  // 설비: 시공 방식(L23) × 공종별 가중 (공조 35 · 위생 20 · 소방 15 · 전기 20 · 통신 10)
+  fx.mepCycK = me.fx.mepCyc * (0.35 * g(hv, 'hvacCyc') + 0.2 * g(pb, 'plumbCyc') + 0.15 * g(fi, 'fireCyc') + 0.2 * g(el, 'elecCyc') + 0.1);
+  fx.mepK = me.fx.mepC * (0.35 * g(hv, 'hvacK') + 0.2 * g(pb, 'plumbK') + 0.15 * g(fi, 'fireK') + 0.2 * g(el, 'elecK') + 0.1 * g(ic, 'ictK'));
+  // 마감: 칸막이 30 · 바닥 30 · 천장 20 · 도장 20
+  fx.finCycK = 0.3 * g(pa, 'partCyc') + 0.3 * g(fl, 'floorCyc') + 0.2 * g(ce, 'ceilCyc') + 0.2 * g(pt, 'paintCyc');
+  fx.finK = 0.3 * g(pa, 'partK') + 0.3 * g(fl, 'floorK') + 0.2 * g(ce, 'ceilK') + 0.2 * g(pt, 'paintK');
+  fx.finSave = Math.min(0.6, fx.finSave + g(pb, 'finCut', 0));
+  // 준공: 승강기 설치 기간·시운전 방식·조경
+  fx.elevDays = g(el2, 'elevDays'); fx.liftK = g(el2, 'liftK');
+  fx.commK = g(cm, 'commK') * (0.7 + 0.3 * fx.elevDays) * (fx.liftEarly ? 0.9 : 1);
+  fx.landK = g(la, 'landK'); fx.landC = g(la, 'landC');
   // 종합 지수 (선택한 공법들의 품질·안전·환경 평균, 0~100)
   const ch = list.filter(x => !x.wp.multi).map(x => x.ev.find(e => e.o.id === x.chosen)).filter(e => e && e.ok);
   const avg = (k) => ch.reduce((a, e) => a + e.adj[k], 0) / Math.max(1, ch.length);

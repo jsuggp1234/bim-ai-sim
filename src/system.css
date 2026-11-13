@@ -398,10 +398,25 @@ th.r, td.r { text-align: right; }
 @media (max-width: 520px) { .layers { grid-template-columns: minmax(0, 1fr); } .opts { grid-template-columns: minmax(0, 1fr); } .b5 { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; } }
 
 /* ---------- 04.2 공종별 시공 시뮬레이터 ---------- */
-.wz-rail { display: grid; grid-template-columns: 8fr 4fr 2fr 2fr; border-radius: var(--r); box-shadow: inset 0 0 0 1px var(--line); background: var(--card); margin-bottom: 14px; }
-.rl-g { min-width: 0; border-left: 1px solid var(--line); }
-.rl-g:first-child { border-left: 0; }
-.rl-gn { display: block; font-family: var(--f-mono); font-size: 9.5px; color: var(--muted); padding: 8px 10px 0; letter-spacing: .04em; }
+.wz-rail { border-radius: var(--r); box-shadow: inset 0 0 0 1px var(--line); background: var(--card); margin-bottom: 14px; }
+.rg-tabs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
+.rg-tabs > li { min-width: 0; border-left: 1px solid var(--line); }
+.rg-tabs > li:first-child { border-left: 0; }
+.rg { width: 100%; display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: baseline; text-align: left; padding: 9px 12px 10px; border: 0; background: transparent; color: var(--ink); cursor: pointer; font: inherit; position: relative; transition: background .15s; }
+.rg:hover { background: var(--panel); }
+.rg-c { grid-column: 1 / -1; font-family: var(--f-mono); font-size: 9.5px; color: var(--muted); letter-spacing: .03em; }
+.rg-n { font-size: 12.5px; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rg-s { font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.rg-bar { grid-column: 1 / -1; display: block; height: 3px; background: var(--hair); border-radius: 2px; overflow: hidden; margin-top: 5px; }
+.rg-bar > i { display: block; height: 100%; background: var(--ink-2); }
+.rg.next .rg-bar > i { background: var(--accent); }
+.rg.done .rg-s { color: var(--good); }
+.rg.lock { opacity: .42; cursor: not-allowed; }
+.rg.lock:hover { background: transparent; }
+.rg.on { background: color-mix(in srgb, var(--accent) 9%, var(--card)); box-shadow: inset 0 -2px 0 var(--accent); }
+.rg.on .rg-c { color: var(--accent-ink); }
+.rg.shake { animation: wz-shake .35s; }
+.rl-g { min-width: 0; }
 .rl-g ol { list-style: none; margin: 0; padding: 6px; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 4px; }
 .rl { width: 100%; display: grid; gap: 1px; text-align: left; padding: 8px 9px 9px; border: 0; border-radius: 3px; background: transparent; color: var(--ink); cursor: pointer; position: relative; min-width: 0; box-shadow: inset 0 0 0 1px var(--hair); font: inherit; transition: background .15s, box-shadow .15s; }
 .rl:hover { background: var(--panel); }
@@ -428,7 +443,32 @@ th.r, td.r { text-align: right; }
 .wz-sim { padding: 10px; display: grid; gap: 10px; min-width: 0; }
 .sim-box { position: relative; aspect-ratio: 16 / 9; background: var(--paper); border-radius: 3px; overflow: hidden; }
 .sim-box svg { display: block; width: 100%; height: 100%; }
-.sim-ctl { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.sim-ctl { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+.sim-view { display: inline-flex; }
+.sim-view button { white-space: nowrap; }
+/* 3D 시뮬레이션 */
+.sim-box.is3d { background: var(--paper); }
+.s3 { position: absolute; inset: 0; }
+.s3 canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.s3 canvas:active { cursor: grabbing; }
+.s3-hud { position: absolute; top: 10px; left: 14px; display: grid; gap: 2px; pointer-events: none; text-shadow: 0 0 6px var(--paper), 0 0 2px var(--paper); }
+.s3-hud.r { left: auto; right: 14px; text-align: right; }
+.s3-hud span { font-family: var(--f-mono); font-size: 10px; color: var(--muted); letter-spacing: .03em; }
+.s3-hud b { font-size: 13px; font-weight: 650; color: var(--ink); }
+.s3-help { position: absolute; left: 14px; bottom: 10px; font-family: var(--f-mono); font-size: 9.5px; color: var(--muted); pointer-events: none; text-shadow: 0 0 4px var(--paper); }
+.s3-fit { position: absolute; right: 12px; bottom: 10px; }
+.s3-mks { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.s3-lbs { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.s3-lb { position: absolute; transform: translate(0, -50%); font: 9.5px var(--f-mono); font-style: normal; color: var(--ink-2); white-space: nowrap; text-shadow: 0 0 3px var(--paper), 0 0 6px var(--paper); }
+.s3-lb.gw { color: #5aa6ec; }
+.s3-mk { position: absolute; width: 19px; height: 19px; margin: -9.5px 0 0 -9.5px; border-radius: 50%; background: var(--bad); color: #fff; font: 700 10.5px/19px var(--f-mono); font-style: normal; text-align: center; box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 35%, transparent); }
+.s3-mk.s1 { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 35%, transparent); }
+@media (max-width: 560px) {
+  .sim-ctl { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+  .sim-view { grid-column: 1 / -1; justify-self: start; }
+  .s3-help { display: none; }
+  .s3-hud.r { top: 44px; left: 14px; right: auto; text-align: left; }
+}
 .sim-ctl .btn.sm { min-width: 38px; justify-content: center; }
 .sim-ctl input[type=range] { width: 100%; accent-color: var(--accent); }
 .sim-cap { display: flex; gap: 6px 10px; align-items: baseline; flex-wrap: wrap; font-size: 13px; min-height: 22px; padding: 0 2px; }
@@ -512,9 +552,10 @@ th.r, td.r { text-align: right; }
 @media (max-width: 1180px) { .icols { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .icols .ic.pro { grid-column: 1 / -1; } }
 @media (max-width: 1000px) { .wz { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 900px) {
-  .wz-rail { display: flex; overflow-x: auto; scrollbar-width: thin; }
-  .rl-g { flex: none; }
-  .rl-g ol { grid-auto-columns: 104px; }
+  .rg-tabs { display: flex; overflow-x: auto; scrollbar-width: thin; }
+  .rg-tabs > li { flex: none; width: 132px; }
+  .rl-g { overflow-x: auto; scrollbar-width: thin; }
+  .rl-g ol { grid-auto-columns: 112px; width: max-content; }
 }
 @media (max-width: 700px) { .icols { grid-template-columns: minmax(0, 1fr); } .ik dl > div { padding: 0 12px; } .ik dd { font-size: 15px; } .sim-steps { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .sim-box { aspect-ratio: 4 / 3; } }
 @media (max-width: 560px) { .sim-box { aspect-ratio: 480 / 560; } }
@@ -683,6 +724,135 @@ th.r, td.r { text-align: right; }
 .bsim .nb-pt { fill: var(--muted); font-size: 9px; }
 .bsim .hud-bg { fill: var(--paper); opacity: .9; }
 .bsim .eq-lab, .bsim .cy-t, .bsim .fl-t, .bsim .st-lab, .bsim .gw-t, .bsim .ok-t, .bsim .warn-t, .bsim .bad-t, .bsim .reach-t, .bsim .nb-pt, .bsim .now-t { paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
+/* 세부 공종 (buildsim-more.js) */
+.bsim .fence { fill: var(--ink-2); } .bsim .fence.snd { fill: color-mix(in srgb, #3d8fd6 30%, var(--panel)); stroke: var(--ink-2); stroke-width: .6; }
+.bsim .fence.fmesh { fill: none; stroke: var(--ink-2); stroke-dasharray: 2 2; } .bsim .fence.acc { stroke: var(--accent); stroke-width: 1; }
+.bsim .fence-l { stroke: var(--ink-2); stroke-width: .6; opacity: .6; }
+.bsim .office { fill: var(--panel); stroke: var(--ink-2); stroke-width: 1; } .bsim .office.acc { stroke: var(--accent); }
+.bsim .wash { fill: #3d8fd6; } .bsim .wash.acc { fill: var(--accent); }
+.bsim .wdrop { fill: #5aa6ec; opacity: .8; }
+.bsim .board { fill: #10131a; stroke: var(--ink-2); }
+.bsim .board-t { fill: #7cf29a; font-size: 9.5px; font-weight: 700; }
+.bsim .nwave { fill: none; stroke: var(--warn); stroke-width: 1.3; } .bsim .nwave.cut { stroke: var(--good); stroke-dasharray: 2 3; }
+.bsim .geo-b { stroke: #5aa6ec; stroke-width: 1.2; stroke-dasharray: 5 2; } .bsim .geo-b.acc { stroke: var(--accent); }
+.bsim .soil { fill: color-mix(in srgb, #7a5c3a 55%, var(--paper)); } .bsim .soil.acc { stroke: var(--accent); stroke-width: .8; }
+.bsim .drainb { fill: #3d8fd6; opacity: .6; }
+.bsim .pave { fill: color-mix(in srgb, var(--ink) 30%, var(--paper)); } .bsim .pave.heavy { fill: color-mix(in srgb, var(--ink) 45%, var(--paper)); }
+.bsim .pave.perm { fill: url(#bp-sand); stroke: color-mix(in srgb, var(--ink) 40%, var(--paper)); stroke-width: .6; } .bsim .pave.acc { stroke: var(--accent); stroke-width: .8; }
+.bsim .trunk { stroke: #8b6f3a; stroke-width: 1.4; }
+.bsim .tree { fill: color-mix(in srgb, #3fae6a 55%, var(--paper)); stroke: #3fae6a; stroke-width: .8; } .bsim .tree.acc { stroke: var(--accent); }
+.bsim .rg { fill: color-mix(in srgb, #3d8fd6 35%, var(--paper)); }
+.bsim .pcblk { fill: color-mix(in srgb, var(--ink) 22%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.bsim .load-a { stroke: var(--warn); stroke-width: 1.2; marker-end: none; }
+.bsim .wp { stroke-width: 2.4; fill: none; }
+.bsim .wp-sheet { stroke: #2b2b2b; } .bsim .wp-pre { stroke: #2f7fd0; } .bsim .wp-bento { stroke: #a67c3d; stroke-width: 3; } .bsim .wp-cryst { stroke: #8fa1b5; stroke-dasharray: 3 2; }
+.bsim .wp.acc { stroke: var(--accent); }
+.bsim .dbl-w { stroke: var(--ink-2); stroke-width: 1.4; }
+.bsim .wstop { fill: var(--accent); }
+.bsim .hydro { fill: color-mix(in srgb, #3d8fd6 25%, transparent); stroke: #3d8fd6; stroke-width: .8; }
+.bsim .drip { fill: #5aa6ec; }
+.bsim .fb-foam { fill: color-mix(in srgb, var(--ink) 14%, var(--paper)); } .bsim .fb-mort { fill: #9a9aa0; } .bsim .fb-dry { fill: #c58a4a; }
+.bsim .fb-oa { fill: #8fa1b5; } .bsim .fb-ped { stroke: #8fa1b5; stroke-width: .7; } .bsim .fb-epoxy { fill: #3fae6a; }
+.bsim .fb-pol { stroke: #c9ccd3; stroke-width: 1.4; } .bsim .fb-stone { fill: #d8cdb8; } .bsim .fb-tile { fill: #7b8ea6; }
+.bsim .fb-foam.acc, .bsim .fb-mort.acc, .bsim .fb-dry.acc, .bsim .fb-oa.acc, .bsim .fb-epoxy.acc, .bsim .fb-stone.acc, .bsim .fb-tile.acc { fill: var(--accent); } .bsim .fb-pol.acc { stroke: var(--accent); }
+.bsim .cl { stroke: #c9ccd3; stroke-width: 1.6; } .bsim .cl.cl-tbar { stroke-dasharray: 6 1; } .bsim .cl.cl-cleang { stroke: #8fa1b5; } .bsim .cl.acc { stroke: var(--accent); }
+.bsim .cl-exp { stroke: var(--muted); stroke-dasharray: 1 3; } .bsim .cl-exp.acc { stroke: var(--accent); }
+.bsim .cl-hang { stroke: var(--muted); stroke-width: .5; opacity: .7; }
+.bsim .ffu { fill: color-mix(in srgb, #8fa1b5 50%, var(--paper)); stroke: #8fa1b5; stroke-width: .6; } .bsim .ffu.acc { stroke: var(--accent); }
+.bsim .lamp { fill: #ffd76a; }
+.bsim .ptn { fill: color-mix(in srgb, var(--ink) 30%, var(--paper)); } .bsim .ptn.ptn-block { fill: #9a9aa0; } .bsim .ptn.ptn-alc { fill: #c9c4b8; } .bsim .ptn.ptn-module { fill: #b9a77f; } .bsim .ptn.ptn-cleanp { fill: #c9d5e3; }
+.bsim .ptn.painted { stroke: #e9d38a; stroke-width: 1; } .bsim .ptn.acc { stroke: var(--accent); stroke-width: 1; }
+.bsim .sprayc { fill: color-mix(in srgb, #e9d38a 45%, transparent); }
+.bsim .ins { fill: #f2c94c; } .bsim .ins.ins-o { fill: #d9b45a; } .bsim .ins.ins-vip { fill: #b4c0cc; } .bsim .ins.ins-sp2 { fill: #f2e3a4; } .bsim .ins.acc { fill: var(--accent); }
+.bsim .ins-sp { fill: none; stroke: #f2e3a4; stroke-width: 2.2; } .bsim .ins-sp.acc { stroke: var(--accent); }
+.bsim .ins-core { stroke: #f2c94c; stroke-width: 2; } .bsim .ins-core.acc { stroke: var(--accent); }
+.bsim .gl-dbl, .bsim .gl-tpl, .bsim .gl-vac, .bsim .gl-pvc, .bsim .gl-bipv { stroke: #5aa6ec; stroke-width: .9; }
+.bsim .gl-pvc { stroke: #e7e7ea; } .bsim .gl-vac { stroke-dasharray: 1 1; }
+.bsim .gl-dbl.acc, .bsim .gl-tpl.acc, .bsim .gl-vac.acc, .bsim .gl-pvc.acc, .bsim .gl-bipv.acc { stroke: var(--accent); }
+.bsim .pvcell { fill: #253a6e; }
+.bsim .spark { stroke: #ffb547; stroke-width: 1.2; }
+.bsim .ct { fill: var(--panel); stroke: var(--g4); stroke-width: 1.1; } .bsim .ct.acc { stroke: var(--accent); }
+.bsim .fan { fill: none; stroke: var(--g4); stroke-width: 1; }
+.bsim .odu { fill: var(--panel); stroke: var(--g3); } .bsim .odu.acc { stroke: var(--accent); }
+.bsim .rf-sheet { fill: #2b2b2b; } .bsim .rf-conc { fill: #9a9aa0; } .bsim .rf-ure { fill: #3fae6a; }
+.bsim .rf-metal { fill: none; stroke: #8fa1b5; stroke-width: 1.2; } .bsim .pv { stroke: #253a6e; stroke-width: 2.6; }
+.bsim .rf-sheet.acc, .bsim .rf-conc.acc, .bsim .rf-ure.acc { fill: var(--accent); } .bsim .rf-metal.acc, .bsim .pv.acc { stroke: var(--accent); }
+.bsim .yard { fill: color-mix(in srgb, var(--ink) 25%, var(--paper)); } .bsim .yard.acc { fill: var(--accent); }
+.bsim .cage { fill: none; stroke: var(--warn); stroke-width: 1.2; } .bsim .cage.acc { stroke: var(--accent); }
+.bsim .cpl { fill: var(--warn); } .bsim .cpl.acc { fill: var(--accent); }
+.bsim .mesh { fill: none; stroke: var(--warn); stroke-width: .8; } .bsim .mesh.acc { stroke: var(--accent); }
+.bsim .bolt { fill: var(--ink); }
+.bsim .blk { fill: color-mix(in srgb, #8fa1b5 20%, transparent); stroke: #8fa1b5; } .bsim .blk.acc { stroke: var(--accent); }
+.bsim .fireproof { fill: color-mix(in srgb, #e7e2d6 60%, transparent); stroke: #c9c4b8; stroke-dasharray: 2 2; }
+.bsim .hmast { fill: none; stroke: var(--ink); stroke-width: 1; } .bsim .hmast.acc { stroke: var(--accent); }
+.bsim .hcar { fill: var(--warn); stroke: var(--ink); stroke-width: .6; } .bsim .hcar.acc { fill: var(--accent); }
+.bsim .gap { fill: var(--bad); opacity: .35; }
+.bsim .shaft { fill: color-mix(in srgb, var(--ink) 8%, transparent); stroke: var(--ink-2); stroke-dasharray: 3 2; } .bsim .shaft.acc { stroke: var(--accent); }
+.bsim .jplat { fill: var(--ink-2); } .bsim .jplat.acc { fill: var(--accent); }
+.bsim .tent { fill: color-mix(in srgb, #ffb547 12%, transparent); stroke: #ffb547; stroke-dasharray: 4 2; }
+.bsim .heater { fill: color-mix(in srgb, #ff7a45 55%, transparent); }
+.bsim .shaft-d { stroke: var(--g4); stroke-width: 3; opacity: .55; } .bsim .shaft-d.acc { stroke: var(--accent); }
+.bsim .refl { stroke: #c58a4a; stroke-width: 1; } .bsim .idu { fill: var(--panel); stroke: var(--g3); stroke-width: .8; }
+.bsim .refl.acc { stroke: var(--accent); } .bsim .idu.acc { stroke: var(--accent); }
+.bsim .rad { fill: none; stroke: #ff7a45; stroke-width: .9; } .bsim .rad.dh { stroke: #ffb547; } .bsim .rad.acc { stroke: var(--accent); }
+.bsim .crac { fill: var(--panel); stroke: var(--g4); } .bsim .crac.acc { stroke: var(--accent); }
+.bsim .rackit { fill: color-mix(in srgb, var(--ink) 25%, var(--paper)); stroke: var(--ink-2); stroke-width: .5; }
+.bsim .ductb { fill: color-mix(in srgb, var(--g4) 30%, transparent); stroke: var(--g4); stroke-width: .8; } .bsim .ductb.acc { stroke: var(--accent); fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+.bsim .diff { stroke: var(--g4); stroke-width: 1; }
+.bsim .plant { fill: var(--panel); stroke: var(--g4); stroke-width: 1.1; } .bsim .plant.acc { stroke: var(--accent); }
+.bsim .heatp { stroke: #ff7a45; stroke-width: 2; stroke-dasharray: 6 2; }
+.bsim .wriser { stroke: #3d8fd6; stroke-width: 1.6; } .bsim .wriser.upw { stroke: #a4d8ff; } .bsim .wriser.acc { stroke: var(--accent); }
+.bsim .tank { fill: color-mix(in srgb, #3d8fd6 30%, var(--paper)); stroke: #3d8fd6; } .bsim .tank.acc { stroke: var(--accent); }
+.bsim .pod { fill: color-mix(in srgb, #e7e7ea 55%, var(--paper)); stroke: #3d8fd6; stroke-width: .8; } .bsim .pod.acc { stroke: var(--accent); }
+.bsim .spr { stroke: var(--bad); stroke-width: 1; } .bsim .sprh { stroke: var(--bad); stroke-width: 1; } .bsim .spr.acc, .bsim .sprh.acc { stroke: var(--accent); }
+.bsim .sens { fill: var(--bad); } .bsim .sens.acc { fill: var(--accent); }
+.bsim .gascyl { fill: color-mix(in srgb, var(--bad) 40%, var(--paper)); stroke: var(--bad); } .bsim .gascyl.acc { stroke: var(--accent); }
+.bsim .fpump { fill: var(--panel); stroke: var(--bad); } .bsim .fpump.acc { stroke: var(--accent); }
+.bsim .bus { stroke: #ffb547; stroke-width: 3; } .bsim .cable { stroke: #ffb547; stroke-width: .9; } .bsim .bus.acc, .bsim .cable.acc { stroke: var(--accent); }
+.bsim .xfmr { fill: var(--panel); stroke: #ffb547; stroke-width: 1.1; } .bsim .ups, .bsim .ess { fill: color-mix(in srgb, #ffb547 30%, var(--paper)); stroke: #ffb547; }
+.bsim .xfmr.acc, .bsim .ups.acc, .bsim .ess.acc { stroke: var(--accent); }
+.bsim .ictl { stroke: #b28cf2; stroke-width: 1.2; stroke-dasharray: 4 2; } .bsim .ictl.acc { stroke: var(--accent); }
+.bsim .lit { fill: color-mix(in srgb, #ffd76a 26%, transparent); } .bsim .lit.occ { fill: color-mix(in srgb, #3fae6a 26%, transparent); } .bsim .lit.acc { stroke: var(--accent); stroke-width: .6; }
+.bsim .ptcl { fill: var(--accent); opacity: .8; }
+.bsim .hway { fill: color-mix(in srgb, var(--ink) 6%, transparent); stroke: var(--ink-2); stroke-width: .8; } .bsim .hway.acc { stroke: var(--accent); }
+.bsim .ecar { fill: var(--ink-2); } .bsim .ecar.acc { fill: var(--accent); }
+.bsim .rail { stroke: var(--muted); stroke-dasharray: 2 2; }
+.bsim .mroom { fill: var(--panel); stroke: var(--ink-2); } .bsim .mroom.acc { stroke: var(--accent); }
+/* 확대 화면 디테일 */
+.bsim .dim { opacity: .28; }
+.bsim .fb-ins { fill: #f2c94c; } .bsim .fb-void { fill: color-mix(in srgb, var(--ink) 6%, transparent); } .bsim .fb-fin { fill: #c58a4a; }
+.bsim .fb-ins.acc, .bsim .fb-fin.acc { fill: var(--accent); } .bsim .fb-void.acc { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
+.bsim .fb-coil { fill: none; stroke: #ff7a45; stroke-width: 1; }
+.bsim .clb { fill: #e7e7ea; } .bsim .clb.cl-cleang { fill: #8fa1b5; } .bsim .clb.acc { fill: var(--accent); }
+.bsim .cl-tick { stroke: #c9ccd3; stroke-width: 1; }
+.bsim .ptn-core { fill: #f2c94c; opacity: .75; } .bsim .ptn-st { stroke: #8fa1b5; stroke-width: 1.4; }
+.bsim .ptn-j { stroke: color-mix(in srgb, var(--paper) 70%, transparent); stroke-width: .8; }
+.bsim .door-f { stroke: var(--ink-2); stroke-width: 1.2; } .bsim .door-l { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 2; }
+.bsim .brd { fill: #e7e7ea; stroke: var(--ink-2); stroke-width: .6; }
+.bsim .hose { fill: none; stroke: #8b6f3a; stroke-width: 2; stroke-linecap: round; }
+.bsim .parapet { fill: var(--ink-2); }
+.bsim .rf-ins { fill: #f2c94c; } .bsim .rf-prot { fill: #8a8f99; } .bsim .rf-drain { fill: #3d8fd6; }
+.bsim .rf-ins.acc, .bsim .rf-prot.acc, .bsim .rf-drain.acc { fill: var(--accent); }
+.bsim .gl-fr { fill: color-mix(in srgb, #8fc7f2 18%, transparent); stroke: #8fa1b5; stroke-width: 1.4; } .bsim .gl-fr.pvc { stroke: #e7e7ea; stroke-width: 2.4; } .bsim .gl-fr.acc { stroke: var(--accent); }
+.bsim .gl-pane { stroke: #8fc7f2; stroke-width: 1.4; } .bsim .gl-pane.vac { stroke: #f4f4f6; stroke-dasharray: 1 1; }
+.bsim .spandrel { fill: color-mix(in srgb, #3d8fd6 20%, var(--panel)); stroke: #8fa1b5; stroke-width: .6; }
+.bsim .acc-top { stroke: var(--accent); stroke-width: 2; }
+.bsim .colr { fill: color-mix(in srgb, var(--ink) 30%, var(--paper)); stroke: var(--ink-2); stroke-width: .8; } .bsim .colr.steel { fill: #8fa1b5; } .bsim .colr.acc { stroke: var(--accent); }
+/* 상세도 (층 구성 · 기준 대비) */
+.bsim .ly { stroke: var(--paper); stroke-width: .6; }
+.bsim .ly-soil { fill: #7a5c3a; } .bsim .ly-prot { fill: #8a8f99; } .bsim .ly-wp { fill: #2b2b2b; } .bsim .ly-conc { fill: #9a9aa0; } .bsim .ly-wall { fill: #6b6b70; }
+.bsim .ly-bento { fill: #a67c3d; } .bsim .ly-drain { fill: #3d8fd6; } .bsim .ly-dbl { fill: #c9c4b8; } .bsim .ly-steel { fill: #8fa1b5; } .bsim .ly-bolt { fill: #4a5566; }
+.bsim .ly-fp { fill: #e7e2d6; } .bsim .ly-weld { fill: #ffb547; } .bsim .ly-ut { fill: #b28cf2; } .bsim .ly-glass { fill: #8fc7f2; } .bsim .ly-gas { fill: #dcecf8; }
+.bsim .ly-vac { fill: #f4f4f6; } .bsim .ly-pv { fill: #253a6e; } .bsim .ly-pvc { fill: #e7e7ea; } .bsim .ly-fin { fill: #c58a4a; } .bsim .ly-ins { fill: #f2c94c; }
+.bsim .ly-gyp { fill: #e7e7ea; } .bsim .ly-vip { fill: #b4c0cc; } .bsim .ly-spray { fill: #f2e3a4; } .bsim .ly-slab { fill: #7d7d84; } .bsim .ly-ure { fill: #3fae6a; }
+.bsim .ly-block { fill: #9a9aa0; } .bsim .ly-alc { fill: #c9c4b8; } .bsim .ly-mod { fill: #b9a77f; } .bsim .ly-mort { fill: #b0aba0; } .bsim .ly-heat { fill: #ff7a45; }
+.bsim .ly-foam { fill: #d9d4c8; } .bsim .ly-air { fill: color-mix(in srgb, var(--g4) 18%, var(--card)); } .bsim .ly-epoxy { fill: #3fae6a; } .bsim .ly-pol { fill: #c9ccd3; } .bsim .ly-stone { fill: #d8cdb8; }
+.bsim .ly-room { fill: color-mix(in srgb, var(--accent) 10%, var(--card)); } .bsim .ly-pave { fill: #8a8f99; } .bsim .ly-sand { fill: #b49b6c; }
+.bsim .ly-t { fill: var(--ink-2); } .bsim .ly-n { fill: var(--accent-ink); } .bsim .ly-ld { stroke: var(--muted); stroke-width: .6; }
+.bsim .gb { fill: var(--line); } .bsim .gv { fill: var(--accent); } .bsim .gv.bad { fill: var(--bad); }
+.bsim .gl-lim { stroke: var(--ink); stroke-width: 1.4; }
+.bsim .ok-v { fill: var(--good); font-weight: 700; } .bsim .bad-v { fill: var(--bad); font-weight: 700; }
+.bsim .board-t { paint-order: normal; }
 .bsim .tl-b { stroke: var(--line); stroke-width: 2; }
 .bsim .tl-p { stroke: var(--ink-2); stroke-width: 1.4; opacity: .45; }
 .bsim .tl-w { fill: var(--accent); }
@@ -927,3 +1097,4 @@ th.r, td.r { text-align: right; }
   .sx-head { padding-inline: 16px; }
   .pad { padding: 16px; }
 }
+.wz-go .chipbtn { justify-self: center; }

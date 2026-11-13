@@ -1,6 +1,7 @@
 // 공종 하나를 고를 때마다: 그 선택이 만드는 이점 · 문제점 · 간섭(앞뒤 공종 · 인접 건물 · 공정)과
 // 공기·공사비·위험 변화를 계산한다. 시공 시뮬레이션(ui/buildsim.js)이 같은 판정을 그림 위 표식으로 쓴다.
-import { WPS, WP_BY_ID, BASELINE, resolveMethods } from './methods.js';
+import { WPS, WP_BY_ID, baseOpt, resolveMethods } from './methods.js';
+import { checksMore } from './impact-more.js';
 import { schedule } from './process.js';
 import { estimate } from './cost.js';
 import { RISKS, exposure } from './risk.js';
@@ -69,7 +70,24 @@ export function wpWindows(S, main) {
     frame: st, form: sub(0.42, 0.52), conc: sub(0.5, 0.58), lift: st,
     skin: A('skin', 1), mep: A('mep', 1),
     plan: { s: 0, e: S.end }, qa: { s: 0, e: S.end },
-    prep: A('prep'), fin: A('fin', 1), comm: A('comm'), land: A('land'),
+    prep: A('prep'), fin: A('fin', 1), comm: A('comm', 1), land: A('land'),
+    ...subWindows(S, st, A, wall, earth),
+  };
+}
+// 세부 공종: 큰 공정(골조·외장·설비·마감) 안에서 실제로 일하는 구간
+function subWindows(S, st, A, wall, earth) {
+  const found = A('found'), base = A('base'), skin = A('skin', 1), mep = A('mep', 1), fin = A('fin', 1), comm = A('comm', 1);
+  const part = (w, f0, f1) => (w ? { s: w.s + (w.e - w.s) * f0, e: w.s + (w.e - w.s) * f1 } : null);
+  const span = (a, b) => (a && b ? { s: Math.min(a.s, b.s), e: Math.max(a.e, b.e) } : a || b);
+  const roofS = st.e, roofE = skin ? Math.max(st.e + 20, Math.min(skin.e, st.e + 45)) : st.e + 30;
+  return {
+    bwp: span(found, base) || part(st, 0, 0.1),
+    rebar: part(st, 0.28, 0.48), pour: part(st, 0.46, 0.62), steel: part(st, 0.08, 0.6),
+    hoist: { s: st.s + (st.e - st.s) * 0.25, e: fin ? fin.e : st.e + 120 },
+    glaz: part(skin, 0, 0.75), insul: part(skin, 0.1, 0.9), roof: { s: roofS, e: roofE },
+    hvac: part(mep, 0, 0.8), plumb: part(mep, 0.05, 0.75), fire: part(mep, 0.2, 0.9), elec: part(mep, 0.1, 1), ict: part(mep, 0.55, 1),
+    elev: mep && comm ? { s: mep.s + (mep.e - mep.s) * 0.6, e: comm.e } : comm,
+    part: part(fin, 0, 0.55), floor: part(fin, 0.2, 0.75), ceil: part(fin, 0.35, 0.85), paint: part(fin, 0.55, 1),
   };
 }
 
@@ -335,6 +353,8 @@ export function checks(wpId, R, G) {
     if (fx.ids.mep === 'conv' && !q.includes('clash')) con(1, '현장 설비 간섭 대비 없음', 'L14를 재래식으로 골랐다면 BIM 간섭검토가 필요합니다', { fix: { wp: 'qa', opt: 'clash', label: 'BIM 간섭검토 추가' } });
   }
 
+  checksMore(wpId, R, G, { pro, con, clash, W, days, wpLabel, optName, NEI, ROAD });
+
   // 같은 판정은 한 번만
   const seen = new Set();
   return out.filter(x => { const k = x.kind + x.t; if (seen.has(k)) return false; seen.add(k); return true; })
@@ -342,7 +362,7 @@ export function checks(wpId, R, G) {
 }
 
 // ---------- 위험 변화: 이 공종을 다른 공법으로 바꾸면 관련 위험 점수가 어떻게 되는가 ----------
-const PH = { survey: 'survey', improve: 'survey', wall: 'wall', support: 'earth', water: 'wall', excav: 'earth', found: 'found', base: 'base', frame: 'struct', form: 'struct', conc: 'struct', lift: 'struct', skin: 'skin', mep: 'mep' };
+const PH = { survey: 'survey', improve: 'survey', prep: 'prep', wall: 'wall', support: 'earth', water: 'wall', excav: 'earth', found: 'found', bwp: 'base', base: 'base', frame: 'struct', form: 'struct', conc: 'struct', rebar: 'struct', pour: 'struct', steel: 'struct', lift: 'struct', hoist: 'struct', skin: 'skin', glaz: 'skin', insul: 'skin', roof: 'skin', mep: 'mep', hvac: 'mep', plumb: 'mep', fire: 'mep', elec: 'mep', ict: 'mep', elev: 'comm', part: 'fin', floor: 'fin', ceil: 'fin', paint: 'fin', comm: 'comm' };
 export function relatedRisks(wpId) {
   return RISKS.filter(r => (r.levers || []).some(([w]) => w === wpId) || (PH[wpId] && r.when.includes(PH[wpId]) && wpId !== 'plan' && wpId !== 'qa'));
 }
@@ -388,7 +408,7 @@ export function delta(R, wpId, optId) {
 // 이 공종만 전통 공법(기준선)으로 했을 때와 비교
 export function vsBaseline(R, wpId) {
   const L = R.M.list.find(x => x.wp.id === wpId);
-  const bOpt = BASELINE[wpId];
+  const bOpt = baseOpt(L);
   if (L.wp.multi) { const p = { ...(R.ms.picks || {}), [wpId]: [] }; const a = current(R), b = trial(R, p); return { opt: null, days: r0(a.end - b.end), cost: a.total - b.total, q: a.q - b.q, s: a.s - b.s }; }
   const ok = L.ev.find(e => e.o.id === bOpt && e.ok);
   if (!ok || L.chosen === bOpt) return { opt: bOpt, same: L.chosen === bOpt, na: !ok, days: 0, cost: 0, q: 0, s: 0 };
@@ -421,7 +441,7 @@ export function wpImpact(R, wpId, G = sectionGeom(R.gen, R.d)) {
     items.push({ kind: s >= 0 ? 'pro' : 'con', sev: s <= -25 ? 3 : s < 0 ? 2 : 1, with: null, t: r.why, d: '평가 점수 ' + dl.map(([k, v]) => `${KN[k]} ${v > 0 ? '+' : ''}${v}`).join(' · '), src: 'rule' });
   });
   // 위험: 이 공종을 전통 공법으로 했을 때보다 줄었나 늘었나
-  const bOpt = BASELINE[wpId];
+  const bOpt = baseOpt(L);
   const alt = L.wp.multi ? { ...(R.ms.picks || {}), qa: [] } : { ...(R.ms.picks || {}), [wpId]: bOpt };
   const rs = riskShift(R, wpId, alt);
   rs.forEach(x => {
