@@ -9,6 +9,7 @@ import { store } from '../store.js';
 import { head, sub, dot, hbar, escH } from '../ui/sys.js';
 import { wpImpact, delta, vsBaseline, sectionGeom, wpLabel, optName } from '../sim/impact.js';
 import { makeScene, frame, roiFor, lerpRoi, winFor } from '../ui/buildsim.js';
+import { workFig, workInfo } from '../ui/workstep.js';
 
 // 받침 있으면 '이', 없으면 '가'
 const josaIGa = (w) => { const c = String(w).trim().slice(-1).charCodeAt(0); return c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28 ? '이' : '가'; };
@@ -37,12 +38,15 @@ const dCost = (v) => (Math.abs(v) < 5000 ? '비용 ±0' : `비용 ${sgn(v, won)}
 const tone = (v, goodIfNeg = true) => (Math.abs(v) < 1e-9 ? '' : (v < 0) === goodIfNeg ? 'pos' : 'neg');
 const CIRC = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫';
 
+const SPEEDS = [0.5, 1, 2, 4];
+const spLabel = (v) => (v === 0.5 ? '½' : v) + '×';
+
 export function mount(root) {
   let R = pipeline();
   let done = getDone();
   const ui = { cur: Math.min(done, N - 1), grp: null, p: 0, T: 0, playing: false, speed: 1, roi: null, roiFrom: null, roiT: 1, raf: 0, last: 0, vis: true, view: '2d', at: null, atT: 0 };
   let v3 = null, v3Loading = false; // 3D 뷰 (three.js는 처음 3D를 누를 때 불러온다)
-  try { if (localStorage.getItem('bim.simView') === '3d') ui.view = '3d'; } catch { /* 저장소 없음 */ }
+  try { if (localStorage.getItem('bim.simView') === '3d') ui.view = '3d'; const sp = +localStorage.getItem('bim.simSpeed'); if (SPEEDS.includes(sp)) ui.speed = sp; } catch { /* 저장소 없음 */ }
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // 휴대폰 폭에서는 세로형 화면으로 다시 그린다
   const mqN = window.matchMedia('(max-width: 560px)'), onMq = () => draw();
@@ -74,10 +78,11 @@ export function mount(root) {
             <button type="button" class="btn acc sm" id="sim-play" aria-label="재생">▶</button>
             <button type="button" class="btn ghost sm" id="sim-re" aria-label="처음부터 재생">↺</button>
             <input type="range" id="sim-p" min="0" max="1000" value="0" aria-label="시공 진행">
-            <button type="button" class="chipbtn" id="sim-sp" aria-label="재생 속도">1×</button>
+            <button type="button" class="chipbtn" id="sim-sp" aria-label="재생 속도 (누를 때마다 ½× → 1× → 2× → 4×)" title="재생 속도">${spLabel(ui.speed)}</button>
             <div class="seg sim-view" role="group" aria-label="보기 방식"><button type="button" data-view="2d" aria-pressed="true">2D 단면</button><button type="button" data-view="3d" aria-pressed="false">3D</button></div>
           </div>
           <div class="sim-cap" id="sim-cap" aria-live="polite"></div>
+          <div class="sim-work" id="sim-work"><div class="sw-fig" id="sw-fig"></div><div class="sw-info" id="sw-info" aria-live="polite"></div></div>
           <ol class="sim-steps" id="sim-steps"></ol>
         </div>
         <div class="wz-side panel" id="side"></div>
@@ -241,9 +246,9 @@ export function mount(root) {
   function rebuildScene() { scene = makeScene(R, known()); }
   function stepsOf() {
     const L = Lof(ui.cur);
-    if (L.wp.multi) return L.chosen.length ? L.chosen.map(id => { const o = L.wp.opts.find(x => x.id === id); return { t: o.name.split(' (')[0], d: (o.how || []).join(' → ') }; }) : [{ t: '품질·안전 기술 없음', d: '' }];
+    if (L.wp.multi) return L.chosen.length ? L.chosen.map(id => { const o = L.wp.opts.find(x => x.id === id); return { t: o.name.split(' (')[0], d: (o.how || []).join(' → '), opt: id, w: (o.how || [o.name])[0] }; }) : [{ t: '품질·안전 기술 없음', d: '', opt: '' }];
     const o = L.wp.opts.find(x => x.id === L.chosen);
-    return (o.how || [o.name]).map(h => ({ t: h }));
+    return (o.how || [o.name]).map(h => ({ t: h, opt: o.id }));
   }
   function setRoi(instant) {
     const target = roiFor(scene, Lof(ui.cur).wp.id);
@@ -270,13 +275,29 @@ export function mount(root) {
     const S = stepsOf(), k = Math.min(S.length - 1, Math.floor(ui.p * S.length * 0.999));
     $('sim-cap').innerHTML = `<span class="sc-n">${String(k + 1).padStart(2, '0')} / ${String(S.length).padStart(2, '0')}</span><b>${escH(S[k].t)}</b>${S[k].d ? `<span>${escH(S[k].d)}</span>` : ''}`;
     $('sim-steps').querySelectorAll('li').forEach((li, i) => li.className = i === k ? 'on' : i < k ? 'done' : '');
+    drawWork(L, S, k);
     const sl = $('sim-p'); if (document.activeElement !== sl) sl.value = Math.round(ui.p * 1000);
+  }
+  // 작업 상세: 지금 단계의 확대 장면 (단계 안 진행률 q로 움직인다) + 장비·인원·관리 항목
+  let wKey = '', wArch = 'generic';
+  function drawWork(L, S, k) {
+    const n = S.length, s = S[k], key = `${L.wp.id}|${s.opt}|${k}|${n}`;
+    if (key !== wKey) {
+      wKey = key;
+      const W = winFor(scene, L.wp.id), days = W.skip ? 0 : (W.e - W.s) / n;
+      const info = workInfo({ wpId: L.wp.id, optId: s.opt, text: s.w || s.t, k, n, days });
+      wArch = info.a; $('sw-info').innerHTML = info.html;
+    }
+    // 멈춘 첫 화면은 단계 중간 모습을, 재생 중에는 단계 안 진행률을 그린다
+    const q = !ui.playing && ui.p === 0 ? 0.55 : Math.min(1, Math.max(0, ui.p * n - k));
+    $('sw-fig').innerHTML = workFig(wArch, q, reduce ? 0 : ui.T, { text: s.w || s.t, wpId: L.wp.id, optId: s.opt });
   }
   function renderSteps() {
     const S = stepsOf();
     $('sim-steps').innerHTML = S.map((s, i) => `<li><button type="button" data-step="${i}"><span>${String(i + 1).padStart(2, '0')}</span>${escH(s.t)}</button></li>`).join('');
   }
-  const dur = () => Math.max(7, Math.min(16, stepsOf().length * 2.4)) / ui.speed;
+  // 한 단계에 약 8초 (1× 기준) — 공종 하나가 24~64초에 걸쳐 재생된다
+  const dur = () => Math.max(24, Math.min(64, stepsOf().length * 8)) / ui.speed;
   function loop(ts) {
     ui.raf = 0;
     if (!alive) return;
@@ -443,7 +464,7 @@ export function mount(root) {
     if (e.target.closest('#sim-play')) { if (ui.playing) { ui.playing = false; paintPlay(); draw(); } else play(false); return; }
     if (e.target.closest('#sim-re')) { play(true); return; }
     const vb = e.target.closest('[data-view]'); if (vb) { if (vb.dataset.view !== ui.view || (vb.dataset.view === '3d' && !v3)) setView(vb.dataset.view); return; }
-    if (e.target.closest('#sim-sp')) { ui.speed = ui.speed === 1 ? 2 : ui.speed === 2 ? 0.5 : 1; $('sim-sp').textContent = (ui.speed === 0.5 ? '½' : ui.speed) + '×'; return; }
+    if (e.target.closest('#sim-sp')) { ui.speed = SPEEDS[(SPEEDS.indexOf(ui.speed) + 1) % SPEEDS.length]; $('sim-sp').textContent = spLabel(ui.speed); try { localStorage.setItem('bim.simSpeed', String(ui.speed)); } catch { /* 저장소 없음 */ } return; }
     const stp = e.target.closest('[data-step]'); if (stp) { const n = stepsOf().length; ui.p = Math.min(0.999, (+stp.dataset.step + 0.02) / n); ui.playing = false; paintPlay(); draw(); return; }
     const sd = e.target.closest('.stage-done.locked .sd-r'); if (sd) { e.preventDefault(); showWp(done); $('wz-sec').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     const gn = e.target.closest('#go-next.locked'); if (gn) { e.preventDefault(); showWp(Math.min(done, N - 1)); $('wz-sec').scrollIntoView({ behavior: 'smooth', block: 'start' }); }

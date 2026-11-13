@@ -9,6 +9,7 @@ import { progAt, focusOf, winFor, CUT_WPS, UNDER_WPS } from './buildsim.js';
 import { WP_BY_ID } from '../sim/methods.js';
 import { dateAt, ym } from '../sim/process.js';
 import { HOIST, elevSpeed } from '../sim/impact-more.js';
+import { buildCity } from './city3d.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const MEPS = ['hvac', 'plumb', 'fire', 'elec', 'ict'], ROOMS = ['part', 'floor', 'ceil', 'paint'];
@@ -74,6 +75,7 @@ export function createSim3D(host, opts = {}) {
   host.appendChild(wrap);
   const $ = (s) => wrap.querySelector(s);
   const scene = new THREE.Scene();
+  if (window.__S3DEBUG) window.__s3scene = scene; // 점검용 (평소에는 꺼져 있음)
   scene.background = BG;
   scene.fog = new THREE.Fog(BG, 600, 1400);
   const cam = new THREE.PerspectiveCamera(38, 16 / 9, 0.5, 4000);
@@ -143,12 +145,17 @@ export function createSim3D(host, opts = {}) {
     // 지하수위: 단면에 파란 띠
     const gwM = mat(COL.water, { em: 0.4 });
     const gwLine = box(gwM, null, D.xl, D.xr, -cond.gw - 0.12, -cond.gw + 0.12, 0, 0.25, ground);
-    // 도로·인접 건물
-    box(mat(COL.road, { rough: 0.9 }), null, pw + 7, pw + 31, 0, 0.12, -Z, Z);
-    const lane = inst(BOX, mat(0xe7e7ea, { em: 0.2 }), 24, null); for (let i = 0; i < 24; i++) ibox(lane, i, pw + 18.8, pw + 19.2, 0.12, 0.16, -Z + i * (2 * Z / 24), -Z + i * (2 * Z / 24) + 3); lane.count = 24;
-    const nbM = mat(COL.nb, { rough: 0.7 });
-    box(nbM, null, nb.x0, nb.x1, -nb.b, nb.h, -pd / 2 + 2, pd / 2 - 8);
-    const nbWin = inst(BOX, mat(0x9fc4e6, { em: 0.25 }), 80, null); { let n = 0; for (let e = 2; e < nb.h - 1 && n < 80; e += 3.2) for (let j = 0; j < 4 && n < 80; j++) ibox(nbWin, n++, nb.x0 + 2 + j * (nb.x1 - nb.x0 - 4) / 4, nb.x0 + 1 + (j + 1) * (nb.x1 - nb.x0 - 4) / 4, e, e + 1.4, pd / 2 - 8.05, pd / 2 - 7.9); nbWin.count = n; }
+    // 주변 가로: 대로·보도·건너편 블록·이면도로·인접 건물·통행 차량·매설물·출입구 (city3d.js)
+    const city = buildCity({ root, mat, inst, ibox, box, mesh, BOX, CYL, CONE, sc, D, _p, _q, _s, _e, _m });
+    const lanes = sc.city.lanes, laneX = (i) => city.laneX(Math.min(i, lanes.length - 1)) ?? pw + 12;
+    const PX = laneX(0), MX = lanes.length > 1 ? laneX(1) : PX + 3.4, CRX = lanes.length > 1 ? (lanes[0].x0 + lanes[1].x1) / 2 : PX;
+    const crane2 = ['crawler', 'ringer', 'mobile'].includes(ids.lift);
+    // 안전 난간 · 추락 방지망 · 낙하물 방지망 · 자재 적치 (지금 짓는 층)
+    const railI = inst(BOX, mat(0xffd23a, { em: 0.15 }), 220, null);
+    const netM = mat(0x3fae6a, { op: 0.22 }), nets = [0, 1, 2, 3].map(() => mesh(BOX, netM, null));
+    const fanI = inst(BOX, mat(0x8fa1b5, { op: 0.55 }), 16, null);
+    const stockI = inst(BOX, mat(0xffffff), 8, null);
+    [0xd9822b, 0xd9822b, 0x9fb3c8, 0x9fb3c8, 0xc58a4a, 0xc58a4a, 0x8fa1b5, 0x8fa1b5].forEach((c, i) => stockI.setColorAt(i, new THREE.Color(c)));
 
     // --- 지반조사·개량 (단면 앞면에 한 줄) ---
     const bores = []; { const n = ids.survey === 'ai' ? 5 : ids.survey === 'spt' ? 3 : 4; for (let i = 0; i < n; i++) bores.push(-2 + (pw + 4) * (i + 0.5) / n); }
@@ -293,7 +300,6 @@ export function createSim3D(host, opts = {}) {
     const pl = -Math.min(3, cond.adj / 2);
     const fenceM = mat(ids.prep === 'sound' ? 0x4f7fb0 : 0x5f6066, { rough: 0.7, op: ids.prep === 'sound' ? 0.55 : 1 });
     const fence = [0, 1, 2, 3].map(() => mesh(BOX, fenceM, 'prep'));
-    const offI = inst(BOX, mat(0xe7e7ea), 3, 'prep');
     const treeI = inst(CONE, mat(COL.tree), 60, 'land'), trunkI = inst(CYL, mat(COL.trunk), 60, 'land');
     const paveI = inst(BOX, mat(COL.pave), 4, 'land');
 
@@ -349,7 +355,7 @@ export function createSim3D(host, opts = {}) {
       exc.visible = dug > 0.3 && earthP < 1 && ['support', 'excav', 'water', 'wall'].includes(wpId);
       if (exc.visible) { const ex = pw * (0.3 + 0.35 * (0.5 + 0.5 * Math.sin(T * 0.4))); exc.position.set(ex, -dug, -pd / 4); exc.rotation.y = Math.sin(T * 0.4) > 0 ? 0 : Math.PI; const sw = Math.sin(T * 3); exArm.position.set(2.6, 3 + sw * 0.5, 0); exArm.rotation.z = 0.5 + sw * 0.2; exArm2.position.set(4.6, 1.6 + sw * 0.4, 0); exArm2.rotation.z = -1.1 + sw * 0.2; }
       const trOn = (earthP > 0 && earthP < 1) || (wpId === 'excav');
-      trucks.forEach((t, i) => { t.visible = trOn; if (!trOn) return; const ph = (T * 0.05 + i / trucks.length) % 1; t.position.set(pw + 13 + (i % 2) * 6, 0.12, -Z + ph * 2 * Z); t.rotation.y = i % 2 ? Math.PI : 0; t.userData.load.visible = !(i % 2); });
+      trucks.forEach((t, i) => { t.visible = trOn; if (!trOn) return; const li = i % 2 ? lanes.length - 1 : 0, L = lanes[li], zc = city.ZC, ph = (T * 0.05 + i / trucks.length) % 1; t.position.set((L.x0 + L.x1) / 2, 0.1, L.dir > 0 ? -zc + ph * 2 * zc : zc - ph * 2 * zc); t.rotation.y = L.dir > 0 ? 0 : Math.PI; t.userData.load.visible = !(i % 2); });
       // 기초
       let np = 0;
       if (K('found') && foundP > 0 && ids.found !== 'mat') { const pileP = clamp(foundP / 0.6, 0, 1), base = -Math.max(depth, 1.2); pileXs.forEach((x, i) => { const lp = clamp(pileP * pileXs.length - i, 0, 1); if (lp <= 0) return; ibox(pileI, np++, x - pileW / 2, x + pileW / 2, base - plen * lp, base, 0.05, 0.05 + pileW); }); }
@@ -404,16 +410,16 @@ export function createSim3D(host, opts = {}) {
       const pourNow = active && stage === 2 && (K('conc') || K('pour'));
       pump.visible = pourNow || (wpId === 'pour' && active);
       if (pump.visible) {
-        pump.position.set(pw + 12, 0.12, -bd / 4);
-        const tx = fp.x0 + (fp.x1 - fp.x0) * 0.5 - (pw + 12), ty = f.e1 + 1, H = f.e1, reach = ids.pour === 'boom' || ids.pour === 'multi' ? 58 : 0;
+        pump.position.set(PX, 0.1, -bd / 4);
+        const tx = fp.x0 + (fp.x1 - fp.x0) * 0.5 - PX, ty = f.e1 + 1, H = f.e1, reach = ids.pour === 'boom' || ids.pour === 'multi' ? 58 : 0;
         const ok = reach && H <= reach, b1 = boom[0], b2 = boom[1], b3 = boom[2];
         if (ok || !reach) {
           const midY = Math.max(ty + 6, 12), mx = tx * 0.45;
           seg(b1, 0, 3, -3, mx, midY, 0); seg(b2, mx, midY, 0, tx, ty + 3, 0); seg(b3, tx, ty + 3, 0, tx, ty, 0);
-          if (!reach) { const cxl = G.core.x1 + 0.4 - (pw + 12), an = Math.sin(T * 0.6) * 0.8, Lb = Math.min(14, (G.bx1 - G.bx0) * 0.45); seg(b1, -1, 1, bd / 4, cxl, 1, bd / 4); seg(b2, cxl, 1, bd / 4, cxl, H + 1, bd / 4); seg(b3, cxl, H + 2.4, bd / 4, cxl + Math.cos(an) * Lb, H + 2.4, bd / 4 + Math.sin(an) * Lb); }
+          if (!reach) { const cxl = G.core.x1 + 0.4 - PX, an = Math.sin(T * 0.6) * 0.8, Lb = Math.min(14, (G.bx1 - G.bx0) * 0.45); seg(b1, -1, 1, bd / 4, cxl, 1, bd / 4); seg(b2, cxl, 1, bd / 4, cxl, H + 1, bd / 4); seg(b3, cxl, H + 2.4, bd / 4, cxl + Math.cos(an) * Lb, H + 2.4, bd / 4 + Math.sin(an) * Lb); }
         } else { seg(b1, 0, 3, 0, -6, reach, 0); seg(b2, -6, reach, 0, -10, reach - 4, 0); seg(b3, -10, reach - 4, 0, -10, reach - 6, 0); }
       }
-      mixers.forEach((m, i) => { m.visible = pourNow; if (pourNow) m.position.set(pw + 20 + i * 4, 0.12, -bd / 4 + 10 + i * 9); });
+      mixers.forEach((m, i) => { m.visible = pourNow; if (pourNow) m.position.set(MX, 0.1, -bd / 4 + 8 + i * 10); });
 
       // 크레인
       const needCrane = (structP > 0 && structP < 1) || wpId === 'lift' || (skinP > 0 && skinP < 1 && ['unitcw', 'pcpanel', 'metal'].includes(ids.skin));
@@ -422,7 +428,7 @@ export function createSim3D(host, opts = {}) {
       crane.visible = showCrane && K('lift'); crGhost.visible = showCrane && !K('lift');
       if (crGhost.visible) setBox(crGhost, sc.crX - 1, sc.crX + 1, 0, Hc, -bd / 2 - 6, -bd / 2 - 4);
       if (crane.visible) {
-        const k = ids.lift, cxp = k === 'crawler' || k === 'ringer' || k === 'mobile' ? pw + 14 : sc.crX, czp = k === 'crawler' || k === 'ringer' || k === 'mobile' ? 0 : -bd / 2 - 5;
+        const k = ids.lift, cxp = crane2 ? CRX : sc.crX, czp = k === 'crawler' || k === 'ringer' || k === 'mobile' ? 0 : -bd / 2 - 5;
         crane.position.set(cxp, 0, czp);
         const tower = k === 'tower' || k === 'luffing';
         setBox(mast, -1, 1, 0, tower ? Hc : 3, -1, 1); setBox(mastS, -1.05, 1.05, 0, 1.2, -1.05, 1.05);
@@ -513,8 +519,7 @@ export function createSim3D(host, opts = {}) {
       const prepOn = K('prep') && P('prep') > 0 && (K('land') ? P('land') : 0) < 0.85;
       const Hf = ({ std: 3, sound: 10, modular: 3, mini: 2 })[ids.prep] || 3, hfx = Hf * clamp(P('prep') * 1.4, 0, 1);
       fence.forEach((o, i) => { o.visible = prepOn && !(underV && (i === 2 || i === 3)); if (!o.visible) return; const za = -pd / 2 - 3, zb = pd / 2 + 3; if (i === 0) setBox(o, pl - 0.15, pl + 0.15, 0, hfx, za, zb); if (i === 1) setBox(o, pl, pw + 5, 0, hfx, za - 0.15, za + 0.15); if (i === 2) setBox(o, pl, pw + 5, 0, Math.min(hfx, 3), zb - 0.15, zb + 0.15); if (i === 3) setBox(o, pw + 4.85, pw + 5.15, 0, Math.min(hfx, 3), za, zb - 10); });
-      let nof = 0; if (prepOn && P('prep') > 0.3) { const nBox = ids.prep === 'modular' ? 3 : ids.prep === 'mini' ? 1 : 2; for (let i = 0; i < nBox; i++) ibox(offI, nof++, pw + 7.5 + (i === 2 ? 0 : 0), pw + 13.5, (i === 2 ? 2.7 : 0) + 0.12, (i === 2 ? 5.3 : 2.6) + 0.12, pd / 2 - 2 - (i % 2) * 3.2, pd / 2 - (i % 2) * 3.2 + 0.6); }
-      offI.count = nof; offI.instanceMatrix.needsUpdate = true;
+      city.offices(prepOn && P('prep') > 0.3, ids.prep === 'modular' ? 3 : ids.prep === 'mini' ? 1 : 2);
       // 조경
       let ntr = 0, npv2 = 0;
       if (K('land') && P('land') > 0) {
@@ -523,6 +528,44 @@ export function createSim3D(host, opts = {}) {
       }
       treeI.count = trunkI.count = ntr; paveI.count = npv2; [treeI, trunkI, paveI].forEach(o => { o.instanceMatrix.needsUpdate = true; });
 
+      // 작업자 · 안전 난간 · 방지망 · 자재 · 차로 점용 → 가로(city)
+      const work = [];
+      const hsh = (i, k) => { const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return v - Math.floor(v); };
+      const crew = (n, x0, x1, y, z0, z1, seed = 0) => { if (!(x1 - x0 > 0.5 && z1 - z0 > 0.5)) return; for (let i = 0; i < n; i++) { const a = hsh(i + seed, 1), b = hsh(i + seed, 2), mv = i % 3 === 0 ? 0.08 * Math.sin(T * 0.3 + i) : 0; work.push([x0 + (x1 - x0) * clamp(0.08 + 0.84 * a + mv, 0.05, 0.95), y, z0 + (z1 - z0) * (0.08 + 0.84 * b), i % 3 === 0, i === 0]); } };
+      const FRW = ['frame', 'form', 'rebar', 'conc', 'pour', 'steel', 'lift'];
+      const cutNow = CUT_WPS.has(wpId);
+      if (active) crew(FRW.includes(wpId) ? 12 : 4, fp.x0, fp.x1, f.e1 + 0.2, fp.z0, cutNow ? -0.5 : fp.z1, 0);
+      if (UNDER_WPS.has(wpId)) {
+        if (wpId === 'survey' || wpId === 'improve' || (wpId === 'wall' && dug < 0.3)) crew(4, 1, pw - 1, 0.02, -pd / 2 + 2, -1, 3);
+        else if (depth > 0.5) { const yU = wpId === 'base' && K('base') ? -depth + Math.min(depth, P('base') * nB * bsh) + 0.25 : matP > 0 ? baseE + thick * matP : -dug; crew(7, th + 1.5, pw - th - 1.5, yU + 0.02, -pd / 2 + th + 2, -2, 5); }
+      }
+      if (cutNow && nF > 0) { const ki = clamp(Math.floor(clamp(P(wpId), 0, 0.999) * nF), 0, nF - 1), p3 = D.fp[ki]; crew(6, p3.x0 + 1, p3.x1 - 1, sc.floors[ki].e0 + 0.2, p3.z0 + 1, -0.6, 9); if (ki > 0) crew(3, p3.x0 + 1, p3.x1 - 1, sc.floors[ki - 1].e0 + 0.2, p3.z0 + 1, -0.6, 13); }
+      if (wpId === 'skin' && nS < nF) { const p3 = D.fp[nS]; crew(5, p3.x0 + 1, p3.x1 - 1, sc.floors[nS].e0 + 0.2, p3.z1 - 2.2, p3.z1 - 0.6, 17); }
+      if (wpId === 'roof' && done) crew(5, rfp.x0 + 1, rfp.x1 - 1, rtop + 0.4, rfp.z0 + 1, rfp.z1 - 1, 21);
+      if (wpId === 'land') { const strips = [[0.6, G.bx0 - 0.6], [G.bx1 + 0.6, pw - 0.6]].sort((a, b) => (b[1] - b[0]) - (a[1] - a[0])); crew(6, strips[0][0], strips[0][1], 0.3, -pd / 2 + 2, pd / 2 - 2, 25); }
+      if (wpId === 'prep' || wpId === 'plan' || wpId === 'qa') crew(3, pw + 0.5, pw + 4.2, 0.05, -pd / 2 + 2, pd / 2 - 14, 29);
+      let nrl = 0, nfn = 0, nst = 0;
+      if (active) {
+        const y = f.e1 + 0.2, a = fp.x0 - 0.15, b = fp.x1 + 0.15, c = fp.z0 - 0.15, d = cutNow ? 0 : fp.z1 + 0.15;
+        [[1.1, 0.07], [0.55, 0.05]].forEach(([hh, t]) => { ibox(railI, nrl++, a, b, y + hh, y + hh + t, c, c + 0.05); if (!cutNow) ibox(railI, nrl++, a, b, y + hh, y + hh + t, d - 0.05, d); ibox(railI, nrl++, a, a + 0.05, y + hh, y + hh + t, c, d); ibox(railI, nrl++, b - 0.05, b, y + hh, y + hh + t, c, d); });
+        const sx = Math.max(2, (b - a) / 40), sz = Math.max(2, (d - c) / 30);
+        for (let x = a; x <= b + 1e-6 && nrl < 214; x += sx) { ibox(railI, nrl++, x - 0.03, x + 0.03, y, y + 1.17, c, c + 0.06); if (!cutNow && nrl < 214) ibox(railI, nrl++, x - 0.03, x + 0.03, y, y + 1.17, d - 0.06, d); }
+        for (let z = c; z <= d + 1e-6 && nrl < 218; z += sz) { ibox(railI, nrl++, a, a + 0.06, y, y + 1.17, z - 0.03, z + 0.03); if (nrl < 220) ibox(railI, nrl++, b - 0.06, b, y, y + 1.17, z - 0.03, z + 0.03); }
+        // 추락 방지망: 짓는 층 아래 2개 층 바깥
+        const y0 = sc.floors[Math.max(0, nF - 2)].e0, y1 = y + 1.5, o = 0.9;
+        nets.forEach((n, i) => { n.visible = !(cutNow && i === 1); if (i === 0) setBox(n, a - o, b + o, y0, y1, c - o - 0.03, c - o); if (i === 1) setBox(n, a - o, b + o, y0, y1, d + o, d + o + 0.03); if (i === 2) setBox(n, a - o - 0.03, a - o, y0, y1, c - o, d + o); if (i === 3) setBox(n, b + o, b + o + 0.03, y0, y1, c - o, d + o); });
+        // 낙하물 방지망: 10개 층마다 (짓는 층 3개 층 아래부터)
+        for (let i = nF - 3; i > 0 && nfn < 16; i -= 10) { const yy = sc.floors[i].e1, p3 = D.fp[i]; ibox(fanI, nfn++, p3.x0 - 0.5, p3.x1 + 0.5, yy - 0.03, yy + 0.03, p3.z0 - 2.7, p3.z0 - 0.2, 0.35, 0); if (!cutNow) ibox(fanI, nfn++, p3.x0 - 0.5, p3.x1 + 0.5, yy - 0.03, yy + 0.03, p3.z1 + 0.2, p3.z1 + 2.7, -0.35, 0); ibox(fanI, nfn++, p3.x0 - 2.7, p3.x0 - 0.2, yy - 0.03, yy + 0.03, p3.z0 - 0.5, cutNow ? 0 : p3.z1 + 0.5, 0, -0.35); ibox(fanI, nfn++, p3.x1 + 0.2, p3.x1 + 2.7, yy - 0.03, yy + 0.03, p3.z0 - 0.5, cutNow ? 0 : p3.z1 + 0.5, 0, 0.35); }
+        // 자재 적치 (거푸집·철근 단계)
+        if (stage < 2) { const bx = fp.x0 + 1.5, bz = fp.z0 + 1.5; [[0, 6, 0, 0.45, 0, 0.9], [0, 6, 0, 0.35, 1.2, 2.0], [7, 9.4, 0, 0.9, 0, 1.2], [7, 9.4, 0.9, 1.6, 0, 1.2], [10.5, 14, 0, 0.5, 0, 1.0], [10.5, 14, 0.5, 0.9, 0, 1.0]].forEach((q2, i) => { if (bx + q2[1] < fp.x1 - 1) ibox(stockI, nst++, bx + q2[0], bx + q2[1], y + q2[2], y + q2[3], bz + q2[4], bz + q2[5]); }); }
+      } else nets.forEach(n => { n.visible = false; });
+      railI.count = nrl; fanI.count = nfn; stockI.count = nst; [railI, fanI, stockI].forEach(o => { o.instanceMatrix.needsUpdate = true; });
+      const occ = new Set(), busy = new Set();
+      if (pump.visible) { occ.add(0); if (pourNow && lanes.length > 1) occ.add(1); }
+      if (crane.visible && crane2) { occ.add(0); if (lanes.length > 1) occ.add(1); }
+      if (trOn) { busy.add(0); busy.add(lanes.length - 1); }
+      city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow });
+      owned.forEach(o => { if (o.count > o.instanceMatrix.count) o.count = o.instanceMatrix.count; }); // 용량을 넘는 인스턴스는 그리지 않는다
       // 강조: 지금 공종의 재질을 강조색으로
       // 설비 공종을 볼 때는 다른 설비·마감을, 실내 마감을 볼 때는 설비를 흐리게 (2D와 같은 규칙)
       const dimSet = MEPS.includes(wpId) ? DIM_FOR_MEP : ROOMS.includes(wpId) ? DIM_FOR_ROOM : null;
@@ -543,11 +586,10 @@ export function createSim3D(host, opts = {}) {
     const labels = [];
     sc.strata.forEach(([a, b, , nm]) => { if (a < sc.dv - 2) labels.push({ t: nm, p: [D.xl + 4, -(a + Math.min(b, sc.dv)) / 2, 0.2], under: true }); });
     if (cond.gw < sc.dv) labels.push({ t: `▽ 지하수위 GL−${cond.gw}m`, p: [pw + 3, -cond.gw + 0.6, 0.3], under: true, cls: 'gw' });
-    labels.push({ t: nb.urban ? '인접 건물' : '인접 시설', p: [(nb.x0 + nb.x1) / 2, nb.h + 2, pd / 2 - 8], under: false });
-    labels.push({ t: '도로', p: [pw + 19, 0.6, D.Z - 6], under: false });
+    city.labels.forEach(l => labels.push({ under: false, ...l }));
     return {
       sc, D, root, frameAt, labels,
-      dispose() { const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
+      dispose() { city.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
     };
   }
 
@@ -593,7 +635,7 @@ export function createSim3D(host, opts = {}) {
     const box = $('.s3-mks'), w = size[0], h = size[1];
     const html = marks.map(m => { const pos = atCache[m.mark]; if (!pos) return ''; const v = new THREE.Vector3(pos[0], pos[1], 0.5).project(cam); if (v.z > 1 || v.x < -1 || v.x > 1 || v.y < -1 || v.y > 1) return ''; return `<i class="s3-mk s${m.sev}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${m.n}</i>`; }).join('');
     if (mkHtml !== html) { box.innerHTML = html; mkHtml = html; }
-    const lh = built.labels.filter(l => !l.under || UNDER_WPS.has(wpId)).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
+    const lh = built.labels.filter(l => (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId))).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
     if (lbHtml !== lh) { $('.s3-lbs').innerHTML = lh; lbHtml = lh; }
   }
   function dispose() {

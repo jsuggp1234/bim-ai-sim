@@ -30,12 +30,7 @@ export function drawSite(g, c) {
       g.rect(pl - 0.25, 0, pl + 0.25, h, cls); g.rect(pw + 4.6, 0, pw + 5.1, Math.min(h, 3), cls);
       if (ids.prep === 'sound' && h > 2) for (let e = 1; e < h; e += 1.5) g.line(pl - 0.25, e, pl + 0.25, e, 'fence-l');
       if (wpId === 'prep' || wpId === 'land') g.text(pl, h + 0.6, ids.prep === 'sound' ? `방음벽 ${Hf}m` : ids.prep === 'mini' ? '펜스' : `가설 울타리 ${Hf}m`, 'eq-lab', 'middle', -3);
-      // 현장 사무실 (도로 쪽, 게이트 뒤)
-      const ox = pw + 7.5, nBox = ids.prep === 'modular' ? 3 : ids.prep === 'mini' ? 1 : 2, two = ids.prep === 'modular';
-      if (pp > 0.3) for (let i = 0; i < nBox; i++) { const lv = two && i === 2 ? 1 : 0, xi = two && i === 2 ? 0 : i; g.rect(ox + xi * 6.2, lv * 2.7, ox + xi * 6.2 + 6, lv * 2.7 + 2.6, `office${c.F('prep')}`); }
-      if (pp > 0.3 && (wpId === 'prep')) g.text(ox + 6, (two ? 5.4 : 2.6) + 0.4, ids.prep === 'modular' ? '모듈러 사무실 · 스마트 게이트' : '현장 사무실', 'eq-lab', 'middle', -3);
-      // 세륜 시설
-      if (pp > 0.5 && ids.prep !== 'mini') { g.rect(pw + 5.2, -0.5, pw + 7.2, 0.1, `wash${c.F('prep')}`); if (wpId === 'prep' || (P('excav') > 0 && P('excav') < 1)) for (let j = 0; j < 4; j++) g.circ(pw + 5.4 + j * 0.5, 0.4 + ((T * 3 + j * 0.3) % 1) * 0.8, Math.max(1, 0.12 * g.s), 'wdrop'); }
+      // 현장 사무실 · 세륜 시설은 buildsim-ctx.js drawGate
       if (ids.prep === 'sound' && pp > 0.6) { g.line(pl + 1.2, 0, pl + 1.2, Math.min(h, 6), 'eq-c'); g.rect(pl + 0.6, 5.4, pl + 3.4, 7, 'board'); g.text(pl + 2, 6.1, `${siteNoise(cond.adj, 'sound')}dB`, 'board-t', 'middle', 3); }
     }
     // 소음 전파 (굴착·브레이커 → 인접 건물)
@@ -315,8 +310,14 @@ export function drawStructDetail(g, c) {
   // 철근: 가공장 · 반입 · 선조립
   if (K('rebar') && active && (wpId === 'rebar' || wpId === 'frame' || wpId === 'form' || wpId === 'conc' || wpId === 'pour')) {
     const k = ids.rebar, a = c.F('rebar');
-    if (k === 'site') { g.rect(pw + 8, 0, pw + 20, 0.25, `yard${a}`); for (let j = 0; j < 5; j++) g.line(pw + 8.5, 0.3 + j * 0.18, pw + 19.5, 0.3 + j * 0.18, 'rebar'); g.rect(pw + 14, 0.3, pw + 15.6, 1.4, `eq${a}`); if (wpId === 'rebar') g.text(pw + 14, 1.9, '현장 가공장 (절단·절곡)', 'eq-lab', 'middle', -2); at.yard = [pw + 14, 1]; }
-    if (k === 'shop' || k === 'coupler' || k === 'mesh') { const tx = pw + 24 - ((T * 2) % 8); c.EQ.truck(g, tx, 0, -1, false, a.trim()); for (let j = 0; j < 3; j++) g.line(tx - 3.2, 2.9 + j * 0.2, tx + 1.4, 2.9 + j * 0.2, 'rebar'); if (wpId === 'rebar') g.text(tx, 4, k === 'mesh' ? '용접 철망 반입' : '공장 가공 철근 반입', 'eq-lab', 'middle', -2); }
+    if (k === 'site') {
+      // 현장 가공장: 건물 옆 1층 바닥(지하 지붕) 빈 곳
+      const [ya, yb] = G.bx0 > 3.2 ? [0.5, G.bx0 - 0.6] : [G.bx1 + 0.6, pw - 0.5], ym = (ya + yb) / 2;
+      g.rect(ya, 0, yb, 0.25, `yard${a}`); for (let j = 0; j < 5; j++) g.line(ya + 0.3, 0.3 + j * 0.18, yb - 0.3, 0.3 + j * 0.18, 'rebar');
+      g.rect(ym - 0.8, 0.3, ym + 0.8, 1.4, `eq${a}`); c.EQ.worker(g, ym + 1.3, 0.25, a.trim());
+      if (wpId === 'rebar') g.text(ym, 1.9, '현장 가공장 (절단·절곡)', 'eq-lab', 'middle', -2); at.yard = [ym, 1];
+    }
+    if (k === 'shop' || k === 'coupler' || k === 'mesh') { const tx = pw + 24 - ((T * 2) % 8); c.occupy(tx - 5.4, tx + 1.6); c.EQ.truck(g, tx, 0, -1, false, a.trim()); for (let j = 0; j < 3; j++) g.line(tx - 3.2, 2.9 + j * 0.2, tx + 1.4, 2.9 + j * 0.2, 'rebar'); if (wpId === 'rebar') g.text(tx, 4, k === 'mesh' ? '용접 철망 반입' : '공장 가공 철근 반입', 'eq-lab', 'middle', -2); }
     if (k === 'cage' && wpId === 'rebar') { const hx = x0 + bw * 0.3, he = f.e1 + 2 + 2 * (0.5 + 0.5 * Math.sin(T * 0.8)); g.line(hx, he + 3.4, hx, f.e1 + 14, 'eq-c'); g.rect(hx - 0.4, he, hx + 0.4, he + 3.4, `cage${a}`); for (let e = he + 0.4; e < he + 3.4; e += 0.5) g.line(hx - 0.4, e, hx + 0.4, e, 'rebar'); g.text(hx + 0.8, he + 2, '기둥 케이지 인양', 'eq-lab', 'start', 3); at.crane = [hx, he + 3.4]; }
     if (k === 'coupler' && wpId === 'rebar' && c.g.s > 3) { const bays = Math.max(2, Math.round(bw / 8.4)); for (let j = 0; j <= bays; j++) g.rect(x0 + bw * j / bays - 0.12, f.e0 + 1.1, x0 + bw * j / bays + 0.12, f.e0 + 1.4, `cpl${a}`); g.text(x1 + 1, f.e0 + 1.2, '기계식 이음', 'eq-lab', 'start', 3); }
     if (k === 'mesh' && wpId === 'rebar' && c.g.s > 3) { const pts = []; for (let x = x0; x <= x1; x += 0.4) pts.push([x, f.e1 - 0.15 + (Math.round((x - x0) / 0.4) % 2) * 0.08]); g.pl(pts, `mesh${a}`); }
@@ -372,7 +373,7 @@ export function drawPour(g, c, f, target) {
     g.text(pw + 12, 3, k === 'highp' ? `초고압 펌프 ${pumpMPa(H)}MPa` : `고정 펌프 ${pumpMPa(H)}MPa`, 'eq-lab', 'middle', -3);
   }
   if (k === 'winter') { g.rect(G.bx0 - 0.6, f.e0, G.bx1 + 0.6, f.e1 + 2.2, 'tent'); for (let j = 0; j < 3; j++) g.circ(G.bx0 + (G.bx1 - G.bx0) * (0.25 + j * 0.25), f.e0 + 0.6, (0.5 + 0.15 * Math.sin(T * 4 + j)) * g.s, 'heater'); g.text(G.bx1 + 1, f.e1 + 1.6, '보온 천막 · 가열 양생', 'eq-lab', 'start', 3); }
-  [0, 1].forEach(j => c.EQ.mixer(g, pw + 21 + j * 8, 0, T + j * 0.3, ''));
+  [0, 1].forEach(j => c.EQ.mixer(g, pw + 21 + j * 8, 0, T + j * 0.3, '', j));
   at.pump = [pw + 12, 3];
 }
 const lerpT = (a, b, T) => a + (b - a) * (0.5 + 0.5 * Math.sin(T * 0.7));

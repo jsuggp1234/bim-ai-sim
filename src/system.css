@@ -1098,3 +1098,337 @@ th.r, td.r { text-align: right; }
   .pad { padding: 16px; }
 }
 .wz-go .chipbtn { justify-self: center; }
+
+/* ---- 주변 맥락 (buildsim-ctx.js): 배경 · 인접/건너편 건물 단면 · 가로 · 매설물 · 계측 ---- */
+.bsim .bg-b { fill: color-mix(in srgb, var(--ink) 3.5%, var(--paper)); }
+.bsim .bg-w { fill: url(#bp-win); opacity: .3; }
+.bsim .pt-win { fill: color-mix(in srgb, var(--ink) 16%, transparent); }
+.bsim .bg-l { stroke: color-mix(in srgb, var(--ink) 14%, transparent); stroke-width: 1; }
+.bsim .nb2 { fill: color-mix(in srgb, var(--ink) 6%, var(--paper)); stroke: color-mix(in srgb, var(--ink) 18%, transparent); stroke-width: .6; }
+.bsim .cb-in { fill: color-mix(in srgb, var(--ink) 5%, var(--paper)); }
+.bsim .cb-cut { fill: color-mix(in srgb, var(--ink) 42%, var(--paper)); }
+.bsim .cb-col { fill: color-mix(in srgb, var(--ink) 30%, var(--paper)); }
+.bsim .cb-pile { fill: color-mix(in srgb, var(--ink) 30%, var(--paper)); }
+.bsim .cb-pan { fill: color-mix(in srgb, #9fb0c2 55%, var(--paper)); }
+.bsim .cb-glr { fill: color-mix(in srgb, #7fb6e6 55%, var(--paper)); }
+.bsim .cb-bw { fill: color-mix(in srgb, #7fb6e6 14%, var(--paper)); }
+.bsim .cb-crane { fill: color-mix(in srgb, #f0b429 55%, var(--paper)); }
+.bsim .cb-box { fill: color-mix(in srgb, #b49b6c 40%, var(--paper)); stroke: color-mix(in srgb, var(--ink) 25%, transparent); stroke-width: .5; }
+.bsim .cb-lamp { fill: #ffd76a; opacity: .55; }
+.bsim .cb-fur { fill: color-mix(in srgb, var(--ink) 20%, var(--paper)); }
+.bsim .cb-furl { stroke: color-mix(in srgb, var(--ink) 22%, var(--paper)); stroke-width: .8; }
+.bsim .cb-rail { stroke: color-mix(in srgb, var(--ink) 40%, var(--paper)); stroke-width: 1; }
+.bsim .cb-awn { fill: color-mix(in srgb, #d0103a 40%, var(--paper)); }
+.bsim .cb-sign { fill: #10131a; stroke: color-mix(in srgb, var(--ink) 30%, transparent); stroke-width: .5; }
+.bsim .cb-st { fill: var(--ink-2); font-size: 8.5px; paint-order: stroke; stroke: var(--paper); stroke-width: 3px; }
+.bsim .cb-t { fill: var(--muted); font-size: 8.5px; }
+.bsim .cb-truss { fill: none; stroke: color-mix(in srgb, var(--ink) 38%, var(--paper)); stroke-width: .9; }
+.bsim .cb-roof { fill: color-mix(in srgb, #9fb0c2 40%, var(--paper)); }
+.bsim .cb-pent { fill: color-mix(in srgb, var(--ink) 12%, var(--paper)); stroke: color-mix(in srgb, var(--ink) 40%, var(--paper)); stroke-width: .8; }
+.bsim .cb-leg { stroke: color-mix(in srgb, var(--ink) 40%, var(--paper)); stroke-width: 1; }
+.bsim .cb-tank { fill: color-mix(in srgb, #7fb6e6 25%, var(--paper)); stroke: color-mix(in srgb, var(--ink) 40%, var(--paper)); stroke-width: .8; }
+.bsim .cb-odu { fill: color-mix(in srgb, var(--ink) 16%, var(--paper)); stroke: color-mix(in srgb, var(--ink) 40%, var(--paper)); stroke-width: .6; }
+.bsim .cb-fan { fill: none; stroke: color-mix(in srgb, var(--ink) 40%, var(--paper)); stroke-width: .6; }
+.bsim .cb-p line { stroke: color-mix(in srgb, var(--ink) 45%, var(--paper)); stroke-width: 1.2; stroke-linecap: round; }
+.bsim .cb-p circle { fill: color-mix(in srgb, var(--ink) 45%, var(--paper)); }
+.bsim .ped line { stroke: color-mix(in srgb, var(--ink) 62%, var(--paper)); stroke-width: 1.3; stroke-linecap: round; }
+.bsim .ped circle { fill: color-mix(in srgb, var(--ink) 62%, var(--paper)); }
+.bsim .flag line { stroke: #ff8a1f; stroke-width: 1.6; stroke-linecap: round; } .bsim .flag circle { fill: var(--ink-2); }
+.bsim .hat { fill: #ffd23a; } .bsim .flag-b { stroke: #ff3b30; stroke-width: 2.4; stroke-linecap: round; }
+.bsim .tcone { fill: #ff8a1f; stroke: #fff; stroke-width: .5; }
+/* 차량 */
+.bsim .veh { fill: #c9ccd3; } .bsim .veh.v0 { fill: #e9eaee; } .bsim .veh.v1 { fill: #9ea3ad; } .bsim .veh.v2 { fill: #3a3d44; } .bsim .veh.v3 { fill: #3f5f8f; } .bsim .veh.v4 { fill: #a8343e; } .bsim .veh.v5 { fill: #6c7480; }
+.bsim .veh.vbus { fill: #3b8f5a; } .bsim .veh.box { fill: #d9d9de; }
+.bsim .pk { fill: color-mix(in srgb, var(--ink) 22%, var(--paper)); }
+.bsim .veh-g { fill: #1c2a3a; opacity: .85; } .bsim .veh-w { fill: #111214; } .bsim .veh-l { stroke: #111214; stroke-width: 1.2; }
+.bsim .veh-hl { fill: #fff5c2; } .bsim .veh-tl { fill: #ff3b30; } .bsim .veh-plate { fill: #f2f2f0; }
+.bsim .veh-led { fill: #10131a; } .bsim .veh-ledt { fill: #ffb547; font-size: 7px; }
+/* 포장 · 보도 · 차선 */
+.bsim .asp { fill: #2a2c31; }
+.bsim .pv-1 { fill: #2f3136; } .bsim .pv-2 { fill: #45474d; } .bsim .pv-3 { fill: color-mix(in srgb, #8a8f99 55%, var(--paper)); } .bsim .pv-4 { fill: color-mix(in srgb, #b49b6c 45%, var(--paper)); } .bsim .pv-5 { fill: color-mix(in srgb, #c9a86a 35%, var(--paper)); }
+.bsim .pv-t { fill: var(--muted); font-size: 8px; }
+.bsim .sw-blk { fill: color-mix(in srgb, #b9a17e 60%, var(--paper)); } .bsim .sw-sand { fill: color-mix(in srgb, #c9a86a 45%, var(--paper)); } .bsim .sw-j { stroke: var(--paper); stroke-width: .6; }
+.bsim .curb { fill: color-mix(in srgb, var(--ink) 55%, var(--paper)); }
+.bsim .ln-w { fill: #f2f2f0; } .bsim .ln-y { fill: #ffc531; }
+.bsim .grass { fill: color-mix(in srgb, #3fae6a 45%, var(--paper)); }
+/* 매설물 */
+.bsim .ut { stroke: var(--paper); stroke-width: .6; }
+.bsim .ut-comm { fill: #b28cf2; } .bsim .ut-power { fill: #ff8a1f; } .bsim .ut-gas { fill: #ffd23a; } .bsim .ut-water { fill: #3d8fd6; } .bsim .ut-storm { fill: #6fb7c9; } .bsim .ut-sewer { fill: #8b6f3a; } .bsim .ut-heat { fill: #e5484d; }
+.bsim .ut-in { fill: color-mix(in srgb, var(--paper) 70%, transparent); }
+.bsim .ut-enc { fill: color-mix(in srgb, var(--ink) 30%, var(--paper)); }
+.bsim .ut-ld { stroke: color-mix(in srgb, var(--ink) 30%, transparent); stroke-width: .6; }
+.bsim .ut-t { fill: var(--ink-2); font-size: 8.5px; paint-order: stroke; stroke: var(--paper); stroke-width: 3px; stroke-linejoin: round; }
+.bsim .mh { fill: color-mix(in srgb, var(--ink) 40%, var(--paper)); } .bsim .mh-c { fill: #111214; } .bsim .mh-s { stroke: var(--ink-2); stroke-width: .8; }
+/* 가로 시설 */
+.bsim .grate { fill: #2a2c31; }
+.bsim .st-trunk { stroke: #8b6f3a; stroke-width: 1.6; stroke-linecap: round; }
+.bsim .st-tree { fill: color-mix(in srgb, #3fae6a 50%, var(--paper)); stroke: color-mix(in srgb, #3fae6a 75%, var(--paper)); stroke-width: .8; }
+.bsim .rootb { fill: color-mix(in srgb, #8b6f3a 30%, transparent); }
+.bsim .pole { fill: color-mix(in srgb, var(--ink) 50%, var(--paper)); } .bsim .pole-l { fill: none; stroke: color-mix(in srgb, var(--ink) 50%, var(--paper)); stroke-width: 1.4; }
+.bsim .lamp-h { fill: #f2f2f0; } .bsim .lamp-c { fill: #ffd76a; opacity: .07; }
+.bsim .sig-b { fill: #15171c; } .bsim .sig-r, .bsim .sig-y, .bsim .sig-g { fill: #2a2d33; }
+.bsim .sig-r.on { fill: #ff3b30; } .bsim .sig-y.on { fill: #ffc531; } .bsim .sig-g.on { fill: #3cc79a; }
+.bsim .bus-r { fill: color-mix(in srgb, var(--ink) 45%, var(--paper)); } .bsim .bus-p { fill: color-mix(in srgb, #7fb6e6 40%, var(--paper)); }
+.bsim .insu { fill: #e7e7ea; } .bsim .trf { fill: color-mix(in srgb, var(--ink) 35%, var(--paper)); }
+/* 게이트 · 사무실 */
+.bsim .gate-p { fill: var(--ink-2); } .bsim .gate-d { fill: color-mix(in srgb, #f0b429 60%, var(--paper)); }
+.bsim .ofc { fill: color-mix(in srgb, #e7e7ea 70%, var(--paper)); stroke: var(--ink-2); stroke-width: .8; } .bsim .ofc.acc { stroke: var(--accent); }
+.bsim .ofc-w { fill: color-mix(in srgb, #7fb6e6 45%, var(--paper)); } .bsim .ofc-m { stroke: var(--ink-2); stroke-width: .6; } .bsim .ofc-st { stroke: var(--ink-2); stroke-width: 1; }
+.bsim .wash-n { stroke: #3d8fd6; stroke-width: 1.2; }
+/* 계측 */
+.bsim .mon-p { stroke: #b28cf2; stroke-width: 1.4; } .bsim .mon-c { fill: none; stroke: #b28cf2; stroke-width: 1.6; stroke-dasharray: 3 2; }
+.bsim .mon-b { fill: #b28cf2; } .bsim .mon-w { stroke: #3d8fd6; stroke-width: 1.2; stroke-dasharray: 4 2; } .bsim .mon-wl { fill: #3d8fd6; }
+.bsim .mon-v { fill: none; stroke: #b28cf2; stroke-width: 1; opacity: .7; }
+.bsim .mon-t { fill: #c9b0f7; font-size: 8.5px; paint-order: stroke; stroke: var(--paper); stroke-width: 3px; }
+.bsim .gv.warn { fill: var(--warn); } .bsim .warn-v { fill: var(--warn); font-weight: 700; }
+.bsim .drum { fill: color-mix(in srgb, #e7e7ea 60%, var(--paper)); }
+
+/* =====================================================================
+   작업 상세 카드 (workstep.js) — 단계별 확대 장면 + 장비·인원·관리 항목
+   ===================================================================== */
+.sim-work { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); overflow: hidden; }
+.sim-work .sw-fig { position: relative; background: var(--panel); border-right: 1px solid var(--line); min-width: 0; }
+.sim-work .sw-fig .wv { display: block; width: 100%; height: auto; aspect-ratio: 440 / 240; }
+.sim-work .sw-info { padding: 10px 12px 12px; display: grid; gap: 8px; align-content: start; min-width: 0; font-size: 12.5px; }
+.sw-h { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.sw-n { font-family: var(--f-mono); font-size: 10px; color: var(--accent-ink); letter-spacing: var(--mono-ls); }
+.sw-k { font-family: var(--f-mono); font-size: 10px; text-transform: uppercase; letter-spacing: var(--mono-ls); color: var(--ink-2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; }
+.sw-t { margin: 0; font-size: 14px; font-weight: 650; line-height: 1.35; }
+.sw-dl { margin: 0; display: grid; gap: 4px; }
+.sw-dl > div { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 8px; }
+.sw-dl dt { font-family: var(--f-mono); font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: var(--mono-ls); padding-top: 2px; }
+.sw-dl dd { margin: 0; color: var(--ink); }
+.sw-dl em { font-style: normal; color: var(--muted); font-size: 11px; }
+.sw-qc b, .sw-sf b { font-family: var(--f-mono); font-size: 10px; text-transform: uppercase; letter-spacing: var(--mono-ls); color: var(--muted); font-weight: 500; margin-right: 6px; }
+.sw-qc ul { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.sw-qc li { padding-left: 14px; position: relative; color: var(--ink-2); }
+.sw-qc li::before { content: ''; position: absolute; left: 2px; top: .62em; width: 6px; height: 6px; border: 1.4px solid var(--good); border-radius: 50%; }
+.sw-sf { margin: 0; color: var(--ink-2); padding: 6px 8px; border-left: 2px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, transparent); border-radius: 0 var(--r) var(--r) 0; }
+@media (max-width: 760px) {
+  .sim-work { grid-template-columns: minmax(0, 1fr); }
+  .sim-work .sw-fig { border-right: 0; border-bottom: 1px solid var(--line); }
+}
+
+/* --- 장면 공통 --- */
+.wv { font-family: var(--f-sans, inherit); }
+.wv text { font-size: 10px; fill: var(--ink-2); }
+.wv polyline { fill: none; }
+.wv .wv-t { fill: var(--ink-2); font-size: 10px; }
+.wv .wv-big { fill: var(--ink); font-size: 15px; font-weight: 700; font-family: var(--f-mono); }
+.wv .wv-tm { fill: var(--muted); font-size: 9.5px; font-family: var(--f-mono); }
+.wv .wv-cl { fill: var(--ink); font-size: 10px; font-weight: 600; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
+.wv .wv-ld { stroke: var(--muted); stroke-width: .8; }
+.wv .wv-dot { fill: var(--accent); }
+.wv .wv-dim { stroke: var(--muted); stroke-width: .8; }
+.wv .wv-dt { fill: var(--muted); font-size: 9px; font-family: var(--f-mono); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+.wv .wv-gb { fill: var(--card); stroke: var(--line); stroke-width: 1; }
+.wv .wv-gt { fill: var(--muted); font-size: 9px; font-family: var(--f-mono); }
+.wv .wv-gv { fill: var(--ink); font-size: 10px; font-weight: 700; font-family: var(--f-mono); }
+.wv .wv-gvb { fill: var(--bad); font-size: 10px; font-weight: 700; font-family: var(--f-mono); }
+.wv .wv-gbar { fill: var(--line); }
+.wv .wv-gf { fill: var(--good); } .wv .wv-gfb { fill: var(--bad); }
+.wv .wv-glim { stroke: var(--bad); stroke-width: 1.2; stroke-dasharray: 2 1.5; }
+.wv .wv-gl { stroke: var(--ink-2); stroke-width: 1.2; }
+.wv .wv-sky0 { fill: color-mix(in srgb, #3d8fd6 6%, transparent); }
+.wv .wv-room { fill: color-mix(in srgb, var(--ink) 4%, var(--panel)); }
+.wv .wv-flr { fill: color-mix(in srgb, #8e9097 45%, var(--paper)); }
+/* 지층 */
+.wv .wv-s1 { fill: color-mix(in srgb, #7a5c3a 55%, var(--paper)); }
+.wv .wv-s2 { fill: color-mix(in srgb, #b08d5a 48%, var(--paper)); }
+.wv .wv-s3 { fill: color-mix(in srgb, #8b7a66 50%, var(--paper)); }
+.wv .wv-s4, .wv .wv-rock { fill: color-mix(in srgb, #6a6a74 58%, var(--paper)); }
+.wv .wv-sclay { fill: color-mix(in srgb, #6f7356 55%, var(--paper)); }
+.wv .wv-sand { fill: color-mix(in srgb, #d0ae6c 55%, var(--paper)); }
+.wv .wv-soil { fill: color-mix(in srgb, #8a6a45 70%, var(--paper)); }
+.wv .wv-soilg { fill: color-mix(in srgb, #5f7a3e 50%, var(--paper)); }
+.wv .wv-pit { fill: var(--panel); stroke: var(--ink-2); stroke-width: .8; stroke-dasharray: 3 2; }
+.wv .wv-hole { fill: color-mix(in srgb, var(--ink) 8%, var(--panel)); stroke: var(--muted); stroke-width: .8; stroke-dasharray: 2 2; }
+/* 재료 */
+.wv .wv-c, .wv .wv-conc { fill: color-mix(in srgb, #8e9097 58%, var(--paper)); }
+.wv .wv-cbk { fill: color-mix(in srgb, var(--bad) 40%, var(--paper)); stroke: var(--bad); stroke-width: 1; }
+.wv .wv-crack { stroke: var(--bad); stroke-width: 1.4; }
+.wv .wv-st { fill: color-mix(in srgb, #4f5d74 82%, var(--paper)); stroke: color-mix(in srgb, #4f5d74 82%, var(--paper)); stroke-width: 2; }
+.wv .wv-hbeam, .wv .wv-hcol { fill: color-mix(in srgb, #4f5d74 82%, var(--paper)); }
+.wv .wv-hweb { stroke: var(--panel); stroke-width: 1; }
+.wv .wv-rb, .wv .wv-rbs, .wv .wv-rbx { stroke: #a4512f; stroke-width: 2.2; stroke-linecap: round; }
+.wv .wv-rbs { stroke-width: 1.3; } .wv .wv-rbx { stroke-dasharray: 3 2; }
+.wv .wv-rbx { stroke: color-mix(in srgb, #a4512f 60%, var(--paper)); }
+.wv .wv-cagebg, .wv .wv-colbg { fill: color-mix(in srgb, #a4512f 8%, transparent); stroke: color-mix(in srgb, #a4512f 50%, var(--paper)); stroke-width: .8; stroke-dasharray: 2 2; }
+.wv .wv-coup { fill: var(--ink-2); }
+.wv .wv-spacer { fill: color-mix(in srgb, var(--ink) 30%, var(--paper)); }
+.wv .wv-mesh { fill: color-mix(in srgb, #a4512f 25%, transparent); stroke: #a4512f; stroke-width: .6; stroke-dasharray: 2 2; }
+.wv .wv-wood, .wv .wv-ply { fill: #c58a4a; stroke: color-mix(in srgb, #7a4f22 70%, var(--paper)); stroke-width: .6; }
+.wv .wv-wood2 { stroke: #c58a4a; stroke-width: 4; }
+.wv .wv-alu { fill: #b9c2cf; stroke: #6f7b8c; stroke-width: .6; }
+.wv .wv-panel { fill: var(--card); stroke: var(--ink-2); stroke-width: 1; }
+.wv .wv-gang, .wv .wv-acs { fill: color-mix(in srgb, #e5a50a 30%, var(--paper)); stroke: #b98208; stroke-width: 1; }
+.wv .wv-rail, .wv .wv-deck { stroke: var(--ink-2); stroke-width: 2; }
+.wv .wv-prop, .wv .wv-propl { stroke: #6f7b8c; stroke-width: 2.2; } .wv .wv-propl { stroke-width: 1; stroke-dasharray: 2 2; }
+.wv .wv-prop2 { fill: none; stroke: var(--muted); stroke-dasharray: 2 2; }
+.wv .wv-hatch { fill: color-mix(in srgb, var(--accent) 10%, transparent); stroke: var(--accent); stroke-width: .8; stroke-dasharray: 3 2; }
+.wv .wv-pc { fill: color-mix(in srgb, #9aa0a8 60%, var(--paper)); stroke: var(--ink-2); stroke-width: .8; }
+.wv .wv-hcs { fill: var(--panel); }
+.wv .wv-mod { fill: color-mix(in srgb, #3d8fd6 18%, var(--card)); stroke: var(--ink-2); stroke-width: 1; }
+.wv .wv-unit { fill: color-mix(in srgb, #8fc3e8 45%, var(--paper)); stroke: var(--ink-2); stroke-width: 1; }
+.wv .wv-mull { stroke: var(--ink-2); stroke-width: 1.4; }
+.wv .wv-frame { fill: color-mix(in srgb, #9aa3ad 60%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-glass, .wv .wv-gls { fill: color-mix(in srgb, #8fc3e8 55%, var(--paper)); stroke: color-mix(in srgb, #3d8fd6 60%, var(--paper)); stroke-width: .6; }
+.wv .wv-glint { stroke: #fff; stroke-width: 2; opacity: .55; }
+.wv .wv-gap { fill: color-mix(in srgb, var(--bad) 30%, transparent); }
+.wv .wv-sealant { fill: #2b2b2e; } .wv .wv-backer { fill: #d7d7db; }
+.wv .wv-foam, .wv .wv-foamc { fill: color-mix(in srgb, #f2d27a 70%, var(--paper)); }
+.wv .wv-ins, .wv .wv-insw { fill: color-mix(in srgb, #f2c94c 55%, var(--paper)); stroke: color-mix(in srgb, #b98208 50%, var(--paper)); stroke-width: .5; }
+.wv .wv-insw { opacity: .75; }
+.wv .wv-ure { fill: color-mix(in srgb, #3fae6a 55%, var(--paper)); }
+.wv .wv-bento { fill: color-mix(in srgb, #a67c3d 70%, var(--paper)); }
+.wv .wv-wp { fill: #2b2b2e; } .wv .wv-lap { fill: color-mix(in srgb, var(--accent) 50%, #2b2b2e); }
+.wv .wv-roll { fill: #3a3a3e; stroke: var(--paper); stroke-width: 1; }
+.wv .wv-flame { fill: #ff8a2b; opacity: .9; }
+.wv .wv-anchor { stroke: var(--ink-2); stroke-width: 1.6; } .wv .wv-anchor2 { fill: var(--ink-2); }
+.wv .wv-tendon { stroke: var(--accent); stroke-width: 1.8; }
+.wv .wv-grout { stroke: color-mix(in srgb, #8e9097 70%, var(--paper)); stroke-width: 6; stroke-linecap: round; opacity: .8; }
+.wv .wv-groutb { fill: color-mix(in srgb, #8e9097 60%, var(--paper)); opacity: .85; }
+.wv .wv-shot { stroke: color-mix(in srgb, #8e9097 75%, var(--paper)); stroke-width: 3; }
+.wv .wv-slurry { fill: color-mix(in srgb, #8a6a45 30%, #3d8fd6 15%); opacity: .85; }
+.wv .wv-cdrop { fill: color-mix(in srgb, #8e9097 70%, var(--paper)); }
+.wv .wv-blanket { fill: color-mix(in srgb, #e5a50a 55%, var(--paper)); }
+.wv .wv-wetc { fill: color-mix(in srgb, #3d8fd6 35%, var(--paper)); }
+.wv .wv-tent { fill: color-mix(in srgb, #e8e8ea 70%, transparent); stroke: var(--ink-2); stroke-width: .8; }
+.wv .wv-tarp { fill: color-mix(in srgb, #3d8fd6 45%, var(--paper)); }
+.wv .wv-mat { fill: color-mix(in srgb, #2b2b2e 80%, var(--paper)); }
+.wv .wv-charge { fill: var(--bad); }
+.wv .wv-flash { fill: #ffd23a; opacity: .85; }
+.wv .wv-pbd { stroke: color-mix(in srgb, #3d8fd6 70%, var(--paper)); stroke-width: 2; }
+.wv .wv-wtab { stroke: #3d8fd6; stroke-width: 1.4; stroke-dasharray: 5 3; }
+.wv .wv-wat { fill: color-mix(in srgb, #3d8fd6 30%, transparent); }
+.wv .wv-well { fill: color-mix(in srgb, #3d8fd6 25%, var(--panel)); stroke: #3d8fd6; stroke-width: 1; }
+.wv .wv-drop { fill: #5aa6ec; } .wv .wv-mist { fill: #9ccff5; opacity: .7; }
+.wv .wv-wash { fill: #3d8fd6; opacity: .75; }
+.wv .wv-spray { stroke: #5aa6ec; stroke-width: 1.2; stroke-dasharray: 2 3; }
+/* 혼합 · 배합 */
+.wv .wv-mc { fill: #8e9097; } .wv .wv-mslag { fill: #c9c3b0; } .wv .wv-mw { fill: #5aa6ec; } .wv .wv-msand { fill: #d0ae6c; } .wv .wv-mgrav { fill: #7a7a82; }
+.wv .wv-mixc { fill: color-mix(in srgb, #8a6a45 45%, #8e9097 30%); }
+.wv .wv-mixc2 { fill: color-mix(in srgb, #8e9097 70%, var(--paper)); }
+.wv .wv-silo { fill: color-mix(in srgb, #c9ccd3 60%, var(--paper)); stroke: var(--ink-2); stroke-width: 1; }
+.wv .wv-tank { fill: color-mix(in srgb, #c9ccd3 55%, var(--paper)); stroke: var(--ink-2); stroke-width: 1; }
+/* 장비 */
+.wv .wv-eq { fill: color-mix(in srgb, #e5a50a 78%, var(--paper)); stroke: color-mix(in srgb, #6b4c06 80%, var(--paper)); stroke-width: .8; }
+.wv .wv-eqd, .wv .wv-cab { fill: color-mix(in srgb, #3a3d44 82%, var(--ink)); stroke: color-mix(in srgb, #3a3d44 82%, var(--ink)); stroke-width: 1.4; }
+.wv .wv-cab { stroke-width: 1.8; }
+.wv .wv-trk { fill: color-mix(in srgb, #2b2b2e 82%, var(--ink)); }
+.wv .wv-whl, .wv .wv-wheel { fill: #2b2b2e; stroke: color-mix(in srgb, var(--ink) 30%, var(--paper)); stroke-width: 1; }
+.wv .wv-trkb { fill: color-mix(in srgb, #3d8fd6 40%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-mixer { fill: color-mix(in srgb, #e8e8ea 80%, var(--paper)); stroke: var(--ink-2); stroke-width: .8; }
+.wv .wv-arm { stroke: color-mix(in srgb, #e5a50a 85%, var(--paper)); stroke-width: 6; stroke-linecap: round; }
+.wv .wv-arm2 { stroke: color-mix(in srgb, #c98e08 85%, var(--paper)); stroke-width: 4.5; stroke-linecap: round; }
+.wv .wv-boom { stroke: color-mix(in srgb, #e5a50a 85%, var(--paper)); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+.wv .wv-mast { stroke: color-mix(in srgb, #e5a50a 85%, var(--paper)); stroke-width: 4; }
+.wv .wv-mastl { stroke: color-mix(in srgb, #b98208 80%, var(--paper)); stroke-width: .8; }
+.wv .wv-mast2, .wv .wv-mastt { fill: color-mix(in srgb, #e5a50a 70%, var(--paper)); stroke: #b98208; stroke-width: .8; }
+.wv .wv-jib { fill: color-mix(in srgb, #e5a50a 70%, var(--paper)); stroke: #b98208; stroke-width: .8; }
+.wv .wv-cwt { fill: color-mix(in srgb, #8e9097 80%, var(--paper)); }
+.wv .wv-cage, .wv .wv-lift { fill: color-mix(in srgb, #c9ccd3 50%, var(--paper)); stroke: var(--ink-2); stroke-width: 1.2; }
+.wv .wv-gate { fill: var(--ink-2); }
+.wv .wv-shaft { fill: color-mix(in srgb, var(--ink) 10%, var(--panel)); stroke: var(--ink-2); stroke-width: 1; }
+.wv .wv-car { fill: color-mix(in srgb, #c9ccd3 65%, var(--paper)); stroke: var(--ink-2); stroke-width: 1.2; }
+.wv .wv-rod, .wv .wv-rod2 { stroke: color-mix(in srgb, #3a3d44 80%, var(--ink)); stroke-width: 2.6; } .wv .wv-rod2 { stroke-width: 1.4; }
+.wv .wv-hammer, .wv .wv-jack { fill: color-mix(in srgb, #3a3d44 80%, var(--ink)); }
+.wv .wv-rope { stroke: var(--ink-2); stroke-width: 1; fill: none; }
+.wv .wv-tool { stroke: var(--ink); stroke-width: 2.2; stroke-linecap: round; }
+.wv .wv-pole { stroke: var(--ink-2); stroke-width: 1.4; }
+.wv .wv-blade { stroke: var(--ink-2); stroke-width: 3; stroke-linecap: round; }
+.wv .wv-cutter { fill: color-mix(in srgb, #3a3d44 80%, var(--paper)); stroke: var(--ink-2); stroke-width: .8; stroke-dasharray: 3 1.5; }
+.wv .wv-hose { stroke: #2b2b2e; stroke-width: 3; fill: color-mix(in srgb, #2b2b2e 80%, var(--paper)); stroke-linecap: round; }
+.wv .wv-vibr { stroke: var(--ink); stroke-width: 2.4; }
+.wv .wv-vib { fill: none; stroke: var(--warn); stroke-width: 1.2; }
+.wv .wv-wave { fill: none; stroke: #3d8fd6; stroke-width: 1.4; }
+.wv .wv-weld { fill: color-mix(in srgb, #ffd23a 70%, var(--paper)); }
+.wv .wv-spk { stroke: #ffb21a; stroke-width: 1.2; }
+.wv .wv-glow { fill: #fff3b0; }
+.wv .wv-laser { stroke: var(--bad); stroke-width: 1; stroke-dasharray: 4 2; }
+.wv .wv-fp { fill: color-mix(in srgb, #d9d0c0 70%, var(--paper)); } .wv .wv-fpd { fill: #d9d0c0; }
+.wv .wv-bolt { fill: var(--muted); } .wv .wv-boltok { fill: var(--good); }
+.wv .wv-lanyard { stroke: var(--accent); stroke-width: 1.4; stroke-dasharray: 3 2; }
+.wv .wv-joint { stroke: var(--accent); stroke-width: 2; }
+.wv .wv-strutl { stroke: color-mix(in srgb, #4f5d74 82%, var(--paper)); stroke-width: 5; }
+.wv .wv-r1 { fill: color-mix(in srgb, #3d8fd6 65%, var(--paper)); } .wv .wv-r2 { fill: color-mix(in srgb, #8fc3e8 55%, var(--paper)); }
+.wv .wv-r3 { fill: color-mix(in srgb, #e0a043 45%, var(--paper)); } .wv .wv-r4 { fill: color-mix(in srgb, #c63b1d 55%, var(--paper)); }
+.wv .wv-graph { stroke: var(--accent); stroke-width: 1.8; fill: none; stroke-linejoin: round; }
+.wv .wv-graph2 { stroke: #3d8fd6; stroke-width: 1.6; fill: none; }
+.wv .wv-graph3 { stroke: var(--good); stroke-width: 1.6; fill: none; }
+.wv .wv-gdot { fill: var(--accent); stroke: var(--panel); stroke-width: 1; }
+.wv .wv-accf { fill: color-mix(in srgb, var(--accent) 22%, transparent); stroke: var(--accent); stroke-width: 1.2; }
+/* 외부 · 마감 */
+.wv .wv-bk { fill: color-mix(in srgb, var(--ink) 9%, var(--panel)); stroke: color-mix(in srgb, var(--ink) 20%, var(--panel)); stroke-width: .8; }
+.wv .wv-bkl { stroke: color-mix(in srgb, var(--ink) 18%, var(--panel)); stroke-width: .6; }
+.wv .wv-fence { fill: color-mix(in srgb, #9aa3ad 55%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-sound { fill: color-mix(in srgb, #3d8fd6 30%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-board { fill: #10131a; stroke: var(--ink-2); } .wv .wv-boardt { fill: #7cf29a; font-size: 11px; font-weight: 700; font-family: var(--f-mono); }
+.wv .wv-stud { fill: color-mix(in srgb, #b9c2cf 80%, var(--paper)); stroke: #6f7b8c; stroke-width: .6; }
+.wv .wv-gyp, .wv .wv-gypw { fill: color-mix(in srgb, #f1efe8 85%, var(--paper)); stroke: color-mix(in srgb, var(--ink) 25%, var(--paper)); stroke-width: .6; }
+.wv .wv-alc { fill: #e7e2d6; stroke: #b9b2a2; stroke-width: .6; } .wv .wv-block { fill: color-mix(in srgb, #9aa0a8 55%, var(--paper)); stroke: var(--ink-2); stroke-width: .5; }
+.wv .wv-plaster { fill: color-mix(in srgb, #d9d4c6 70%, transparent); opacity: .55; }
+.wv .wv-putty { fill: #f1efe8; }
+.wv .wv-paper { fill: color-mix(in srgb, #e8dcc8 70%, var(--paper)); stroke: color-mix(in srgb, var(--ink) 15%, var(--paper)); stroke-width: .5; }
+.wv .wv-p1 { fill: color-mix(in srgb, #c9ccd3 50%, var(--paper)); } .wv .wv-p2 { fill: color-mix(in srgb, #9ccff5 45%, var(--paper)); } .wv .wv-p3 { fill: color-mix(in srgb, #3d8fd6 45%, var(--paper)); }
+.wv .wv-roll2, .wv .wv-roller { fill: color-mix(in srgb, #3d8fd6 55%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-chan { stroke: #6f7b8c; stroke-width: 2.4; }
+.wv .wv-hanger { stroke: var(--muted); stroke-width: 1; }
+.wv .wv-tile, .wv .wv-tile2 { fill: color-mix(in srgb, #e8e8ea 80%, var(--paper)); stroke: var(--ink-2); stroke-width: .5; }
+.wv .wv-tile2 { fill: color-mix(in srgb, #7b8ea6 55%, var(--paper)); }
+.wv .wv-oa { fill: #8fa1b5; stroke: var(--ink-2); stroke-width: .5; }
+.wv .wv-epoxy { fill: #3fae6a; } .wv .wv-polish { fill: #c9ccd3; }
+.wv .wv-stone { fill: #d8cdb8; stroke: #a59a84; stroke-width: .5; } .wv .wv-carpet { fill: color-mix(in srgb, #7b5ea6 50%, var(--paper)); }
+.wv .wv-cush { fill: color-mix(in srgb, var(--ink) 18%, var(--paper)); }
+.wv .wv-coil { fill: none; stroke: var(--bad); stroke-width: 1.4; }
+.wv .wv-mort { fill: color-mix(in srgb, #9a9aa0 70%, var(--paper)); }
+.wv .wv-pave { fill: color-mix(in srgb, var(--ink) 35%, var(--paper)); } .wv .wv-perm { fill: color-mix(in srgb, #d0ae6c 60%, var(--paper)); stroke: var(--ink-2); stroke-width: .5; stroke-dasharray: 1 2; }
+.wv .wv-rootball { fill: color-mix(in srgb, #8a6a45 70%, var(--paper)); }
+.wv .wv-trunk2 { stroke: #8b6f3a; stroke-width: 4; }
+.wv .wv-canopy { fill: color-mix(in srgb, #3fae6a 55%, var(--paper)); stroke: #3fae6a; stroke-width: 1; }
+.wv .wv-pvm { fill: color-mix(in srgb, #1f3f75 80%, var(--paper)); stroke: #8fa1b5; stroke-width: .6; }
+/* 설비 · 전기 */
+.wv .wv-equip { fill: color-mix(in srgb, #c9ccd3 55%, var(--paper)); stroke: var(--ink-2); stroke-width: 1.2; }
+.wv .wv-fan { fill: none; stroke: var(--ink-2); stroke-width: 1.4; stroke-dasharray: 6 3; }
+.wv .wv-pipe { stroke: color-mix(in srgb, #6f7b8c 85%, var(--paper)); stroke-width: 5; stroke-linecap: round; }
+.wv .wv-pipe2 { stroke: color-mix(in srgb, #3d8fd6 70%, var(--paper)); stroke-width: 4; }
+.wv .wv-pipeF, .wv .wv-pipeF2 { fill: #d03a2f; stroke: #d03a2f; stroke-width: 3; }
+.wv .wv-pipeW { fill: #3d8fd6; } .wv .wv-pipeD { fill: color-mix(in srgb, #8e9097 75%, var(--paper)); } .wv .wv-pipeR { fill: #c58a4a; }
+.wv .wv-joint2 { fill: var(--ink-2); }
+.wv .wv-head { fill: #d03a2f; }
+.wv .wv-ductf { fill: color-mix(in srgb, #c9ccd3 70%, var(--paper)); stroke: var(--ink-2); stroke-width: .8; }
+.wv .wv-ffu { fill: color-mix(in srgb, #e8e8ea 85%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-air { stroke: #5aa6ec; stroke-width: 1.4; stroke-dasharray: 3 3; }
+.wv .wv-det { fill: color-mix(in srgb, #f1efe8 85%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-ledon { fill: var(--bad); } .wv .wv-ledoff { fill: color-mix(in srgb, var(--ink) 20%, var(--paper)); }
+.wv .wv-smoke { fill: color-mix(in srgb, var(--ink) 25%, transparent); }
+.wv .wv-tray { fill: none; stroke: var(--ink-2); stroke-width: 1.2; }
+.wv .wv-drum { fill: color-mix(in srgb, #8b6f3a 60%, var(--paper)); stroke: var(--ink-2); stroke-width: .8; }
+.wv .wv-bus { fill: color-mix(in srgb, #6f7b8c 70%, var(--paper)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-rack { fill: color-mix(in srgb, #2b2b2e 85%, var(--ink)); stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-fiber { stroke: #e5a50a; stroke-width: 1.4; }
+.wv .wv-screen { fill: var(--card); stroke: var(--ink-2); stroke-width: .8; }
+.wv .wv-sens { fill: var(--good); }
+.wv .wv-scan { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
+.wv .wv-pt { fill: var(--good); } .wv .wv-ptbad { fill: var(--bad); }
+.wv .wv-vox { fill: color-mix(in srgb, #3d8fd6 35%, var(--paper)); stroke: var(--ink-2); stroke-width: .4; } .wv .wv-vox2 { fill: color-mix(in srgb, #3d8fd6 20%, var(--paper)); stroke: var(--ink-2); stroke-width: .4; }
+.wv .wv-box { fill: var(--card); stroke: var(--ink-2); stroke-width: .8; }
+.wv .wv-desk { fill: color-mix(in srgb, #c58a4a 60%, var(--paper)); }
+.wv .wv-tablet { fill: #10131a; stroke: var(--ink-2); stroke-width: .6; }
+.wv .wv-okbox { fill: color-mix(in srgb, var(--good) 18%, var(--card)); stroke: var(--good); stroke-width: 1; }
+.wv .wv-pendbox { fill: var(--card); stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 2; }
+.wv .wv-bar { fill: color-mix(in srgb, var(--ink) 18%, var(--paper)); } .wv .wv-crit { fill: color-mix(in srgb, var(--accent) 35%, var(--paper)); }
+.wv .wv-done { fill: var(--good); opacity: .8; }
+.wv .wv-link { stroke: var(--muted); stroke-width: .8; stroke-dasharray: 2 2; }
+.wv .wv-today { stroke: var(--accent); stroke-width: 1.4; }
+.wv .wv-lob { stroke: var(--accent); stroke-width: 2; opacity: .75; }
+.wv .wv-crt { fill: var(--accent); font-weight: 700; }
+/* 작업자 */
+.wv .wv-ml, .wv .wv-ma { stroke: color-mix(in srgb, #2e3a52 85%, var(--paper)); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+.wv .wv-ma { stroke-width: 2.4; }
+.wv .wv-mv { stroke: #ff8a2b; stroke-width: 6; stroke-linecap: round; }
+.wv .wv-mvs { stroke: #ffd23a; stroke-width: 6; stroke-linecap: round; }
+.wv .wv-mh { fill: #e8b98f; }
+.wv .wv-hat { fill: #ffd23a; stroke: #b98208; stroke-width: .5; }
+:root:not([data-theme="light"]) .wv .wv-ml, :root:not([data-theme="light"]) .wv .wv-ma { stroke: #8c9bb5; }
+.wv .wv-big, .wv .wv-tm, .wv .wv-t { paint-order: stroke; stroke: var(--panel); stroke-width: 3.5px; stroke-linejoin: round; }

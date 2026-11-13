@@ -7,6 +7,8 @@ import { WP_BY_ID } from '../sim/methods.js';
 import { dateAt, ym } from '../sim/process.js';
 import { MORE } from '../sim/wps-more.js';
 import { drawSite, drawBwp, drawBuilding, drawEnvelope, drawStructDetail, drawPour, drawSystems, detailInset } from './buildsim-more.js';
+import { drawBackdrop, drawStreet, drawTraffic, drawNeighbours, drawGate, drawMonitor, monitorInset, person } from './buildsim-ctx.js';
+import { streetModel } from '../sim/street.js';
 
 // 화면 크기: 데스크톱 16:9, 휴대폰은 세로형 (frame(opts.narrow)로 바뀐다)
 export let VW = 960, VH = 540;
@@ -23,6 +25,7 @@ const GROUND = new Set(['prep', 'land']);
 // 건물 안을 보는 공종: 외장을 입면 대신 단면(양끝 띠)으로 그려 속이 보이게
 const CUT = new Set(['glaz', 'mep', 'hvac', 'plumb', 'fire', 'elec', 'ict', 'elev', 'part', 'floor', 'ceil', 'paint', 'comm', 'insul', 'hoist']);
 const codeOf = (id) => (WP_BY_ID[id] ? WP_BY_ID[id].code : '');
+let CUR = null; // 지금 그리는 프레임의 맥락 (장비가 차로를 쓰면 그 차로의 통행 차량을 비운다)
 
 // ---------- 장면 ----------
 export function makeScene(R, known) {
@@ -42,7 +45,9 @@ export function makeScene(R, known) {
   const strata = L.filter(([a, b]) => b > a);
   const softBot = strata.filter(s => s[2] === 'clay').reduce((m, s) => Math.max(m, s[1]), 0);
   const floors = G.floors.length ? G.floors : [{ e0: 0, e1: G.H }];
+  const city = streetModel({ pw: G.pw, adj, noise: cond.noise, ground: g, nb, seed: R.site.id });
   return {
+    city,
     R, G, W, cond, d, fx: R.fx, ids: { ...R.fx.ids }, qa: R.fx.qa || [], nb, strata, softBot, dv,
     known: new Set(known), mv: wallMove(R.fx.ids, R.fx, d, cond), floors, NF: floors.length,
     t0: R.S.t0, end: R.S.end, phases: R.S.phases, use: R.u,
@@ -225,6 +230,7 @@ const EQ = {
     if (label) g.text(x, e + mast + 1.4, label, 'eq-lab', 'middle', -4);
   },
   crawler(g, x, e, ang, len, hookE, c = '', label = '', dir = 1) {
+    if (CUR && e > -0.5) CUR.occupy(x - 3, x + 3);
     EQ.tracks(g, x, e, 6, c); g.rect(x - 2.2, e + 0.9, x + 2.2, e + 3, `eq ${c}`);
     const tx = x + dir * Math.cos(ang) * len, te = e + 2.4 + Math.sin(ang) * len;
     g.line(x + dir * 0.8, e + 2.4, tx, te, `eq-m ${c}`); g.line(x - dir * 0.6, e + 2.6, tx, te, `eq-l ${c}`);
@@ -257,17 +263,24 @@ const EQ = {
     return { tx, te };
   },
   pump(g, x, e, to, c = '') {
+    if (CUR && e > -0.5) CUR.occupy(x - 4, x + 4.4);
+    // 아웃리거
+    [-3.4, 3.6].forEach(k => { g.line(x + k, e + 1.2, x + k + Math.sign(k) * 1.2, e + 0.15, `eq-l ${c}`); g.rect(x + k + Math.sign(k) * 1.2 - 0.35, e, x + k + Math.sign(k) * 1.2 + 0.35, e + 0.15, `eq ${c}`); });
     g.rect(x - 4, e + 0.9, x + 2.4, e + 2.8, `eq ${c}`); g.rect(x + 2.6, e + 0.9, x + 4.4, e + 2.6, `eq ${c}`);
     [-3, 0, 3.4].forEach(k => g.circ(x + k, e + 0.55, Math.max(1.5, 0.55 * g.s), `eq-w ${c}`));
     const bx = x - 1, be = e + 3, dx = to[0] - bx, de = to[1] - be, L = Math.hypot(dx, de);
     if (L < 52) { const mx = bx + dx * 0.45, me = be + de * 0.45 + Math.min(14, L * 0.35); g.pl([[bx, be], [mx, me], [to[0], to[1] + 2], [to[0], to[1]]], `eq-m ${c}`); }
     else g.pl([[bx, be], [bx + Math.sign(dx) * 6, be + 8]], `eq-m ${c}`);
   },
-  mixer(g, x, e, T, c = '') {
-    g.rect(x + 1.8, e + 0.9, x + 3.6, e + 2.6, `eq ${c}`);
-    g.P(`<ellipse class="eq ${c}" cx="${g.X(x - 1).toFixed(1)}" cy="${g.Y(e + 2.2).toFixed(1)}" rx="${(2.6 * g.s).toFixed(1)}" ry="${(1.3 * g.s).toFixed(1)}"/>`);
-    const k = (T * 2) % 1; g.line(x - 3 + k * 4, e + 1.2, x - 2.4 + k * 4, e + 3.2, 'eq-l');
-    [-2.4, 0.6, 2.8].forEach(k2 => g.circ(x + k2, e + 0.55, Math.max(1.5, 0.55 * g.s), `eq-w ${c}`));
+  // 레미콘 (펌프카 옆 차로에 선 모습: 앞모습 + 뒤로 보이는 드럼)
+  mixer(g, x, e, T, c = '', j = 0) {
+    if (CUR && CUR.laneX) { const lx = CUR.laneX(2 + j); if (lx == null || CUR.occupied.has(2 + j)) return; x = lx; CUR.occupy(x - 1.3, x + 1.3); }
+    const w = 2.5;
+    g.P(`<ellipse class="eq drum ${c}" cx="${g.X(x).toFixed(1)}" cy="${g.Y(e + 2.75).toFixed(1)}" rx="${(1.15 * g.s).toFixed(1)}" ry="${(1.15 * g.s).toFixed(1)}"/>`);
+    const k = (T * 0.9) % 1; for (let q = 0; q < 2; q++) { const a = (k + q / 2) * Math.PI * 2; g.line(x + Math.cos(a) * 0.3, e + 2.75 + Math.sin(a) * 0.3, x + Math.cos(a) * 1.05, e + 2.75 + Math.sin(a) * 1.05, 'eq-l'); }
+    g.rect(x - w / 2, e + 0.4, x + w / 2, e + 2.5, `eq ${c}`); g.rect(x - w * 0.4, e + 1.3, x + w * 0.4, e + 2.3, 'veh-g');
+    [-1, 1].forEach(q => g.rect(x + q * (w / 2 - 0.22) - 0.14, e, x + q * (w / 2 - 0.22) + 0.14, e + 0.5, `eq-w ${c}`));
+    if (g.s >= 5) g.text(x, e + 4.1, '레미콘', 'eq-lab', 'middle', -2);
   },
   worker(g, x, e, c = '') { g.circ(x, e + 1.75, Math.max(1.4, 0.22 * g.s), `wk ${c}`); g.line(x, e + 1.5, x, e + 0.6, `wk-l ${c}`); g.line(x, e + 0.6, x - 0.3, e, `wk-l ${c}`); g.line(x, e + 0.6, x + 0.3, e, `wk-l ${c}`); },
 };
@@ -305,7 +318,17 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
     <pattern id="bp-wr" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M0 10L10 0" class="pt-l" stroke-dasharray="2 3"/></pattern>
     <pattern id="bp-fill" width="9" height="9" patternUnits="userSpaceOnUse"><path d="M2 3l2 2M6 6l1 -2" class="pt-l"/></pattern>
     <pattern id="bp-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0V5" class="pt-h"/></pattern>
+    <pattern id="bp-win" width="7" height="9" patternUnits="userSpaceOnUse"><rect x="1.5" y="2" width="3.4" height="4.2" class="pt-win"/></pattern>
   </defs>`);
+  // 세부 공종 그리기 맥락 (buildsim-more.js · buildsim-ctx.js)
+  const city = sc.city;
+  const laneX = (i) => { const L = city && city.lanes[i]; return L ? (L.x0 + L.x1) / 2 : null; };
+  const occ = new Set();
+  const occupy = (a, b) => { if (!city) return; city.lanes.forEach((L, i) => { if (b > L.x0 + 0.4 && a < L.x1 - 0.4) occ.add(i); }); };
+  const c = { sc, wpId, tau, T, P, K, F, at, eMinV, eMaxV, fl: structP * sc.NF, EQ, g, TOP, VW, VH, NARROW, xMin, xMax, under: UNDER.has(wpId), urbanLeft: city && city.kind === 'urban', occupied: occ, occupy, laneX,
+    trucks: dug > 0.3 && earthP < 1 && ['support', 'excav', 'water'].includes(wpId) };
+  CUR = c;
+  drawBackdrop(g, c);
 
   // ---- 지층 ----
   sc.strata.forEach(([a, b, k, nm]) => {
@@ -341,20 +364,19 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
       g.pl(pts, 'gw'); g.line(xl, -gw, xr, -gw, 'gw0');
       at.drawdown = [nb.x1 - 4, -gw - dh * Math.max(0, 1 - (-nb.x1 + 4) / R0) ** 1.6];
     } else g.line(xl, -gw, xr, -gw, 'gw');
-    g.text(pw + 1.5, -gw, `▽ 지하수위 GL−${gw}m`, 'gw-t', 'start', -4);
+    g.text(Math.max(cam.xw(VW * 0.62), 2), -gw, `▽ 지하수위 GL−${gw}m`, 'gw-t', 'start', -4);
   }
   // 지표
   g.line(xl, 0, 0 - (open ? depth * 1.2 : 0), 0, 'gl'); g.line(pw + (open ? depth * 1.2 : 0), 0, xr, 0, 'gl');
 
-  // ---- 인접 건물 · 도로 · 대지 경계 ----
+  // ---- 도로 · 인접 건물 · 대지 경계 ----
   const settleNow = sc.mv.total > 0 && K('wall') ? sc.mv.settle * clamp(earthP * 1.2, 0, 1) + (dwOn ? sc.mv.dewater * earthP : 0) : 0;
   const sdy = settleNow * 0.025; // 과장 표시 (1mm → 2.5cm)
+  drawStreet(g, c);
+  drawNeighbours(g, c, sdy);
   {
-    const x0 = nb.x0, x1 = nb.x1, h = nb.h, b = nb.b;
-    g.rect(x0, -b - sdy, x1, h - sdy, 'nb');
-    for (let e = 3.2; e < h - 1; e += 3.2) g.line(x0 + 1.2, e - sdy, x1 - 1.2, e - sdy, 'nb-l');
-    g.rect(x0 - 0.6, -b - 0.8 - sdy, x1 + 0.6, -b - sdy, 'nb-f');
-    g.text(Math.min(x1 - 6, Math.max((x0 + x1) / 2, cam.xw(44))), Math.min(h - sdy, cam.ew(NARROW ? 66 : 48)), nb.urban ? '인접 건물' : '인접 시설', 'nb-t', 'middle', 13);
+    const x0 = nb.x0, x1 = nb.x1, h = nb.h, b = nb.b, nbName = city ? `인접 건물 · ${city.nb.name}` : nb.urban ? '인접 건물' : '인접 시설';
+    g.text(Math.min(x1 - 6, Math.max((x0 + x1) / 2, cam.xw(70))), Math.min(h + 3 - sdy, cam.ew(NARROW ? 66 : 48)), nbName, 'nb-t', 'middle', 0);
     if (g.X(x1) < 12) g.P(`<text class="nb-pt" x="20" y="${(g.Y(0) - 8).toFixed(1)}">← ${nb.urban ? '인접 건물' : '인접 시설'} ${Math.round(-x1)}m</text>`);
     if (settleNow > 0.3) {
       const pts = []; for (let x = x0 - 6; x <= 0; x += 1) pts.push([x, -b - 1.2 - sdy * Math.max(0, 1 - (-x) / (sc.mv.zone || 20)) * 2.2]);
@@ -363,14 +385,11 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
     }
     const pl = -Math.min(3, cond.adj / 2);
     g.line(pl, h * 0.5, pl, -sc.dv, 'pline'); g.text(pl, h * 0.5 + 1, '대지 경계', 'pline-t', 'middle', -3);
-    // 도로
-    g.rect(pw + 7, -0.6, pw + 31, 0, 'road'); g.text(pw + 31, 0, '도로', 'road-t', 'end', -3);
-    g.line(pw + 5, 0, pw + 5, 3.4, 'gate'); g.text(pw + 5, 3.8, 'GATE', 'gate-t', 'middle', -2);
-    at.road = [pw + 19, 2]; at.gate = [pw + 5, 3.6]; at.truck = [pw + 12, 4.6];
+    // 도로 이름
+    if (city) { const rx = Math.min((city.road[0] + city.road[1]) / 2, cam.xw(VW - 30)); g.text(rx, -1.05, `${city.kind === 'urban' ? '왕복 4차로' : city.kind === 'ind' ? '산업 도로 4차로' : '왕복 2차로'} · 폭 ${f1(city.road[1] - city.road[0])}m`, 'road-t', 'middle', 4); }
+    at.road = [laneX(1) ?? pw + 19, 2]; at.gate = [city ? city.gate : pw + 5, 3.6]; at.truck = [pw + 12, 4.6];
   }
-  // 세부 공종 그리기 맥락 (buildsim-more.js)
-  const flNow = structP * sc.NF;
-  const c = { sc, wpId, tau, T, P, K, F, at, eMinV, eMaxV, fl: flNow, EQ, g, TOP, VW, VH, NARROW };
+  drawGate(g, c);
   drawSite(g, c);
   // 플랜트 맥락 (연돌·탱크)
   if (G.stack && !isUnder(wpId)) { const sx = pw + 22; g.rect(sx - 1.6, 0, sx + 1.6, G.stack, 'ctx'); g.text(sx, G.stack + 1, '연돌', 'ctx-t', 'middle', -4); }
@@ -528,8 +547,8 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
       if (k === 'splitter') { const bx = pw * 0.55; g.rect(bx - 1.2, -dug, bx + 1.2, -dug + 1.6, `eq${c}`); g.line(bx, -dug + 1.6, bx + 1.2, -dug + 3.2, `eq-m${c}`); for (let j = 0; j < 4; j++) g.pl([[bx - 4 + j * 2.4, -dug], [bx - 3.4 + j * 2.4, -dug - 0.9], [bx - 4.2 + j * 2.4, -dug - 1.8]], 'crack'); g.text(bx, -dug + 4.2, '유압 할암', 'eq-lab', 'middle', -2); }
       if (k === 'normal') { g.text(pw * 0.5, -dug + 3.5, '브레이커 암반 파쇄 · 저속', 'warn-t', 'middle'); }
     }
-    // 덤프
-    const nT = 3; for (let j = 0; j < nT; j++) { const ph = ((T * 0.08 + j / nT) % 1); EQ.truck(g, pw + 4 + ph * 34, 0, 1, true, ''); }
+    // 덤프: 상차 → 세륜 → 게이트 → 차로로 나가며 회전 (단면 밖으로)
+    const nT = 2; for (let j = 0; j < nT; j++) { const ph = ((T * 0.06 + j / nT) % 1), x = pw - 2 + ph * 17, op = ph > 0.72 ? (1 - ph) / 0.28 : ph < 0.08 ? ph / 0.08 : 1; g.P(`<g opacity="${op.toFixed(2)}">`); EQ.truck(g, x, 0, 1, true, ''); g.P('</g>'); if (x > pw + 8) CUR.occupy(x - 3.4, x + 3.6); }
   }
 
   // ---- 기초 ----
@@ -601,12 +620,16 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
   if (wpId === 'plan') drawPlan(g, sc, tau, at);
   if (wpId === 'qa') drawQA(g, sc, fl, at, T, true);
 
+  // 계측 (지하 공종) · 지나가는 차량·보행자
+  const mon = drawMonitor(g, c, settleNow, earthP, dwOn);
+  drawTraffic(g, c);
   // 인접 대지 경계 (상공 투영): 지상 공종에서 크레인 선회 간섭을 읽기 쉽게
   if (!UNDER.has(wpId)) { g.line(nb.x1, 0, nb.x1, Math.max(G.H + 20, eMaxV), 'nb-proj'); g.text(nb.x1 - 0.5, Math.min(eMaxV - 4 / cam.s * 14, G.H + 14), '인접 대지 ←', 'nb-pt', 'end', 0); }
   // HUD 띠: ROI 밖으로 넘친 형상이 제목·시간축과 겹치지 않게
   g.P(`<rect class="hud-bg" x="0" y="0" width="${VW}" height="${NARROW ? 64 : 44}"/><rect class="hud-bg" x="0" y="${VH - 40}" width="${VW}" height="40"/>`);
   if (roi !== full && !UNDER.has(wpId) && !GROUND.has(wpId)) minimap(g, sc, full, roi, fl);
   if (MORE[wpId]) detailInset(g, c);
+  else if (mon && wpId !== 'conc') monitorInset(g, c, mon);
   // ---- 판정 표식 ----
   const fall = [[pw * 0.5, sc.G.H * 0.5]];
   marks.forEach((m, i) => {
@@ -723,7 +746,7 @@ function drawCycle(g, sc, fl, coreAhead, wpId, at, T, ctx) {
     if (f.e1 < 46) EQ.pump(g, G.pw + 12, 0, target, wpId === 'conc' ? 'acc' : '');
     else { g.line(G.core.x1 + 0.4, 0, G.core.x1 + 0.4, f.e1, `pipe${c}`); g.rect(G.pw + 9, 0, G.pw + 15, 2, `eq${c}`); g.line(G.pw + 9, 1, G.core.x1 + 0.4, 1, `pipe${c}`); g.line(G.core.x1 + 0.4, f.e1 + 1, x0 + bw * 0.25, f.e1 + 3, `eq-m${c}`); g.text(G.pw + 12, 3, '고압 펌프', 'eq-lab', 'middle', -3); }
     at.pump = [G.pw + 12, 3];
-    [0, 1].forEach(j => EQ.mixer(g, G.pw + 21 + j * 8, 0, T + j * 0.3, ''));
+    [0, 1].forEach(j => EQ.mixer(g, G.pw + 21 + j * 8, 0, T + j * 0.3, '', j));
   }
   if (wpId === 'conc') concInset(g, sc, T);
   at.shore = [x0 + bw * 0.3, Math.max(1, f.e0 - 2)];
@@ -806,7 +829,7 @@ function drawCrane(g, sc, fl, known, c, at, T, wpId) {
     if (big) g.P(`<ellipse class="eq ${c}" cx="${g.X(x).toFixed(1)}" cy="${g.Y(0.6).toFixed(1)}" rx="${(9 * g.s).toFixed(1)}" ry="${(1.2 * g.s).toFixed(1)}"/>`);
     EQ.crawler(g, x, 0, 1.05 + 0.1 * Math.sin(T * 0.4), Math.max(top + 20, big ? 90 : 60), loadE, c.trim(), big ? '링거 크레인' : '크롤러 크레인', -1);
   } else if (k === 'mobile') {
-    EQ.truck(g, G.pw + 14, 0, -1, false, c.trim()); g.line(G.pw + 14, 3, G.pw + 2, Math.max(top + 8, 20), `eq-m ${c}`);
+    EQ.truck(g, G.pw + 14, 0, -1, false, c.trim()); g.line(G.pw + 14, 3, G.pw + 2, Math.max(top + 8, 20), `eq-m ${c}`); if (CUR) CUR.occupy(G.pw + 9, G.pw + 18);
     g.rect(G.bx1 + 0.4, 0, G.bx1 + 1.6, top + 3, `hoist ${c}`); g.rect(G.bx1 + 0.3, loadE, G.bx1 + 1.7, loadE + 2.4, 'eq-load'); g.text(G.bx1 + 2.2, top + 3, '호이스트', 'eq-lab', 'start', 3);
   }
   at.crane = at.crane || [cx, H];
