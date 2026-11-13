@@ -2,7 +2,7 @@
 import { resolveSite } from './sim/sites.js';
 const KEY = 'bim-sim-pipeline-v1';
 const listeners = new Set();
-const blank = () => ({ use: 'housing', handoff1: null, site: null, useMap: true, mass: null, massFrom: null, massx: {}, methods: {}, opt: {}, siteW: {}, proc: null, cost: null, risk: null, seen3: false });
+const blank = () => ({ use: 'housing', handoff1: null, site: null, useMap: true, mass: null, massFrom: null, massx: {}, methods: {}, mdone: {}, opt: {}, siteW: {}, proc: null, cost: null, risk: null, seen3: false });
 
 function load() {
   try {

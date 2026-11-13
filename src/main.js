@@ -3,7 +3,7 @@ import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
 import './styles.css';
 import './system.css';
 import { store, currentSite } from './store.js';
-import { pipeline, fmt, won } from './pipeline.js';
+import { pipeline, fmt, won, projKey } from './pipeline.js';
 import { isHousingGen, useOf } from './sim/uses.js';
 
 const PAGES = {
@@ -100,7 +100,8 @@ function stageSummary(name) {
     if (name === 'schedule') return [['층 수 합계', fmt(gen.bldgs.reduce((a, b) => a + b.storeys, 0)) + '개 층'], ['세대', fmt(gen.totals.units || 0) + '세대'], ['지하 연면적', fmt((gen.totals.gfaBelow || 0) / 1e4, 1) + '만㎡'], ['주차', fmt(gen.totals.parking || 0) + '대']];
     if (name === 'method') {
       const rec = R.M.list.filter(L => (L.wp.multi ? !L.user : L.chosen === L.rec)).length;
-      return [['공기', S.months + '개월'], ['공사비', won(E.total)], ['AI 추천 그대로', `${rec} / ${R.M.list.length} 공종`], ['품질 · 안전 지수', `${R.fx.index.quality} · ${R.fx.index.safety}`]];
+      const done = Math.min(R.M.list.length, ((store.get().mdone || {})[projKey()]) || 0);
+      return [['확정', `${done} / ${R.M.list.length} 공종`], ['공기', S.months + '개월'], ['공사비', won(E.total)], ['AI 추천 그대로', `${rec} / ${R.M.list.length} 공종`]];
     }
     if (name === 'process') return [['총 공기', S.months + '개월'], ['미해결 간섭', fmt(C.list.filter(c => !c.mit).length) + '건'], ['AI 공정 최적화', R.opt ? '적용함' : '아직'], ['작업 항목', fmt(S.acts.length) + '건']];
     if (name === 'budget') return [['총 공사비', won(E.total)], ['㎡당', fmt(E.perM2, 0) + '만원'], ['평당', fmt(E.perPy, 0) + '만원'], ['월 최대 집행', won(E.peak.total)]];
