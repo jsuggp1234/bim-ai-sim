@@ -13,11 +13,12 @@ const DEF = {
 };
 const VAR = (k) => '--s-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
 
-export function readPalette() {
+// day: 화면 테마와 상관없이 낮(밝은 화면)의 장면 색 (공법 시뮬레이터는 늘 낮 장면)
+export function readPalette({ day = false } = {}) {
   const cs = typeof document !== 'undefined' ? getComputedStyle(document.documentElement) : null;
   const P = {};
   for (const [k, d] of Object.entries(DEF)) {
-    const v = cs ? cs.getPropertyValue(VAR(k)).trim() : '';
+    const v = cs && !day ? cs.getPropertyValue(VAR(k)).trim() : '';
     P[k] = new THREE.Color(v || d);
   }
   const tok = (n, d) => { const v = cs ? cs.getPropertyValue(n).trim() : ''; return new THREE.Color(v || d); };
@@ -29,7 +30,7 @@ export function readPalette() {
   Object.entries(FLOOR_USES).forEach(([k, x]) => { if (!P.use[k]) P.use[k] = tok(x.tok, '#9a9aa0'); });
   P.model = tok('--model', '#ffffff'); P.na = tok('--model-na', '#e7e4df');
   P.heatLo = tok('--heat-lo', '#efede7'); P.heatHi = tok('--heat-hi', '#0c6f68');
-  P.dark = isDark();
+  P.dark = day ? false : isDark();
   // 수평면(땅·물·도로) 밝기 보정. 톤 매핑이 하이라이트를 눌러 주므로 이제는 거의 그대로 쓴다
   P.flat = 1;
   return P;

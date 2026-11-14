@@ -28,7 +28,7 @@ void main() {
   #include <colorspace_fragment>
 }`;
 
-function softwareGL(renderer) {
+export function softwareGL(renderer) {
   try {
     const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
     const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);

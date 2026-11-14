@@ -2,6 +2,7 @@
 // build3d.js가 공통 장면(땅·골조·외장·크레인)을 만든 뒤 buildMethods()를 부르고, 매 프레임 frame(S)로
 // 공통 부재를 숨기거나 덮어쓴 다음 공법 고유의 장비·부재·이름표를 더한다.
 import * as THREE from 'three';
+import { keepTriplanar } from './simtex.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -282,13 +283,13 @@ export function buildMethods(X) {
   const capP = wallReal && ['cip', 'scw', 'dwall'].includes(WL) ? pool(BOX, CONC_L, 10, 'wall') : null; // 캡빔 · 가이드월 // H형강 삽입 · 이음 · 가이드월 · 캡빔
   const lagM = texM(tex(plankTex()), { rough: 0.9 });
   const lagP = WL === 'hpile' && wallReal ? pool(BOX, lagM, Math.min(2400, (wEl.length + 2) * Math.ceil(depth / 1.5 + 1)), 'wall') : null;
-  const slurM = mat(0x8a6a3c, { op: 0.72 }), slurP = WL === 'dwall' ? pool(BOX, slurM, 2, 'wall') : null;
+  const slurM = mat(0x8a6a3c, { op: 0.72 }), slurP = WL === 'dwall' ? pool(BOX, slurM, 2, 'wall') : null; if (slurP) slurP.im.userData.noMirror = true;
   const nailHead = WL === 'nail' && depth > 0.5 ? pool(BOX, mat(0xd9d9de, { metal: 0.5 }), Math.min(2000, Math.ceil(Ltot / 1.5 + 2) * Math.ceil(depth / 1.5 + 1)), 'wall') : null;
   const nailBar = WL === 'nail' && depth > 0.5 ? pool(BOX, mat(0xd9822b, { em: 0.15 }), 80, 'wall') : null;
   const openW = WL === 'open' && depth > 0.5 ? pool(WEDGE, soilM, 3, null) : null;
   const openT = WL === 'open' && depth > 0.5 ? pool(BOX, mat(0x4f7fb0, { op: 0.8 }), 3, 'wall') : null;
   const openB = WL === 'open' && depth > 0.5 ? pool(BOX, mat(0xd8cfa8), 420, 'wall') : null;
-  const wRing = pool(TOR, RING, 4, 'wall');
+  const wRing = pool(TOR, RING, 4, 'wall'); wRing.im.userData.noMirror = true;
   let wRig = null, wCrane = null, wPlant = null, nailRig = null;
   if (wallReal) {
     if (WL === 'sheet' || WL === 'dwall') {
@@ -324,7 +325,7 @@ export function buildMethods(X) {
   const wtM = new THREE.MeshStandardMaterial({ color: 0x3d8fd6, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, roughness: 0.3 }); own.mats.push(wtM);
   const wtGeo = geo(new THREE.PlaneGeometry(1, 1, 48, 10).rotateX(-Math.PI / 2)); const wtable = new THREE.Mesh(wtGeo, wtM); wtable.visible = false; root.add(wtable);
   const wtBase = Float32Array.from(wtGeo.attributes.position.array);
-  const waterIn = pool(BOX, WATERM, 2, 'water');
+  const waterIn = pool(BOX, WATERM, 2, 'water'); waterIn.im.userData.noMirror = true;
 
   // ================= 굴착 =================
   const EX = ids.excav;
@@ -348,9 +349,9 @@ export function buildMethods(X) {
   const pileM = { phc: mat(0xc6c6ca), steel: mat(0x6f8296, { metal: 0.6, rough: 0.4 }), bored: mat(0x9a9aa0), micro: mat(0x8fa1b5, { metal: 0.5 }), piledraft: mat(0xa3a3a8) }[FD] || CONC;
   const plP = piled ? pool(CYL, pileM, piles.length + 4, 'found') : null;
   const plJ = piled && (FD === 'phc' || FD === 'steel') ? pool(CYL, mat(FD === 'phc' ? 0x55565b : 0xd9d9de, { metal: 0.5 }), Math.min(1600, piles.length * 4 + 8), 'found') : null;
-  const plCase = FD === 'bored' ? pool(CYL, mat(0x5a6b7d, { metal: 0.6 }), 3, 'found') : null;
+  const plCase = FD === 'bored' ? pool(CYL, mat(0x5a6b7d, { metal: 0.6 }), 3, 'found') : null; if (plCase) plCase.im.userData.noMirror = true;
   const cageM = mat(0xd9822b, { wire: true }), plCage = FD === 'bored' ? pool(CYL, cageM, piles.length + 4, 'found') : null;
-  const fRing = pool(TOR, RING, 4, 'found');
+  const fRing = pool(TOR, RING, 4, 'found'); fRing.im.userData.noMirror = true;
   let fRig = null, rcd = null;
   if (piled) {
     if (FD === 'bored') { rcd = grp(); pbox(rcd, DARK2, 'found', -1.6, 1.6, 0, 1.4, -1.6, 1.6); pbox(rcd, EQ, 'found', -1.7, 1.7, 1.4, 1.9, -1.7, 1.7); rcd.userData.kelly = pcyl(rcd, STEEL, null, 0, 5, 0, 0.22, 7); pbox(rcd, EQ, 'found', -2.6, -1.6, 0, 4.6, -0.5, 0.5); pbox(rcd, EQ, 'found', -2.6, 0.4, 4.4, 4.9, -0.5, 0.5); fRig = crawlerCrane(20, 'found', 1.28); }
@@ -464,7 +465,7 @@ export function buildMethods(X) {
 
   // ---------- 땅 투시 (흙을 반투명으로: 벽체·말뚝·개량체가 땅속에서 보이게) ----------
   const ghostOf = new Map();
-  const ghostM = (m, op) => { const k = m.uuid + op; if (!ghostOf.has(k)) { const g = m.clone(); g.transparent = true; g.opacity = op; g.depthWrite = false; own.mats.push(g); ghostOf.set(k, g); } return ghostOf.get(k); };
+  const ghostM = (m, op) => { const k = m.uuid + op; if (!ghostOf.has(k)) { const g = keepTriplanar(m, m.clone()); g.transparent = true; g.opacity = op; g.depthWrite = false; own.mats.push(g); ghostOf.set(k, g); } return ghostOf.get(k); };
   function xray(mode) { R.strata.forEach(L => L.pieces.forEach((o, i) => { const want = mode === 2 ? ghostM(L.m, 0.42) : mode === 1 && i === 3 ? ghostM(L.m, 0.13) : L.m; if (o.material !== want) o.material = want; })); }
 
   // ================= 매 프레임 =================

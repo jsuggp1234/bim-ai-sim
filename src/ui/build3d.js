@@ -11,6 +11,13 @@ import { dateAt, ym } from '../sim/process.js';
 import { HOIST, elevSpeed } from '../sim/impact-more.js';
 import { buildCity } from './city3d.js';
 import { buildMethods, skinTex } from './method3d.js';
+import { createLook, softwareGL } from '../sim/scene/look.js';
+import { readPalette } from '../sim/scene/palette.js';
+import { FACADE_U } from '../sim/scene/facade.js';
+import { simTex, simTexAniso, triplanar, keepTriplanar } from './simtex.js';
+import { buildSimContext } from './simctx.js';
+import { fallbackFor, osmFor, osmReady } from '../sim/ctxload.js';
+import { OSM_ATTRIB } from '../sim/osm.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const MEPS = ['hvac', 'plumb', 'fire', 'elec', 'ict'], ROOMS = ['part', 'floor', 'ceil', 'paint'];
@@ -45,7 +52,7 @@ export function plan3d(sc) {
 // ---------- 색 ----------
 const COL = {
   fill: 0x9c8462, sand: 0xc9a86a, clay: 0x8f6e4e, soil: 0xa88a5e, wr: 0x7a7f8a, rock: 0x4c4f57,
-  conc: 0xa3a3a8, slab: 0xbdbdc2, dark: 0x5f6066, steel: 0x8fa1b5, glass: 0x7fb6e6, water: 0x3d8fd6,
+  conc: 0xbab8b1, slab: 0xc9c7c1, dark: 0x6a6b6e, steel: 0x8fa1b5, glass: 0x5f88a8, water: 0x3d8fd6,
   ins: 0xf2c94c, wp: 0x2b2b2b, wood: 0xc58a4a, gyp: 0xe7e7ea, red: 0xe5484d, orange: 0xffb547, green: 0x3fae6a,
   purple: 0xb28cf2, yellow: 0xffd76a, eq: 0xf0b429, truck: 0xd9d9de, road: 0x34363b, nb: 0x6e737c, rebar: 0xd9822b,
   tree: 0x3fae6a, trunk: 0x8b6f3a, pave: 0x8a8f99, form: 0x9fb3c8, glow: 0xffd76a,
@@ -64,30 +71,85 @@ export function createSim3D(host, opts = {}) {
   const cv = (k, d) => (css.getPropertyValue(k) || '').trim() || d;
   const ACC = new THREE.Color(cv('--accent', '#ff4d5e'));
   const BG = new THREE.Color(cv('--paper', '#0b0c0e'));
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: !!opts.preserve });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const LITE = window.innerWidth < 700;
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, stencil: true, powerPreference: 'high-performance', preserveDrawingBuffer: !!opts.preserve });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, LITE ? 1.5 : 2));
   renderer.setClearColor(BG, 1);
-  renderer.localClippingEnabled = true;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const wrap = document.createElement('div'); wrap.className = 's3';
   wrap.innerHTML = `<div class="s3-hud"><span class="s3-c"></span><b class="s3-t"></b></div><div class="s3-hud r"><span class="s3-d"></span><b class="s3-day"></b></div>
-    <div class="s3-lbs"></div><div class="s3-mks"></div><div class="s3-help">드래그 회전 · 휠/두 손가락 확대 · 우클릭 이동</div><div class="seg s3-vw" role="group" aria-label="3D 시점"><button type="button" data-v3="all" aria-pressed="true">전체 보기</button><button type="button" data-v3="focus" aria-pressed="false">작업 부위</button></div>`;
+    <div class="s3-lbs"></div><div class="s3-mks"></div><div class="s3-help">드래그 회전 · 휠/두 손가락 확대 · 우클릭 이동</div><div class="s3-attr" hidden></div><div class="seg s3-vw" role="group" aria-label="3D 시점"><button type="button" data-v3="all" aria-pressed="true">전체 보기</button><button type="button" data-v3="focus" aria-pressed="false">작업 부위</button></div>`;
   wrap.prepend(renderer.domElement);
   host.appendChild(wrap);
   const $ = (s) => wrap.querySelector(s);
   const scene = new THREE.Scene();
   if (window.__S3DEBUG) window.__s3scene = scene; // 점검용 (평소에는 꺼져 있음)
-  scene.background = BG;
-  scene.fog = new THREE.Fog(BG, 600, 1400);
-  const cam = new THREE.PerspectiveCamera(38, 16 / 9, 0.5, 4000);
-  if (window.__S3DEBUG) window.__s3cam = cam;
+  // 실사 장면: 하늘 돔 · 하늘을 구운 환경광(유리·금속 반사) · 대기 원근 · ACES 톤 매핑 · (GPU면) 앰비언트 오클루전
+  // 공법 시뮬레이터는 화면 테마와 상관없이 늘 맑은 낮
+  const look = createLook(renderer, scene, { lite: LITE });
+  const P = readPalette({ day: true });
+  // 실사 톤: 하얀 모형 대신 실제 도시의 색 (콘크리트·석재·벽돌·유리·아스팔트·녹지)
+  Object.entries({
+    ground: '#a9a698', site: '#a99e89', lot: '#a7a397', asphalt: '#5c5e62', walk: '#b8b3a8', curb: '#c9c5bc', mark: '#eeede8', markY: '#e0b03a',
+    water: '#58788a', bank: '#b3aea3', skyTop: '#6e98c9', skyHor: '#d9e3ea', park: '#86a067', forest: '#5f7d4c', grass: '#98ad78', pitch: '#76a052', sand: '#cfc3a4',
+    wRes: '#d6d0c3', wCom: '#b6b9bc', wHouse: '#b48d76', wTower: '#8e9eab', wInd: '#c3c0b9', wCivic: '#cbbfa6', roof: '#9d9b96',
+    glass: '#4d6473', film: '#5f8f8a', interior: '#b9b09c', frame: '#4a4e53', crown: '#5c7a45', trunk: '#6a5847', edge: '#26282b',
+    bridge: '#b7b5b0', ballast: '#8d887e', rail: '#55524d',
+  }).forEach(([k, v]) => { if (P[k]) P[k].set(v); });
+  FACADE_U.uGlass.value.copy(P.glass); FACADE_U.uFilm.value.copy(P.film); FACADE_U.uInterior.value.copy(P.interior); FACADE_U.uLit.value.copy(P.lit); FACADE_U.uFrame.value.copy(P.frame); FACADE_U.uNight.value = 0;
+  const cam = new THREE.PerspectiveCamera(38, 16 / 9, 0.6, 12000);
+  if (window.__S3DEBUG) { window.__s3cam = cam; window.__s3r = renderer; }
   const ctl = new OrbitControls(cam, renderer.domElement);
-  ctl.enableDamping = true; ctl.dampingFactor = 0.09; ctl.maxPolarAngle = Math.PI * 0.495; ctl.minDistance = 8; ctl.maxDistance = 1600; ctl.screenSpacePanning = true;
-  scene.add(new THREE.HemisphereLight(0xf2f4ff, 0x40362a, 1.15));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(0.8, 1.6, 1.1); scene.add(sun);
-  const fill = new THREE.DirectionalLight(0xbfd4ff, 0.45); fill.position.set(-1.2, 0.6, -0.8); scene.add(fill);
+  ctl.enableDamping = true; ctl.dampingFactor = 0.09; ctl.maxPolarAngle = Math.PI * 0.495; ctl.minDistance = 8; ctl.maxDistance = 3200; ctl.screenSpacePanning = true;
+  // 해: 대로 쪽 앞에서 비스듬히 (보이는 면이 밝고, 그림자는 뒤·왼쪽으로)
+  const sunDir = new THREE.Vector3(0.62, 0.78, 0.42).normalize();
+  const hemi = new THREE.HemisphereLight(0xeef3ff, 0x8a7d6a, 0.35); scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xfff1e0, 3.4); sun.castShadow = true;
+  // 그래픽 가속이 없는(소프트웨어) 렌더러는 그림자 지도를 작게
+  const SOFT = softwareGL(renderer);
+  if (SOFT) renderer.setPixelRatio(1);
+  simTexAniso(SOFT ? 1 : Math.min(8, renderer.capabilities.getMaxAnisotropy() || 4));
+  { const ms = Math.min(SOFT ? 1024 : LITE ? 2048 : 4096, renderer.capabilities.maxTextureSize || 2048); sun.shadow.mapSize.set(ms, ms); }
+  sun.shadow.bias = -0.0003; sun.shadow.normalBias = 0.35;
+  scene.add(sun); scene.add(sun.target);
+  look.applyTheme(P, sunDir, true);
+  function fitSun(D, G) {
+    // 그림자 상자: 현장 가까이(가로·인접 블록)만. 먼 주변 맥락은 그림자 없이
+    const cx = G.pw / 2, half = Math.max(160, (D.xr - D.xl) / 2 + 70, D.Z + 70, G.H * 0.9);
+    sun.target.position.set(cx, 0, 0); sun.position.copy(sunDir).multiplyScalar(900).add(sun.target.position);
+    Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half, near: 10, far: 2200 });
+    sun.shadow.camera.updateProjectionMatrix(); sun.target.updateMatrixWorld();
+  }
 
   let userMoved = false, follow = { t: new THREE.Vector3(), has: false }, lastWp = null, built = null, disposed = false;
+  // 넓은 주변 맥락: 먼저 자동 생성(바로), 실제 지도(OpenStreetMap)를 받으면 바꾼다
+  const plan = opts.plan || (opts.gen && opts.gen.plan) || null, gen = opts.gen || null;
+  let ctxSrc = null, ctxObj = null, ctxKey = '', ctxN = 0;
+  const ctxId = new WeakMap(), idOf = (c) => { if (!ctxId.has(c)) ctxId.set(c, ++ctxN); return ctxId.get(c); };
+  if (plan) { try { ctxSrc = fallbackFor(plan); } catch (e) { ctxSrc = null; } }
+  const ctxAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  if (plan && opts.useMap !== false) {
+    const ready = osmReady(plan);
+    (ready ? Promise.resolve(ready) : osmFor(plan, { signal: ctxAbort && ctxAbort.signal })).then(c => { if (disposed || !c) return; ctxSrc = c; ensureContext(); }).catch(() => { /* 지도 실패: 자동 생성 맥락 그대로 */ });
+  }
+  function ensureContext() {
+    if (!built || !ctxSrc || !plan || disposed) return;
+    const { sc, D } = built, G = sc.G, zone = built.city.zone, C = sc.city;
+    const roadX = C && C.road ? (C.road[0] + C.road[1]) / 2 : null;
+    const key = [idOf(ctxSrc), G.pw, G.bx0, G.bx1, D.xl, D.xr, D.Z, zone.x0, zone.x1, zone.z0, zone.z1, roadX, G.main && G.main.id].join('|');
+    if (key === ctxKey && ctxObj) { built.city.ground.forEach(o => { o.visible = false; }); return; }
+    if (ctxObj) { scene.remove(ctxObj.group); ctxObj.dispose(); ctxObj = null; }
+    try {
+      ctxObj = buildSimContext(ctxSrc, { plan, gen, G, roadX, zone, near: { x0: D.xl, x1: D.xr, z0: -D.Z, z1: D.Z }, P, lite: LITE, renderer });
+      ctxObj.group.traverse(o => { if (o.isMesh && o !== ctxObj.mask) { o.receiveShadow = true; } });
+      scene.add(ctxObj.group); ctxKey = key;
+      built.city.ground.forEach(o => { o.visible = false; });
+      const at = $('.s3-attr'); at.hidden = ctxSrc.source !== 'osm'; at.textContent = OSM_ATTRIB;
+      if (window.__S3DEBUG) window.__s3ctx = ctxObj.stats;
+    } catch (e) { console.warn('주변 맥락', e); ctxObj = null; built.city.ground.forEach(o => { o.visible = true; }); }
+  }
   ctl.addEventListener('start', () => { userMoved = true; });
   // 시점: 전체 보기(기본, 현장·건물 전체를 고정 시점으로) · 작업 부위(작업 전선을 따라감). 다시 누르면 시점을 되돌린다
   let viewMode = 'all';
@@ -101,25 +163,34 @@ export function createSim3D(host, opts = {}) {
   const CYL = new THREE.CylinderGeometry(0.5, 0.5, 1, 10);
   const CONE = new THREE.ConeGeometry(0.5, 1, 8);
   const mats = new Map(), accMats = new Map(), all = [];
-  const clipZ = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0.02); // z ≤ 0 만 남김
-  const clipUp = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.3); // 지상(y > 0.3)과 겹치는 곳만 자를 때
   const clipList = [];
+  // o.tex: 질감 (conc 콘크리트 · soil 흙 · asph 아스팔트 · paver 보도블록 · steel 철재 · ply 합판 · gravel 쇄석)
+  // o.clip: 지상 건물 부재 (지하 공종을 볼 때 흐리게 한다. 예전 이름 그대로)
   function mat(color, o = {}) {
-    const key = `${color}|${o.op ?? 1}|${o.em ?? 0}|${o.clip ? 1 : 0}|${o.wire ? 1 : 0}`;
+    const key = `${color}|${o.op ?? 1}|${o.em ?? 0}|${o.clip ? 1 : 0}|${o.wire ? 1 : 0}|${o.tex || ''}|${o.rough ?? ''}|${o.metal ?? ''}|${o.env ?? ''}`;
     if (mats.has(key)) return mats.get(key);
     const m = new THREE.MeshStandardMaterial({ color, roughness: o.rough ?? 0.82, metalness: o.metal ?? 0.05, transparent: (o.op ?? 1) < 1, opacity: o.op ?? 1, depthWrite: (o.op ?? 1) >= 1, emissive: o.em ? new THREE.Color(color) : new THREE.Color(0), emissiveIntensity: o.em || 0, wireframe: !!o.wire, side: (o.op ?? 1) < 1 ? THREE.DoubleSide : THREE.FrontSide });
-    if (o.clip) { m.clippingPlanes = []; clipList.push(m); }
+    if (o.tex) { const t = simTex(o.tex); if (t) { m.map = t; triplanar(m); } }
+    if (o.env != null) m.envMapIntensity = o.env;
+    if (o.clip) { m.clippingPlanes = []; clipList.push(m); m.userData.above = true; }
     mats.set(key, m); return m;
   }
-  const dimMats = new Map();
+  const dimMats = new Map(), ghostMats = new Map();
   function dimOf(m) {
     if (dimMats.has(m)) return dimMats.get(m);
-    const a = m.clone(); a.transparent = true; a.opacity = Math.min(m.opacity, 0.14); a.depthWrite = false; if (m.clippingPlanes) { a.clippingPlanes = m.clippingPlanes; clipList.push(a); }
+    const a = keepTriplanar(m, m.clone()); a.transparent = true; a.opacity = Math.min(m.opacity, 0.14); a.depthWrite = false; a.side = THREE.DoubleSide;
     dimMats.set(m, a); return a;
+  }
+  // 반투명 (앞쪽 땅·흙막이 · 실내 공종 때 외장): op 불투명도
+  function ghostOf(m, op) {
+    const k = ghostMats.get(m) || new Map(); ghostMats.set(m, k);
+    if (k.has(op)) return k.get(op);
+    const a = keepTriplanar(m, m.clone()); a.transparent = true; a.opacity = Math.min(m.opacity, op); a.depthWrite = false; a.side = THREE.DoubleSide; a.userData.ghost = true;
+    k.set(op, a); return a;
   }
   function accOf(m) {
     if (accMats.has(m)) return accMats.get(m);
-    const a = m.clone(); a.color = m.color.clone().lerp(ACC, 0.12); a.emissive = ACC.clone(); a.emissiveIntensity = 0.05; if (m.clippingPlanes) { a.clippingPlanes = m.clippingPlanes; clipList.push(a); }
+    const a = keepTriplanar(m, m.clone()); a.color = m.color.clone().lerp(ACC, 0.07); a.emissive = ACC.clone(); a.emissiveIntensity = 0.035;
     accMats.set(m, a); return a;
   }
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
@@ -139,20 +210,36 @@ export function createSim3D(host, opts = {}) {
     const inst = (geo, m, n, wp, parent = root) => { const o = new THREE.InstancedMesh(geo, m, Math.max(1, n)); o.count = 0; o.frustumCulled = false; (parent || root).add(o); owned.push(o); if (wp) tag(o, wp); return o; };
     const pw = G.pw, depth = G.depth, pd = D.pd, Z = D.Z, bd = D.bd;
 
-    // --- 땅: 뒤쪽 절반만 (z ≤ 0). 구덩이 자리는 굴착 깊이만큼 비운다 ---
+    // --- 땅: 현장 둘레 흙 덩어리. 단면으로 자르지 않는다 ---
+    // 뒤쪽 절반(z ≤ 0)을 만들고 앞쪽 절반은 거울 복제(twin)로 채운다. 지하 공종을 볼 때는 앞쪽 흙·지표를 반투명하게 해 땅속을 보인다
+    const mirror = new THREE.Group(); mirror.scale.z = -1; mirror.name = 'front-half'; root.add(mirror);
+    const twins = [];
+    // front: 지하 공종을 볼 때 앞쪽 복제본의 불투명도 (null이면 그대로)
+    const twin = (o, front = null) => {
+      if (!o || o.userData.twin) return o;
+      const t = o.isInstancedMesh ? new THREE.InstancedMesh(o.geometry, o.material, 1) : new THREE.Mesh(o.geometry, o.material);
+      if (o.isInstancedMesh) { t.instanceMatrix = o.instanceMatrix; t.instanceColor = o.instanceColor; t.frustumCulled = false; t.count = 0; }
+      t.userData.src = o; t.userData.front = front; o.userData.twin = t; mirror.add(t); twins.push(t); return t;
+    };
     const ground = new THREE.Group(); root.add(ground);
-    const strata = sc.strata.filter(([a]) => a < sc.dv).map(([a, b, k]) => ({ a, b: Math.min(b, sc.dv), m: mat(COL[k] ?? COL.soil, { rough: 0.95 }), pieces: [] }));
-    strata.forEach(L => { for (let i = 0; i < 4; i++) L.pieces.push(mesh(BOX, L.m, null, ground)); });
-    // 지층 경계선 (단면 앞면)
-    const bnd = inst(BOX, mat(0xe7e2d6, { em: 0.25 }), strata.length, null);
-    strata.slice(1).forEach((L, i) => ibox(bnd, i, D.xl, D.xr, -L.a - 0.08, -L.a + 0.08, 0, 0.12)); bnd.count = Math.max(0, strata.length - 1);
-    // 앞쪽 절반: 얇은 지표면만 (대지 밖)
-    const surfM = mat(0x6f6455, { rough: 1 });
-    const front = [box(surfM, null, D.xl, 0, -0.5, 0, 0, Z, ground), box(surfM, null, pw, D.xr, -0.5, 0, 0, Z, ground), box(surfM, null, 0, pw, -0.5, 0, pd / 2, Z, ground)];
-    const pitLid = box(surfM, null, 0, pw, -0.5, 0, 0, pd / 2, ground);
-    // 지하수위: 단면에 파란 띠
-    const gwM = mat(COL.water, { em: 0.4 });
-    const gwLine = box(gwM, null, D.xl, D.xr, -cond.gw - 0.12, -cond.gw + 0.12, 0, 0.25, ground);
+    const SURF = 0.5; // 지표 (쇄석·포장) 두께
+    const strata = sc.strata.filter(([a, b]) => a < sc.dv && Math.min(b, sc.dv) > SURF + 0.05).map(([a, b, k]) => ({ a: Math.max(a, SURF), b: Math.min(b, sc.dv), m: mat(COL[k] ?? COL.soil, { rough: 0.95, tex: 'soil' }), pieces: [] }));
+    strata.forEach(L => { for (let i = 0; i < 4; i++) { const o = mesh(BOX, L.m, null, ground); L.pieces.push(o); twin(o, 0.2); } });
+    // 지층 경계선: 흙 덩어리 바깥 네 면에 (지하 공종에서 지층 두께가 읽히게)
+    const bndM = mat(0xf2ede2, { em: 0.35 }), bnd = inst(BOX, bndM, Math.max(1, strata.length) * 4, null);
+    { let n = 0; strata.slice(1).forEach(L => { const y = -L.a; ibox(bnd, n++, D.xl, D.xr, y - 0.07, y + 0.07, -Z - 0.03, -Z + 0.05); ibox(bnd, n++, D.xl, D.xr, y - 0.07, y + 0.07, Z - 0.05, Z + 0.03); ibox(bnd, n++, D.xl - 0.03, D.xl + 0.05, y - 0.07, y + 0.07, -Z, Z); ibox(bnd, n++, D.xr - 0.05, D.xr + 0.03, y - 0.07, y + 0.07, -Z, Z); }); bnd.count = n; }
+    // 지표 (쇄석 포장): 대지 둘레 띠 + 굴착 전 대지 덮개
+    const surfM = mat(0xa39883, { rough: 1, tex: 'gravel' });
+    const front = [box(surfM, null, D.xl, 0, -SURF, 0, -Z, 0, ground), box(surfM, null, pw, D.xr, -SURF, 0, -Z, 0, ground), box(surfM, null, 0, pw, -SURF, 0, -Z, -pd / 2, ground)];
+    front.forEach(o => twin(o, 0.22));
+    const pitLid = box(surfM, null, 0, pw, -SURF, 0, -pd / 2, 0, ground); twin(pitLid, 0.22);
+    // 지하수위: 흙 속에 얇은 물 막 + 바깥 네 면에 파란 선 (지하 공종에서만)
+    const gwM = mat(COL.water, { op: 0.28, em: 0.25 }), gwEdge = mat(COL.water, { em: 0.6 });
+    const gwY = -cond.gw;
+    const gwPl = [box(gwM, null, D.xl, 0, gwY - 0.05, gwY + 0.05, -Z, 0, ground), box(gwM, null, pw, D.xr, gwY - 0.05, gwY + 0.05, -Z, 0, ground), box(gwM, null, 0, pw, gwY - 0.05, gwY + 0.05, -Z, -pd / 2, ground)];
+    gwPl.forEach(o => twin(o));
+    const gwLine = inst(BOX, gwEdge, 4, null);
+    ibox(gwLine, 0, D.xl, D.xr, gwY - 0.1, gwY + 0.1, -Z - 0.04, -Z + 0.06); ibox(gwLine, 1, D.xl, D.xr, gwY - 0.1, gwY + 0.1, Z - 0.06, Z + 0.04); ibox(gwLine, 2, D.xl - 0.04, D.xl + 0.06, gwY - 0.1, gwY + 0.1, -Z, Z); ibox(gwLine, 3, D.xr - 0.06, D.xr + 0.04, gwY - 0.1, gwY + 0.1, -Z, Z); gwLine.count = 4;
     // 주변 가로: 대로·보도·건너편 블록·이면도로·인접 건물·통행 차량·매설물·출입구 (city3d.js)
     const city = buildCity({ root, mat, inst, ibox, box, mesh, BOX, CYL, CONE, sc, D, _p, _q, _s, _e, _m });
     const lanes = sc.city.lanes, laneX = (i) => city.laneX(Math.min(i, lanes.length - 1)) ?? pw + 12;
@@ -175,16 +262,16 @@ export function createSim3D(host, opts = {}) {
 
     // --- 흙막이 (뒤쪽 절반: 좌·우·뒤) ---
     const th = Math.max(sc.wallTh, 0.3);
-    const wallM = mat(WALL_C[ids.wall] ?? 0x86868c, { metal: ids.wall === 'hpile' || ids.wall === 'sheet' ? 0.4 : 0.05 });
+    const wallM = mat(WALL_C[ids.wall] ?? 0x86868c, { metal: ids.wall === 'hpile' || ids.wall === 'sheet' ? 0.4 : 0.05, tex: ids.wall === 'hpile' || ids.wall === 'sheet' ? 'steel' : 'conc' });
     const walls = [0, 1, 2].map(() => mesh(BOX, wallM, 'wall'));
-    const capM = mat(0x77777d);
+    const capM = mat(0x9a9993, { tex: 'conc' });
     // 지보: 버팀보·띠장 (층마다), 어스앵커 (단면 앞면), 역타 슬래브
     const lv = []; if (depth > 0.5) for (let m = 1.5; m < depth - 1; m += 3.5) lv.push(m);
     const strutZ = []; for (let z = -pd / 2 + 4; z < -2; z += 8) strutZ.push(z);
-    const supM = mat(ids.support === 'sps' ? 0x9fb3c8 : 0xcf6a3a, { metal: 0.45, rough: 0.5 });
+    const supM = mat(ids.support === 'sps' ? 0x9fb3c8 : 0xcf6a3a, { metal: 0.45, rough: 0.5, tex: 'steel' });
     const strutI = inst(BOX, supM, lv.length * (strutZ.length + 3), 'support');
     const ancI = inst(CYL, mat(0xd9d9de, { metal: 0.5 }), lv.length * 2, 'support');
-    const tdSlab = inst(BOX, mat(COL.slab), Math.max(1, G.nB) + 1, 'support');
+    const tdSlab = inst(BOX, mat(COL.slab, { tex: 'conc' }), Math.max(1, G.nB) + 1, 'support');
     // 굴착 장비
     const exM = mat(COL.eq, { metal: 0.3, rough: 0.5 });
     const exc = new THREE.Group(); root.add(exc);
@@ -198,9 +285,9 @@ export function createSim3D(host, opts = {}) {
     const plen = Math.max(5, Math.min(sc.dv - depth - 2, Math.max(cond.rockDepth - depth + 2, 9)));
     const pileXs = []; { const n = ids.found === 'micro' ? 16 : ids.found === 'piledraft' ? 6 : ids.found === 'bored' ? 7 : 10; for (let i = 0; i < n; i++) pileXs.push(3 + (pw - 6) * i / (n - 1)); }
     const pileW = ids.found === 'bored' ? 1.5 : ids.found === 'micro' ? 0.3 : ids.found === 'steel' ? 0.6 : 0.6;
-    const pileI = inst(CYL, mat(PILE_C[ids.found] ?? 0xb8b8bc), pileXs.length, 'found');
+    const pileI = inst(CYL, mat(PILE_C[ids.found] ?? 0xb8b8bc, { tex: ids.found === 'steel' || ids.found === 'micro' ? 'steel' : 'conc', metal: ids.found === 'steel' || ids.found === 'micro' ? 0.45 : 0.05 }), pileXs.length * 7, 'found');
     const thick = sc.d.superTall ? 3.5 : sc.d.tall ? 2.6 : sc.d.heavy ? 2 : 1.4;
-    const matM = mat(0x8d8d93);
+    const matM = mat(0xaaa8a2, { tex: 'conc' });
     const matSlab = mesh(BOX, matM, 'found');
     const rig = new THREE.Group(); root.add(rig); { const m2 = mat(COL.eq, { metal: 0.3 }); const b2 = mesh(BOX, m2, 'found', rig); b2.scale.set(3, 2, 3); b2.position.y = 1.4; const ms = mesh(BOX, m2, 'found', rig); ms.scale.set(0.5, 18, 0.5); ms.position.set(0.8, 11, 0); rig.userData.mast = ms; }
 
@@ -208,17 +295,17 @@ export function createSim3D(host, opts = {}) {
     const bwpM = mat(BWP_C[ids.bwp] ?? 0x2b2b2b, { rough: 0.6 });
     const bwpI = inst(BOX, bwpM, 4, 'bwp');
     const nB = Math.max(1, G.nB), bsh = depth / nB;
-    const bslab = inst(BOX, mat(COL.slab), nB + 1, 'base');
-    const bwallI = inst(BOX, mat(COL.conc), 3, 'base');
-    const bcolI = inst(BOX, mat(COL.conc), 7 * Math.max(2, strutZ.length), 'base');
+    const bslab = inst(BOX, mat(COL.slab, { tex: 'conc' }), nB + 1, 'base');
+    const bwallI = inst(BOX, mat(COL.conc, { tex: 'conc' }), 3, 'base');
+    const bcolI = inst(BOX, mat(COL.conc, { tex: 'conc' }), 7 * Math.max(2, strutZ.length) * 2, 'base');
 
     // --- 지상 골조 (층마다) ---
     const clipM = (c, o = {}) => mat(c, { ...o, clip: true });
-    const slabI = inst(BOX, clipM(COL.slab), NF, 'frame');
+    const slabI = inst(BOX, clipM(COL.slab, { tex: 'conc' }), NF, 'frame');
     const steelF = ['steel', 'hybrid', 'stick', 'truss', 'module'].includes(ids.frame);
     const colPer = D.fp.map(f => (f.x1 - f.x0 > (G.bx1 - G.bx0) + 1 ? Math.max(3, Math.round((f.x1 - f.x0) / 8.4)) + 1 : D.colX.length) * D.colZ.length);
     const colOff = [0]; colPer.forEach((n, i) => colOff.push(colOff[i] + n));
-    const colI = inst(BOX, clipM(steelF ? COL.steel : COL.conc, { metal: steelF ? 0.5 : 0.05 }), colOff[NF], 'frame');
+    const colI = inst(BOX, clipM(steelF ? COL.steel : COL.conc, { metal: steelF ? 0.5 : 0.05, tex: steelF ? 'steel' : 'conc' }), colOff[NF], 'frame');
     sc.floors.forEach((f, i) => {
       const fp = D.fp[i], nx = Math.max(3, Math.round((fp.x1 - fp.x0) / 8.4)), xs = fp.x1 - fp.x0 > (G.bx1 - G.bx0) + 1 ? Array.from({ length: nx + 1 }, (_, j) => fp.x0 + (fp.x1 - fp.x0) * j / nx) : D.colX;
       const zs = D.colZ.map(z => clamp(z, fp.z0, fp.z1));
@@ -227,19 +314,19 @@ export function createSim3D(host, opts = {}) {
       ibox(slabI, i, fp.x0, fp.x1, f.e1 - 0.32, f.e1 + 0.18, fp.z0, fp.z1);
     });
     // 코어 (속이 빈 네 벽)
-    const coreM = clipM(0x8d8d93);
+    const coreM = clipM(0xaeaca5, { tex: 'conc' });
     const core = [0, 1, 2, 3].map(() => mesh(BOX, coreM, 'frame'));
     // 미정 골조: 외곽선
     const ghost = new THREE.LineSegments(new THREE.EdgesGeometry(BOX), new THREE.LineBasicMaterial({ color: 0x9a9aa0, transparent: true, opacity: 0.55 }));
     setBox(ghost, G.bx0, G.bx1, 0, G.H, -bd / 2, bd / 2); root.add(ghost);
     // 거푸집·철근·타설 (지금 층)
-    const formM = clipM(COL.form, { op: 0.45 }), formBox = mesh(BOX, formM, 'form');
+    const formM = clipM(COL.form, { op: 0.55, tex: 'ply' }), formBox = mesh(BOX, formM, 'form');
     const acs = mesh(BOX, clipM(COL.orange, { op: 0.7 }), 'form');
     const shoreI = inst(BOX, clipM(0xffb547), 120, 'form');
     const rebarTex = gridTex('#d9822b', 8); rebarTex.wrapS = rebarTex.wrapT = THREE.RepeatWrapping; rebarTex.repeat.set((G.bx1 - G.bx0) / 1.2, bd / 1.2);
     const rebarM = new THREE.MeshBasicMaterial({ map: rebarTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: [] }); clipList.push(rebarM);
     const rebarP = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), rebarM); root.add(rebarP); tag(rebarP, 'rebar');
-    const pourM = clipM(0x8d8d93), pourBox = mesh(BOX, pourM, 'pour');
+    const pourM = clipM(0x8f8e8a, { rough: 0.35, tex: 'conc' }), pourBox = mesh(BOX, pourM, 'pour');
     const cageI = inst(BOX, clipM(COL.rebar), 6, 'rebar');
     // 철골 용접 불꽃
     const sparkI = inst(BOX, mat(0xffb547, { em: 1.2 }), 40, 'steel');
@@ -270,14 +357,14 @@ export function createSim3D(host, opts = {}) {
     const fH = D.fh.length ? D.fh.reduce((a, b) => a + b, 0) / D.fh.length : 4;
     [texX, texZ].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; });
     texX.repeat.set((G.bx1 - G.bx0) / cellW, 1); texZ.repeat.set(bd / cellW, 1);
-    const skinMat = (tex) => { const m = new THREE.MeshStandardMaterial({ color: sTex && !glassy ? 0xffffff : skC, map: tex, transparent: glassy, opacity: skOp, depthWrite: !glassy, roughness: glassy ? 0.15 : 0.8, metalness: glassy ? 0.3 : 0.05, side: THREE.DoubleSide, clippingPlanes: [] }); clipList.push(m); return m; };
+    const skinMat = (tex) => { const m = new THREE.MeshStandardMaterial({ color: sTex && !glassy ? 0xffffff : skC, map: tex, transparent: glassy, opacity: glassy ? Math.max(skOp, 0.58) : skOp, depthWrite: !glassy, roughness: glassy ? 0.06 : 0.8, metalness: glassy ? 0.55 : 0.05, envMapIntensity: glassy ? 1.4 : 1, side: THREE.DoubleSide, clippingPlanes: [] }); m.userData.above = true; clipList.push(m); return m; };
     const skinX = inst(BOX, skinMat(texX), NF * 2, 'skin'), skinZ = inst(BOX, skinMat(texZ), NF * 2, 'skin');
     // 창호·단열 (외장 안쪽 띠): 창호는 외장 띠 위에 테두리, 단열은 노란 층
     const glazI = inst(BOX, clipM(0xe7e7ea, { metal: 0.4 }), NF * 4, 'glaz');
     const insI = inst(BOX, clipM(COL.ins), NF * 2, 'insul');
     // 지붕
     const roofL = mesh(BOX, clipM(ROOF_C[ids.roof] ?? 0x9a9aa0), 'roof');
-    const parI = inst(BOX, clipM(COL.conc), 4, 'roof');
+    const parI = inst(BOX, clipM(COL.conc, { tex: 'conc' }), 4, 'roof');
     const pvI = inst(BOX, mat(0x253a6e, { metal: 0.6, rough: 0.3 }), 60, 'roof');
     const ctI = inst(CYL, mat(0xd9d9de, { metal: 0.3 }), 8, 'hvac');
     const oduI = inst(BOX, mat(0xd9d9de, { metal: 0.3 }), 24, 'hvac');
@@ -315,6 +402,12 @@ export function createSim3D(host, opts = {}) {
     // 공법별 장면 (장비·부재·순서): 공통 부재를 숨기거나 덮어쓴다
     const meth = buildMethods({ root, mat, clipM, inst, mesh, box, setBox, ibox, BOX, CYL, CONE, sc, D, clipList, R: { strata, bores, boreI, rigI, impI, walls, strutI, ancI, tdSlab, exc, trucks, pileI, matSlab, rig, bwpI, slabI, colI, core, formBox, acs, shoreI, rebarP, rebarTex, pourBox, cageI, sparkI, pump, boom, mixers, crane, mast, mastS, slew, jib, cjib, cwt, cab, apex, hookL, hookLoad, hMast, hCar, hCar2, skinX, skinZ, roofL, lv, strutZ, skinGlassy: glassy } });
 
+    // 땅속 부재는 앞쪽 절반을 거울 복제로 (흙막이 둘레 전체 · 지보 · 말뚝 · 지하 구조). 시공 장비 묶음(Group)과 한 자리 표시물은 빼고
+    // 흙막이·방수·지하 외벽처럼 앞을 가리는 벽은 지하 공종에서 앞쪽을 반투명하게
+    const MIRROR_WPS = new Set(['improve', 'wall', 'support', 'water', 'found', 'bwp', 'base']);
+    root.children.slice().forEach(o => { if (!(o.isMesh || o.isInstancedMesh) || o.userData.noMirror || !MIRROR_WPS.has(o.userData.wp)) return; twin(o, o.userData.wp === 'wall' || o.userData.wp === 'bwp' || o === bwallI ? 0.3 : null); });
+    const SKIN_WPS = new Set(['skin', 'insul']);
+
     // ---------- 시각별 갱신 ----------
     function frameAt(st) {
       const { wpId, tau, T } = st;
@@ -329,11 +422,12 @@ export function createSim3D(host, opts = {}) {
         setBox(l, D.xl, 0, -L.b, -L.a, -Z, 0); setBox(r, pw, D.xr, -L.b, -L.a, -Z, 0); setBox(b, 0, pw, -L.b, -L.a, -Z, -pd / 2);
         const yTop = Math.min(-L.a, -dug); u.visible = yTop > -L.b + 0.01; if (u.visible) setBox(u, 0, pw, -L.b, yTop, -pd / 2, 0);
       });
-      // 지하 공종: 앞쪽 지표를 걷어 단면(지층·흙막이·말뚝)을 정면으로 보인다
+      // 지하 공종: 앞쪽 흙·지표는 반투명 (twin의 front 불투명도), 지하수위·지층선을 보인다
       const underV = UNDER_WPS.has(wpId);
-      front.forEach(o => { o.visible = !underV; });
-      pitLid.visible = dug < 0.6 && !underV;
-      gwLine.visible = cond.gw < sc.dv;
+      front.forEach(o => { o.visible = true; });
+      pitLid.visible = dug < 0.6;
+      const gwOn = underV && cond.gw < sc.dv && cond.gw > SURF;
+      gwLine.visible = gwOn; bnd.visible = underV; gwPl.forEach(o => { o.visible = gwOn; });
       // 조사
       const target = Math.min(sc.dv - 2, Math.max(depth * 1.6, cond.rockDepth + 3));
       let nb2 = 0, nr = 0;
@@ -548,12 +642,12 @@ export function createSim3D(host, opts = {}) {
       const crew = (n, x0, x1, y, z0, z1, seed = 0) => { if (!(x1 - x0 > 0.5 && z1 - z0 > 0.5)) return; for (let i = 0; i < n; i++) { const a = hsh(i + seed, 1), b = hsh(i + seed, 2), mv = i % 3 === 0 ? 0.08 * Math.sin(T * 0.3 + i) : 0; work.push([x0 + (x1 - x0) * clamp(0.08 + 0.84 * a + mv, 0.05, 0.95), y, z0 + (z1 - z0) * (0.08 + 0.84 * b), i % 3 === 0, i === 0]); } };
       const FRW = ['frame', 'form', 'rebar', 'conc', 'pour', 'steel', 'lift'];
       const cutNow = CUT_WPS.has(wpId);
-      if (active) crew(FRW.includes(wpId) ? 12 : 4, fp.x0, fp.x1, f.e1 + 0.2, fp.z0, cutNow ? -0.5 : fp.z1, 0);
+      if (active) crew(FRW.includes(wpId) ? 12 : 4, fp.x0, fp.x1, f.e1 + 0.2, fp.z0, fp.z1, 0);
       if (UNDER_WPS.has(wpId)) {
         if (wpId === 'survey' || wpId === 'improve' || (wpId === 'wall' && dug < 0.3)) crew(4, 1, pw - 1, 0.02, -pd / 2 + 2, -1, 3);
         else if (depth > 0.5) { const yU = wpId === 'base' && K('base') ? -depth + Math.min(depth, P('base') * nB * bsh) + 0.25 : matP > 0 ? baseE + thick * matP : -dug; crew(7, th + 1.5, pw - th - 1.5, yU + 0.02, -pd / 2 + th + 2, -2, 5); }
       }
-      if (cutNow && nF > 0) { const ki = clamp(Math.floor(clamp(P(wpId), 0, 0.999) * nF), 0, nF - 1), p3 = D.fp[ki]; crew(6, p3.x0 + 1, p3.x1 - 1, sc.floors[ki].e0 + 0.2, p3.z0 + 1, -0.6, 9); if (ki > 0) crew(3, p3.x0 + 1, p3.x1 - 1, sc.floors[ki - 1].e0 + 0.2, p3.z0 + 1, -0.6, 13); }
+      if (cutNow && nF > 0) { const ki = clamp(Math.floor(clamp(P(wpId), 0, 0.999) * nF), 0, nF - 1), p3 = D.fp[ki]; crew(8, p3.x0 + 1, p3.x1 - 1, sc.floors[ki].e0 + 0.2, p3.z0 + 1, p3.z1 - 1, 9); if (ki > 0) crew(4, p3.x0 + 1, p3.x1 - 1, sc.floors[ki - 1].e0 + 0.2, p3.z0 + 1, p3.z1 - 1, 13); }
       if (wpId === 'skin' && nS < nF) { const p3 = D.fp[nS]; crew(5, p3.x0 + 1, p3.x1 - 1, sc.floors[nS].e0 + 0.2, p3.z1 - 2.2, p3.z1 - 0.6, 17); }
       if (wpId === 'roof' && done) crew(5, rfp.x0 + 1, rfp.x1 - 1, rtop + 0.4, rfp.z0 + 1, rfp.z1 - 1, 21);
       if (wpId === 'land') { const strips = [[0.6, G.bx0 - 0.6], [G.bx1 + 0.6, pw - 0.6]].sort((a, b) => (b[1] - b[0]) - (a[1] - a[0])); crew(6, strips[0][0], strips[0][1], 0.3, -pd / 2 + 2, pd / 2 - 2, 25); }
@@ -586,11 +680,21 @@ export function createSim3D(host, opts = {}) {
       // 강조: 지금 공종의 재질을 강조색으로
       // 설비 공종을 볼 때는 다른 설비·마감을, 실내 마감을 볼 때는 설비를 흐리게 (2D와 같은 규칙)
       const dimSet = MEPS.includes(wpId) ? DIM_FOR_MEP : ROOMS.includes(wpId) ? DIM_FOR_ROOM : null;
-      byWp.forEach((list, wp) => { const on = wp === wpId || (wpId === 'mep' && sys[wp]) || (wpId === 'conc' && (wp === 'pour')); const dm = !on && dimSet && dimSet.has(wp); list.forEach(o => { const m = on ? accOf(o.userData.base) : dm ? dimOf(o.userData.base) : o.userData.base; if (o.material !== m) o.material = m; }); });
-      // 실내 공종: 건물 앞쪽 절반을 잘라 속을 보인다
-      // 역타처럼 지하 공사 중에 지상 골조가 이미 올라가 있으면, 지상부만 앞쪽 절반을 잘라 아래 공사가 보이게 한다
-      const cut = CUT_WPS.has(wpId) ? 1 : UNDER_WPS.has(wpId) && top > 0.5 ? 2 : 0;
-      clipList.forEach(m => { const want = cut === 1 ? 1 : cut === 2 ? 2 : 0, ix = cut === 2; if (m.clippingPlanes.length !== want || m.clipIntersection !== ix) { m.clippingPlanes = cut === 1 ? [clipZ] : cut === 2 ? [clipZ, clipUp] : []; m.clipIntersection = ix; m.needsUpdate = true; } });
+      // 단면으로 자르지 않는다: 실내 공종은 외장을 유리처럼 비우고, 역타처럼 지하 공사 중에 지상 골조가 있으면 지상부를 흐리게
+      const ghostAbove = underV && top > 0.5;
+      byWp.forEach((list, wp) => { const on = wp === wpId || (wpId === 'mep' && sys[wp]) || (wpId === 'conc' && (wp === 'pour')); const dm = !on && dimSet && dimSet.has(wp); list.forEach(o => { const b = o.userData.base; let m = on ? accOf(b) : dm ? dimOf(b) : b; if (!on && ghostAbove && b.userData.above) m = dimOf(b); else if (!on && cutNow && SKIN_WPS.has(wp)) m = ghostOf(b, 0.1); if (o.material !== m) o.material = m; }); });
+      // 앞쪽 절반 복제본: 지하 공종에서는 흙·지표·흙막이를 반투명하게. 흙 덩어리 뒤쪽은 공법이 투시를 켰을 때만 흐리게
+      // 역타 1층 바닥판: 지하를 보는 공종에서는 반투명 (그 밑 굴착·지하 골조가 보이게)
+      if (underV && wpId !== 'support') tdSlab.material = ghostOf(tdSlab.material, 0.22);
+      city.surfs.forEach(o => { const b = o.userData.sbase || (o.userData.sbase = o.material), m = underV ? ghostOf(b, 0.32) : b; if (o.material !== m) o.material = m; });
+      twins.forEach(t => {
+        const o = t.userData.src; let v = o.visible; for (let q = o.parent; v && q && q !== root; q = q.parent) v = q.visible;
+        t.visible = v; if (!v) return;
+        if (o.isInstancedMesh) { t.count = o.count; if (t.instanceColor !== o.instanceColor) t.instanceColor = o.instanceColor; }
+        else { t.position.copy(o.position); t.quaternion.copy(o.quaternion); t.scale.copy(o.scale); }
+        const fm = underV && t.userData.front != null ? ghostOf(o.material, t.userData.front) : o.material;
+        if (t.material !== fm) t.material = fm;
+      });
       // 전체 보기 높이: 골조 전에는 완성 볼륨, 골조가 오르는 동안에는 지금 높이 + 크레인 여유까지
       const hTop = Math.max(top, ctop), hView = !K('frame') || hTop >= G.H - 0.5 ? G.H : Math.min(G.H, hTop + Math.max(16, hTop * 0.25));
       return { top: hTop, dyn, hv: hView };
@@ -604,28 +708,33 @@ export function createSim3D(host, opts = {}) {
 
     // 단면 이름표 (지하 공종에서만): 지층 · 지하수위
     const labels = [];
-    sc.strata.forEach(([a, b, , nm]) => { if (a < sc.dv - 2) labels.push({ t: nm, p: [D.xl + 4, -(a + Math.min(b, sc.dv)) / 2, 0.2], under: true }); });
-    if (cond.gw < sc.dv) labels.push({ t: `▽ 지하수위 GL−${cond.gw}m`, p: [pw + 3, -cond.gw + 0.6, 0.3], under: true, cls: 'gw' });
+    sc.strata.forEach(([a, b, , nm]) => { if (a < sc.dv - 2) labels.push({ t: nm, p: [D.xl + 4, -(a + Math.min(b, sc.dv)) / 2, Z], under: true }); });
+    if (cond.gw < sc.dv) labels.push({ t: `▽ 지하수위 GL−${cond.gw}m`, p: [D.xr - 14, -cond.gw + 0.6, Z], under: true, cls: 'gw' });
     city.labels.forEach(l => labels.push({ under: false, ...l }));
     return {
-      sc, D, root, frameAt, labels,
+      sc, D, root, frameAt, labels, city,
       dispose() { city.dispose(); meth.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
     };
   }
 
+  // 그림자: 불투명한 면만 그림자를 드리우고, 모든 면이 받는다
+  function shadowsOn(root) {
+    root.traverse(o => { if (!o.isMesh) return; const m = o.material; o.receiveShadow = true; o.castShadow = !(m && m.transparent && m.opacity < 0.7) && !(m && m.emissiveIntensity > 0.9); });
+  }
   // ---------- 매 프레임 ----------
   let mkHtml = '', lbHtml = '', atCache = {}, size = [0, 0];
   function resize() {
     const r = host.getBoundingClientRect(), w = Math.max(10, Math.round(r.width)), h = Math.max(10, Math.round(r.height));
     if (w === size[0] && h === size[1]) return;
     size = [w, h]; renderer.setSize(w, h, false); renderer.domElement.style.width = '100%'; renderer.domElement.style.height = '100%';
+    look.setSize(w, h, renderer.getPixelRatio());
     cam.aspect = w / h; cam.updateProjectionMatrix();
   }
   function update(st) {
     if (disposed) return;
     resize();
     const { sc, wpId, p, T, marks = [], at } = st;
-    if (!built || built.sc !== sc) { built = build(sc); lastWp = null; }
+    if (!built || built.sc !== sc) { built = build(sc); lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); }
     const win = winFor(sc, wpId), tau = win.s + clamp(p, 0, 1) * (win.e - win.s);
     const fres = built.frameAt({ wpId, tau, T });
     // 시점: 전체 보기는 현장·건물 전체를 한 화면에 고정, 작업 부위는 2D 카메라가 보는 범위를 따라간다
@@ -662,7 +771,7 @@ export function createSim3D(host, opts = {}) {
     }
     if (follow.anim) { const k = clamp((now - follow.anim.t0) / 1100, 0, 1), e = 1 - Math.pow(1 - k, 3); cam.position.lerpVectors(follow.anim.from.p, follow.anim.to.p, e); ctl.target.lerpVectors(follow.anim.from.t, follow.anim.to.t, e); if (k >= 1) follow.anim = null; }
     ctl.update();
-    renderer.render(scene, cam);
+    look.render(cam);
     // HUD
     const wp = WP_BY_ID[wpId], o = wp.multi ? `${sc.qa.length}개 기술` : (wp.opts.find(x => x.id === sc.ids[wpId]) || { name: '' }).name;
     $('.s3-c').textContent = `// SIM_${wp.code} · 3D`; $('.s3-t').textContent = o;
@@ -672,15 +781,17 @@ export function createSim3D(host, opts = {}) {
     const box = $('.s3-mks'), w = size[0], h = size[1];
     const html = marks.map(m => { const pos = atCache[m.mark]; if (!pos) return ''; const v = new THREE.Vector3(pos[0], pos[1], 0.5).project(cam); if (v.z > 1 || v.x < -1 || v.x > 1 || v.y < -1 || v.y > 1) return ''; return `<i class="s3-mk s${m.sev}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${m.n}</i>`; }).join('');
     if (mkHtml !== html) { box.innerHTML = html; mkHtml = html; }
-    const lh = (fres && fres.dyn && fres.dyn.length ? built.labels.concat(fres.dyn) : built.labels).filter(l => (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId))).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
+    const lh = built.labels.concat(fres && fres.dyn ? fres.dyn : [], ctxObj && !UNDER_WPS.has(wpId) ? ctxObj.labels : []).filter(l => (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId))).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
     if (lbHtml !== lh) { $('.s3-lbs').innerHTML = lh; lbHtml = lh; }
   }
   function dispose() {
     disposed = true;
     if (built) { scene.remove(built.root); built.dispose(); built = null; }
-    mats.forEach(m => m.dispose()); accMats.forEach(m => m.dispose()); dimMats.forEach(m => m.dispose());
+    if (ctxAbort) ctxAbort.abort();
+    if (ctxObj) { scene.remove(ctxObj.group); ctxObj.dispose(); ctxObj = null; }
+    mats.forEach(m => m.dispose()); accMats.forEach(m => m.dispose()); dimMats.forEach(m => m.dispose()); ghostMats.forEach(k => k.forEach(m => m.dispose()));
     [BOX, CYL, CONE].forEach(g => g.dispose());
-    ctl.dispose(); renderer.dispose(); renderer.forceContextLoss?.(); wrap.remove();
+    look.dispose(); ctl.dispose(); renderer.dispose(); renderer.forceContextLoss?.(); wrap.remove();
   }
   return { update, resize, dispose, el: wrap, canvas: renderer.domElement };
 }

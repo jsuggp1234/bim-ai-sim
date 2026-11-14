@@ -1,12 +1,14 @@
 // 04 공법·재료: 공종 37개(6개 묶음)를 지반조사(L01)부터 순서대로 하나씩 고르고 확정한다. 확정해야 다음 공종이 열린다.
-// 고를 때마다 그 공법으로 시공 장면을 4D 공정 일정대로 재생하고(ui/buildsim.js),
+// 화면은 시뮬레이터 작업대: 가운데 3D 시공 장면(전체 화면), 왼쪽 공종 목록, 오른쪽 공법 고르기, 아래 재생 막대.
+// 2D 단면·작업 상세·간섭·공정 단계·현장 조건·결정 기록·전통 대비는 장면 왼쪽 아이콘으로 여는 창이다.
+// 고를 때마다 그 공법으로 시공 장면을 4D 공정 일정대로 재생하고(ui/build3d.js · ui/buildsim.js),
 // 그 선택이 만드는 이점·문제점·간섭(sim/impact.js)과 공기·공사비 변화를 함께 보여 준다.
 import { WPS, PRIO, PRIO_DEFAULT, COND_META, GROUPS, baseOpt } from '../sim/methods.js';
 import { PHASES, ym, dateAt } from '../sim/process.js';
 import { GROUND } from '../sim/kr-sites.js';
 import { pipeline, fmt, won, setMethodState, setOptState, tip, projKey } from '../pipeline.js';
 import { store } from '../store.js';
-import { head, sub, dot, hbar, escH } from '../ui/sys.js';
+import { dot, hbar, escH } from '../ui/sys.js';
 import { wpImpact, delta, vsBaseline, sectionGeom, wpLabel, optName } from '../sim/impact.js';
 import { makeScene, frame, roiFor, lerpRoi, winFor } from '../ui/buildsim.js';
 import { workFig, workInfo } from '../ui/workstep.js';
@@ -38,67 +40,90 @@ const dCost = (v) => (Math.abs(v) < 5000 ? '비용 ±0' : `비용 ${sgn(v, won)}
 const tone = (v, goodIfNeg = true) => (Math.abs(v) < 1e-9 ? '' : (v < 0) === goodIfNeg ? 'pos' : 'neg');
 const CIRC = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫';
 
-const SPEEDS = [0.5, 1, 2, 4];
-const AMB = 0.55; // 주변 움직임 속도 배율
+const SPEEDS = [0.5, 1, 2, 4, 8];
+const AMB = 0.4; // 주변 움직임(장비·차량·사람) 속도 배율: 실제보다 느긋하게
 const spLabel = (v) => (v === 0.5 ? '½' : v) + '×';
+// 아이콘 메뉴: [키, 이름, 설명, SVG 경로]
+const POPS = [
+  ['2d', '2D 단면', '단면으로 보기 (지층·흙막이·층 구성)', '<path d="M3 16h18M3 12h18M3 8h18"/><path d="M7 4v16M17 4v16" opacity=".5"/>'],
+  ['work', '작업 상세', '지금 단계 확대 장면 · 장비 · 인원 · 관리 항목', '<circle cx="11" cy="11" r="6"/><path d="M15.5 15.5 21 21M8.5 11h5M11 8.5v5"/>'],
+  ['imp', '간섭·이점', '간섭 · 문제점 · 이점 · 전통 공법 대비', '<path d="M12 3 2.5 20h19z"/><path d="M12 10v4.5M12 17v.5"/>'],
+  ['steps', '공정 단계', '이 공법의 시공 순서', '<path d="M4 6h3M4 12h3M4 18h3M10 6h10M10 12h10M10 18h10"/>'],
+  ['cond', '현장 조건', '지반·지하수·인접 거리 · 우선순위', '<path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/>'],
+  ['log', '결정 기록', '확정한 공종과 공정 창', '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h5"/>'],
+  ['fx', '전통 대비', '전통 공법 묶음과 지표·기간 비교', '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>'],
+];
+const ICON = (d) => `<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
 
 export function mount(root) {
   let R = pipeline();
   let done = getDone();
-  const ui = { cur: Math.min(done, N - 1), grp: null, p: 0, T: 0, playing: false, speed: 1, roi: null, roiFrom: null, roiT: 1, raf: 0, last: 0, vis: true, view: '2d', at: null, atT: 0 };
-  let v3 = null, v3Loading = false; // 3D 뷰 (three.js는 처음 3D를 누를 때 불러온다)
-  try { if (localStorage.getItem('bim.simView') === '3d') ui.view = '3d'; const sp = +localStorage.getItem('bim.simSpeed'); if (SPEEDS.includes(sp)) ui.speed = sp; } catch { /* 저장소 없음 */ }
+  const ui = { cur: Math.min(done, N - 1), grp: null, p: 0, T: 0, playing: false, speed: 1, roi: null, roiFrom: null, roiT: 1, raf: 0, last: 0, vis: true, at: null, atT: 0, pop: null, pip: false, big2d: false };
+  let v3 = null, v3Loading = false, main2d = false; // 3D가 기본 (WebGL이 없으면 2D 단면이 가운데로)
+  try { const sp = +localStorage.getItem('bim.simSpeed2'); if (SPEEDS.includes(sp)) ui.speed = sp; const pp = localStorage.getItem('bim.simPop'); if (POPS.some(x => x[0] === pp) && pp !== '2d') ui.pop = pp; ui.pip = localStorage.getItem('bim.simPip') === '1'; } catch { /* 저장소 없음 */ }
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // 휴대폰 폭에서는 세로형 화면으로 다시 그린다
   const mqN = window.matchMedia('(max-width: 560px)'), onMq = () => draw();
   const $ = (id) => root.querySelector('#' + id);
   let alive = true, scene = null, G = sectionGeom(R.gen, R.d), imp = null, marks = [];
 
-  root.innerHTML = head({
-    n: 4, key: 'METHOD', title: '어떻게 지을까', status: 'BUILD SIMULATOR ONLINE',
-    dim: `${escH(R.site.name)} · ${R.u.name} · ${N}개 공종 · ${WPS.reduce((s, w) => s + w.opts.length, 0)}개 공법·기술`,
-    desc: '가설·지반부터 골조·외피·설비·마감·준공까지 37개 공종을 차례로 하나씩 고르고 확정합니다. 확정해야 다음 공종이 열리고, 묶음 단위로 AI 추천을 한 번에 확정할 수도 있습니다. 고를 때마다 그 공법으로 현장을 4D 공정 일정대로 2D 단면·3D로 재생하고, 그 선택이 만드는 이점·문제점·간섭(앞뒤 공종 · 인접 건물 · 공정)과 공기·공사비 변화를 함께 보여 줍니다.',
-    stats: [['확정', '<b id="k-done">—</b>', '<span id="k-done2"></span>'], ['공기', '<b id="k-mo">—</b>', '<span id="k-mo2"></span>'], ['공사비', '<b id="k-cost">—</b>', '<span id="k-cost2"></span>']],
-    actions: `<a class="btn ghost" href="#/mass">← 03 매스</a><a class="btn acc" id="go-next" href="#/process">05 4D·간섭 <span class="ar">→</span></a>`,
-  }) + `
-  <div class="wrap">
-    <section class="sx-sec" aria-label="현장 조건과 우선순위">
-      ${sub('04.1', '현장 조건 · 우선순위', '입지에서 가져온 값입니다. 바꾸면 추천과 판정이 다시 계산됩니다.', '<button type="button" class="chipbtn" id="c-reset">조건 되돌리기</button>')}
-      <div class="me-cond">
-        <div class="panel pad" id="cond"></div>
-        <div class="panel pad" id="prio"></div>
+  const nOpt = WPS.reduce((s2, w) => s2 + w.opts.length, 0);
+  const popBody = {
+    '2d': '',
+    work: '<div class="sim-work" id="sim-work"><div class="sw-fig" id="sw-fig"></div><div class="sw-info" id="sw-info" aria-live="polite"></div></div>',
+    imp: '<div class="wz-imp" id="imp"></div>',
+    steps: '<ol class="sim-steps" id="sim-steps"></ol>',
+    cond: '<div class="pop-acts"><button type="button" class="chipbtn" id="c-reset">조건 되돌리기</button><button type="button" class="chipbtn" id="wz-reset">공종 확정 처음부터 다시</button></div><div id="cond"></div><div id="prio"></div>',
+    log: '<p class="pop-n">확정한 공종과 그 선택의 공정 창. 행을 누르면 그 공종으로 돌아갑니다.</p><div id="log"></div>',
+    fx: `<p class="pop-n">같은 매스를 전통 공법 묶음(SPT·CIP·버팀보·PHC·외방수 시트·순타·RC 라멘·재래식 거푸집·현장 철근·붐 펌프·습식 외장·중앙 공조 등 용도에 맞는 관행 공법)으로 지었을 때와 비교합니다.</p><div id="fx-kpi"></div><div id="fx-ph"></div>`,
+  };
+  root.innerHTML = `
+  <section class="sws" id="wz-sec" aria-label="공법·재료 시공 시뮬레이터">
+    <header class="sws-top">
+      <a class="sws-back" href="#/mass" title="03 매스로" aria-label="03 매스로">←</a>
+      <div class="sws-t"><span class="sws-code">04 · METHOD ${dot('BUILD SIMULATOR', 'acc')}</span><h1>어떻게 지을까<span class="pd">.</span></h1><span class="sws-dim">${escH(R.site.name)} · ${R.u.name} · ${N}개 공종 · ${nOpt}개 공법</span></div>
+      <dl class="sws-k">
+        <div><dt>확정</dt><dd id="k-done">—</dd><span id="k-done2"></span></div>
+        <div><dt>공기</dt><dd id="k-mo">—</dd><span id="k-mo2"></span></div>
+        <div><dt>공사비</dt><dd id="k-cost">—</dd><span id="k-cost2"></span></div>
+      </dl>
+      <a class="btn acc sm" id="go-next" href="#/process">05 4D·간섭 <span class="ar">→</span></a>
+    </header>
+    <aside class="sws-nav" aria-label="공종 순서">
+      <div class="sws-ph"><b>공종</b><span class="hint">지반조사부터 차례로 확정</span><button type="button" class="sws-tog" data-tog="nav" aria-label="공종 목록 접기" title="접기">‹</button></div>
+      <div class="sws-rail" id="rail"></div>
+    </aside>
+    <div class="sws-stage">
+      <div class="sim-box" id="sim"></div>
+      <nav class="sws-dock" aria-label="세부 보기">
+        ${POPS.map(([k, n, d, ic]) => `<button type="button" class="sws-ic" data-pop="${k}" aria-pressed="false" title="${d}">${ICON(ic)}<span>${n}</span><i class="sws-badge" data-badge="${k}" hidden></i></button>`).join('')}
+        <span class="sws-sep" aria-hidden="true"></span>
+        <button type="button" class="sws-ic" id="sws-fs" title="전체 화면 (Esc로 나가기)">${ICON('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>')}<span>전체 화면</span></button>
+        <button type="button" class="sws-ic sws-open" data-tog="nav" title="공종 목록 펴기">${ICON('<path d="M4 6h16M4 12h16M4 18h16"/>')}<span>공종</span></button>
+        <button type="button" class="sws-ic sws-open" data-tog="side" title="공법 선택 펴기">${ICON('<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/>')}<span>공법</span></button>
+      </nav>
+      <div class="sws-pop" id="pop" hidden role="dialog" aria-labelledby="pop-t">
+        <div class="sws-ph"><b id="pop-t"></b><span class="hint" id="pop-d"></span><button type="button" class="sws-tog" id="pop-x" aria-label="닫기" title="닫기">×</button></div>
+        <div class="pop-b">${POPS.filter(x => x[0] !== '2d').map(([k]) => `<div class="pop-p" data-pp="${k}" hidden>${popBody[k]}</div>`).join('')}</div>
       </div>
-    </section>
-    <section class="sx-sec" aria-label="공종별 시공 시뮬레이션" id="wz-sec">
-      ${sub('04.2', '공종별 시공 시뮬레이션', '하나씩 고르고 확정하세요. 그림 속 번호는 아래 간섭·문제점 목록과 같습니다.', '<button type="button" class="chipbtn" id="wz-reset">처음부터 다시</button>')}
-      <div class="wz-rail" id="rail" role="tablist" aria-label="공종 순서"></div>
-      <div class="wz">
-        <div class="wz-sim panel">
-          <div class="sim-box" id="sim"></div>
-          <div class="sim-ctl">
-            <button type="button" class="btn acc sm" id="sim-play" aria-label="재생">▶</button>
-            <button type="button" class="btn ghost sm" id="sim-re" aria-label="처음부터 재생">↺</button>
-            <input type="range" id="sim-p" min="0" max="1000" value="0" aria-label="시공 진행">
-            <button type="button" class="chipbtn" id="sim-sp" aria-label="재생 속도 (누를 때마다 ½× → 1× → 2× → 4×)" title="재생 속도">${spLabel(ui.speed)}</button>
-            <div class="seg sim-view" role="group" aria-label="보기 방식"><button type="button" data-view="2d" aria-pressed="true">2D 단면</button><button type="button" data-view="3d" aria-pressed="false">3D</button></div>
-          </div>
-          <div class="sim-cap" id="sim-cap" aria-live="polite"></div>
-          <div class="sim-work" id="sim-work"><div class="sw-fig" id="sw-fig"></div><div class="sw-info" id="sw-info" aria-live="polite"></div></div>
-          <ol class="sim-steps" id="sim-steps"></ol>
-        </div>
-        <div class="wz-side panel" id="side"></div>
+      <div class="sws-pip" id="pip" hidden>
+        <div class="sws-ph"><b>2D 단면</b><span class="hint">3D와 같은 시각 · 그림 속 번호 = 간섭·문제점</span><button type="button" class="sws-tog" id="pip-big" aria-label="2D 크게 보기" title="크게 / 작게">⤢</button><button type="button" class="sws-tog" id="pip-x" aria-label="2D 단면 닫기" title="닫기">×</button></div>
+        <div class="sim2d" id="sim2d"></div>
       </div>
-      <div class="wz-imp" id="imp"></div>
-    </section>
-    <section class="sx-sec" aria-label="결정 기록">
-      ${sub('04.3', '결정 기록', '확정한 공종과 그 선택의 간섭·효과. 행을 누르면 그 공종으로 돌아갑니다.')}
-      <div class="panel" id="log"></div>
-    </section>
-    <section class="sx-sec" aria-label="전통 공법 대비 효과">
-      ${sub('04.4', '전통 공법 대비 효과', '같은 매스를 전통 공법 묶음(SPT·CIP·버팀보·PHC·외방수 시트·순타·RC 라멘·재래식 거푸집·현장 철근·붐 펌프·습식 외장·중앙 공조·조적·습식 온돌·롤러 도장·단독 시운전·CPM 등, 용도에 맞는 관행 공법)으로 지었을 때와 비교합니다.')}
-      <div class="me-fx"><div class="panel pad" id="fx-kpi"></div><div class="panel pad" id="fx-ph"></div></div>
-    </section>
-  </div>`;
+      <div class="sws-bar">
+        <button type="button" class="btn acc sm" id="sim-play" aria-label="재생">▶</button>
+        <button type="button" class="btn ghost sm" id="sim-re" aria-label="처음부터 재생" title="처음부터">↺</button>
+        <div class="sws-tl"><div class="sim-cap" id="sim-cap" aria-live="polite"></div><div class="sws-track"><input type="range" id="sim-p" min="0" max="1000" value="0" aria-label="시공 진행"><div class="sws-ticks" id="sim-ticks" aria-hidden="true"></div></div></div>
+        <div class="seg sws-sp" role="group" aria-label="재생 속도">${SPEEDS.map(v => `<button type="button" data-sp="${v}" aria-pressed="${v === ui.speed}">${spLabel(v)}</button>`).join('')}</div>
+      </div>
+    </div>
+    <aside class="sws-side" aria-label="공법 고르기">
+      <div class="sws-ph"><b>공법 선택</b><span class="hint">누르면 바로 재생</span><button type="button" class="sws-tog" data-tog="side" aria-label="공법 선택 접기" title="접기">›</button></div>
+      <div class="wz-side" id="side"></div>
+    </aside>
+  </section>`;
+  const ws = $('wz-sec');
+  try { if (localStorage.getItem('bim.simNav') === '0') ws.classList.add('no-nav'); if (localStorage.getItem('bim.simSide') === '0') ws.classList.add('no-side'); } catch { /* 저장소 없음 */ }
 
   // ---------- 조건 · 우선순위 ----------
   function renderCond() {
@@ -137,19 +162,22 @@ export function mount(root) {
   const Lof = (i) => R.M.list[i];
   const chosenName = (L) => (L.wp.multi ? (L.chosen.length ? `${L.chosen.length}개 기술` : '없음') : optName(L.wp.id, L.chosen));
   function renderRail() {
+    // 왼쪽 목록: 묶음 6개를 펼침 목록으로, 지금 묶음 안에 공종 칩 (휴대폰 폭에서는 가로로 넘긴다)
     const open = ui.grp != null ? GR.find(g => g.k === ui.grp) || grpOf(ui.cur) : grpOf(ui.cur);
-    const tabs = GR.map(g => {
+    const html = GR.map(g => {
       const n = g.b - g.a, dn = Math.max(0, Math.min(n, done - g.a)), st = dn >= n ? 'done' : g.a <= done ? 'next' : 'lock';
-      return `<li><button type="button" class="rg ${st}${g === open ? ' on' : ''}" data-grp="${g.k}" aria-expanded="${g === open}" ${st === 'lock' ? 'aria-disabled="true"' : ''}>
-        <span class="rg-c">${WPS[g.a].code}–${WPS[g.b - 1].code}</span><span class="rg-n">${g.name}</span><span class="rg-s">${dn} / ${n}</span><i class="rg-bar" aria-hidden="true"><i style="width:${(dn / n * 100).toFixed(1)}%"></i></i></button></li>`;
+      const head = `<button type="button" class="rg ${st}${g === open ? ' on' : ''}" data-grp="${g.k}" aria-expanded="${g === open}" ${st === 'lock' ? 'aria-disabled="true"' : ''}>
+        <span class="rg-c">${WPS[g.a].code}–${WPS[g.b - 1].code}</span><span class="rg-n">${g.name}</span><span class="rg-s">${dn} / ${n}</span><i class="rg-bar" aria-hidden="true"><i style="width:${(dn / n * 100).toFixed(1)}%"></i></i></button>`;
+      const chips = g !== open ? '' : `<ol class="rl-list" role="tablist" aria-label="${g.name} 공종">${R.M.list.slice(g.a, g.b).map((L, j) => {
+        const i = g.a + j, st2 = i < done ? 'done' : i === done ? 'next' : 'lock';
+        return `<li><button type="button" role="tab" class="rl ${st2}${i === ui.cur ? ' on' : ''}" data-wp="${i}" aria-selected="${i === ui.cur}" ${st2 === 'lock' ? 'aria-disabled="true"' : ''} title="${st2 === 'lock' ? `앞 공종(${Lof(done) ? Lof(done).wp.code : ''})을 먼저 확정하세요` : escH(L.wp.name + ' · ' + chosenName(L))}">
+          <span class="rl-c">${L.wp.code}</span><span class="rl-n">${L.wp.name}</span><span class="rl-s">${st2 === 'done' ? escH(chosenName(L)) : st2 === 'next' ? '고를 차례' : '잠김'}</span><i class="rl-m" aria-hidden="true"></i></button></li>`;
+      }).join('')}</ol>`;
+      return `<li class="rg-li${g === open ? ' open' : ''}">${head}${chips}</li>`;
     }).join('');
-    const chips = R.M.list.slice(open.a, open.b).map((L, j) => {
-      const i = open.a + j, st = i < done ? 'done' : i === done ? 'next' : 'lock';
-      return `<li><button type="button" role="tab" class="rl ${st}${i === ui.cur ? ' on' : ''}" data-wp="${i}" aria-selected="${i === ui.cur}" ${st === 'lock' ? 'aria-disabled="true"' : ''} title="${st === 'lock' ? `앞 공종(${Lof(done) ? Lof(done).wp.code : ''})을 먼저 확정하세요` : escH(L.wp.name + ' · ' + chosenName(L))}">
-        <span class="rl-c">${L.wp.code}</span><span class="rl-n">${L.wp.name}</span><span class="rl-s">${st === 'done' ? escH(chosenName(L)) : st === 'next' ? '고를 차례' : '잠김'}</span><i class="rl-m" aria-hidden="true"></i></button></li>`;
-    }).join('');
-    $('rail').innerHTML = `<ol class="rg-tabs" aria-label="공종 묶음">${tabs}</ol><div class="rl-g" role="tablist" aria-label="${open.name} 공종"><ol>${chips}</ol></div>`;
-    if (window.innerWidth < 900) { const on = $('rail').querySelector('.rl.on'), tg = $('rail').querySelector('.rg.on'); if (tg) tg.scrollIntoView({ block: 'nearest', inline: 'center' }); if (on) on.scrollIntoView({ block: 'nearest', inline: 'center' }); }
+    $('rail').innerHTML = `<ol class="rg-tabs" aria-label="공종 묶음">${html}</ol>`;
+    const on = $('rail').querySelector('.rl.on');
+    if (on) { const box = $('rail'), r1 = on.getBoundingClientRect(), r0 = box.getBoundingClientRect(); if (r1.top < r0.top || r1.bottom > r0.bottom) box.scrollTop += r1.top - r0.top - box.clientHeight / 3; if (r1.left < r0.left || r1.right > r0.right) box.scrollLeft += r1.left - r0.left - (box.clientWidth - r1.width) / 2; }
   }
 
   // ---------- 오른쪽: 공법 고르기 ----------
@@ -220,6 +248,7 @@ export function mount(root) {
     };
     const item = (x, k) => `<li class="ii ${k} s${x.sev || 1}">${x.n ? `<span class="ii-n">${CIRC[x.n - 1] || x.n}</span>` : `<span class="ii-n dot"></span>`}<div><b>${escH(x.t)}</b>${x.with ? `<em>↔ ${escH(x.with)}</em>` : ''}${x.d ? `<p>${escH(x.d)}</p>` : ''}${fixBtn(x.fix)}</div></li>`;
     const col = (k, ttl, en, arr, empty) => `<div class="ic ${k}"><div class="ic-h"><span class="ic-t">${ttl}</span><span class="ic-en">${en}</span><b>${arr.length}</b></div>${arr.length ? `<ol>${arr.map(x => item(x, k)).join('')}</ol>` : `<p class="ic-e">${empty}</p>`}</div>`;
+    const bd = root.querySelector('[data-badge="imp"]'); if (bd) { const nI = imp.clashes.length + imp.cons.length; bd.hidden = !nI; bd.textContent = nI; bd.classList.toggle('hi', imp.clashes.some(x => (x.sev || 1) >= 2) || imp.cons.some(x => (x.sev || 1) >= 2)); }
     $('imp').innerHTML = `<div class="ik" id="ik">${kpiCells(null)}</div>
       ${inv.length ? `<p class="ib">앞 공종을 바꿔서 ${escH(inv.join(', '))}의 선택이 불가능해져 AI 추천으로 바뀌었습니다.</p>` : ''}
       <div class="icols">${col('clash', '간섭', 'CLASH', imp.clashes, '앞뒤 공종·인접 건물·공정과 부딪히는 곳이 없습니다.')}${col('con', '문제점', 'ISSUES', imp.cons, '눈에 띄는 문제점이 없습니다.')}${col('pro', '이점', 'BENEFITS', imp.pros, '—')}</div>`;
@@ -261,22 +290,26 @@ export function mount(root) {
     const L = Lof(ui.cur);
     const roi = ui.roiT < 1 ? lerpRoi(ui.roiFrom, ui.roiTo, 1 - Math.pow(1 - ui.roiT, 3)) : (ui.roiTo || ui.roi);
     ui.roi = roi;
-    if (ui.view === '3d' && v3) {
-      // 판정 표식 위치는 2D 장면이 계산한 단면 좌표를 그대로 쓴다 (0.3초마다)
-      const now = performance.now();
-      if (!ui.at || now - ui.atT > 300) { try { ui.at = frame(scene, L.wp.id, ui.p, ui.T, roi, [], { narrow: mqN.matches }).at; } catch { ui.at = {}; } ui.atT = now; }
-      try { v3.update({ sc: scene, wpId: L.wp.id, p: ui.p, T: ui.T, marks, at: ui.at }); }
-      catch (e) { console.error(e); setView('2d', '3D 장면을 그리지 못해 2D 단면으로 돌아왔습니다.'); return; }
-    } else if (ui.view !== '3d') {
+    // 2D 단면: 가운데(3D를 못 쓸 때) 또는 아이콘으로 연 작은 창
+    const pip2 = ui.pip && !main2d, want2d = main2d || pip2;
+    if (want2d) {
       let out;
-      try { out = frame(scene, L.wp.id, ui.p, ui.T, roi, marks, { paused: !ui.playing && ui.p > 0 && ui.p < 1, narrow: mqN.matches }); }
-      catch (e) { console.error(e); $('sim').innerHTML = `<div class="empty">시뮬레이션을 그리지 못했습니다: ${escH(e.message)}</div>`; return; }
-      $('sim').innerHTML = out.svg;
+      try { out = frame(scene, L.wp.id, ui.p, ui.T, roi, marks, { paused: !ui.playing && ui.p > 0 && ui.p < 1, narrow: main2d ? mqN.matches : false }); }
+      catch (e) { console.error(e); (main2d ? $('sim') : $('sim2d')).innerHTML = `<div class="empty">단면을 그리지 못했습니다: ${escH(e.message)}</div>`; out = null; }
+      if (out) { (main2d ? $('sim') : $('sim2d')).innerHTML = out.svg; ui.at = out.at; ui.atT = performance.now(); }
+    }
+    if (v3 && !main2d) {
+      // 판정 표식 위치는 2D 장면이 계산한 단면 좌표를 그대로 쓴다 (2D 창이 닫혀 있으면 0.3초마다)
+      const now = performance.now();
+      if (!want2d && (!ui.at || now - ui.atT > 300)) { try { ui.at = frame(scene, L.wp.id, ui.p, ui.T, roi, [], { narrow: false }).at; } catch { ui.at = {}; } ui.atT = now; }
+      try { v3.update({ sc: scene, wpId: L.wp.id, p: ui.p, T: ui.T, marks, at: ui.at }); }
+      catch (e) { console.error(e); v3.dispose(); v3 = null; main2d = true; paintView(); flash('3D 장면을 그리지 못해 2D 단면으로 보여 줍니다.'); return; }
     }
     const S = stepsOf(), k = Math.min(S.length - 1, Math.floor(ui.p * S.length * 0.999));
     $('sim-cap').innerHTML = `<span class="sc-n">${String(k + 1).padStart(2, '0')} / ${String(S.length).padStart(2, '0')}</span><b>${escH(S[k].t)}</b>${S[k].d ? `<span>${escH(S[k].d)}</span>` : ''}`;
     $('sim-steps').querySelectorAll('li').forEach((li, i) => li.className = i === k ? 'on' : i < k ? 'done' : '');
-    drawWork(L, S, k);
+    $('sim-ticks').querySelectorAll('i').forEach((t, i) => t.classList.toggle('on', i <= k));
+    if (ui.pop === 'work') drawWork(L, S, k);
     const sl = $('sim-p'); if (document.activeElement !== sl) sl.value = Math.round(ui.p * 1000);
   }
   // 작업 상세: 지금 단계의 확대 장면 (단계 안 진행률 q로 움직인다) + 장비·인원·관리 항목
@@ -296,9 +329,11 @@ export function mount(root) {
   function renderSteps() {
     const S = stepsOf();
     $('sim-steps').innerHTML = S.map((s, i) => `<li><button type="button" data-step="${i}"><span>${String(i + 1).padStart(2, '0')}</span>${escH(s.t)}</button></li>`).join('');
+    $('sim-ticks').innerHTML = S.map((s, i) => `<i style="left:${(i / S.length * 100).toFixed(2)}%;width:${(100 / S.length).toFixed(2)}%" title="${escH(s.t)}"></i>`).join('');
+    wKey = '';
   }
-  // 한 단계에 약 15초 (1× 기준) — 공종 하나가 45~120초에 걸쳐 천천히 재생된다
-  const dur = () => Math.max(45, Math.min(120, stepsOf().length * 15)) / ui.speed;
+  // 한 단계에 약 50초 (1× 기준) — 공종 하나가 2분 30초~5분에 걸쳐 천천히 재생된다 (8×면 20~40초)
+  const dur = () => Math.max(150, Math.min(300, stepsOf().length * 50)) / ui.speed;
   function loop(ts) {
     ui.raf = 0;
     if (!alive) return;
@@ -309,35 +344,42 @@ export function mount(root) {
       if (ui.playing) { ui.p = Math.min(1, ui.p + dt / dur()); if (ui.p >= 1) { ui.playing = false; paintPlay(); } need = true; }
       if (ui.roiT < 1) { ui.roiT = Math.min(1, ui.roiT + dt / 0.7); need = true; }
       if (!reduce) need = true; // 장비·진동 같은 주변 움직임
-      if (ui.view === '3d' && v3) need = true; // 회전·확대 감쇠
+      if (v3) need = true; // 회전·확대 감쇠
     }
     if (need) draw();
-    if (ui.playing || ui.roiT < 1 || (!reduce && ui.vis) || (ui.view === '3d' && v3 && ui.vis)) ui.raf = requestAnimationFrame(loop);
+    if (ui.playing || ui.roiT < 1 || (!reduce && ui.vis) || (v3 && ui.vis)) ui.raf = requestAnimationFrame(loop);
   }
   const kick = () => { if (!ui.raf && alive) { ui.last = 0; ui.raf = requestAnimationFrame(loop); } };
   function paintPlay() { const b = $('sim-play'); b.textContent = ui.playing ? '❚❚' : '▶'; b.setAttribute('aria-label', ui.playing ? '일시정지' : '재생'); }
-  // 2D 단면 ↔ 3D
-  function paintView() { root.querySelectorAll('[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === ui.view))); $('sim').classList.toggle('is3d', ui.view === '3d'); }
-  async function setView(v, msg) {
-    if (v === '3d' && !v3) {
-      if (v3Loading) return;
-      v3Loading = true; ui.view = '3d'; paintView();
-      $('sim').innerHTML = '<div class="empty">3D 장면을 불러오는 중…</div>';
-      try {
-        const mod = await import('../ui/build3d.js');
-        if (!alive) return;
-        if (!mod.webglOK()) throw new Error('이 기기·브라우저에서 WebGL을 쓸 수 없습니다');
-        if (ui.view !== '3d') return;
-        $('sim').innerHTML = '';
-        v3 = mod.createSim3D($('sim'));
-      } catch (e) { console.warn(e); v3Loading = false; v3 = null; ui.view = '2d'; paintView(); flash(`3D를 열 수 없어 2D 단면으로 보여 줍니다. (${e.message})`); draw(); return; }
-      v3Loading = false;
-    }
-    if (v === '2d' && v3) { v3.dispose(); v3 = null; }
-    ui.view = v; ui.at = null; paintView();
-    try { localStorage.setItem('bim.simView', v); } catch { /* 저장소 없음 */ }
-    if (msg) flash(msg);
-    draw(); kick();
+  // 가운데 장면: 3D (WebGL이 없으면 2D 단면) · 아이콘 창
+  function paintView() {
+    $('sim').classList.toggle('is3d', !main2d);
+    ws.classList.toggle('main2d', main2d);
+    $('pip').hidden = !(ui.pip && !main2d); $('pip').classList.toggle('big', ui.big2d);
+    root.querySelectorAll('[data-pop]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.pop === '2d' ? (ui.pip || main2d) : b.dataset.pop === ui.pop)));
+    const P = POPS.find(x => x[0] === ui.pop);
+    $('pop').hidden = !P;
+    if (P) { $('pop-t').textContent = P[1]; $('pop-d').textContent = P[2]; root.querySelectorAll('[data-pp]').forEach(el => { el.hidden = el.dataset.pp !== ui.pop; }); }
+  }
+  function setPop(k) {
+    if (k === '2d') { if (main2d) return; ui.pip = !ui.pip; if (!ui.pip) $('sim2d').innerHTML = ''; try { localStorage.setItem('bim.simPip', ui.pip ? '1' : '0'); } catch { /* 저장소 없음 */ } }
+    else { ui.pop = ui.pop === k ? null : k; try { localStorage.setItem('bim.simPop', ui.pop || ''); } catch { /* 저장소 없음 */ } if (ui.pop === 'work') wKey = ''; }
+    paintView(); draw(); kick();
+  }
+  async function init3D() {
+    if (v3 || v3Loading) return;
+    v3Loading = true;
+    $('sim').innerHTML = '<div class="empty">3D 장면을 불러오는 중…</div>';
+    try {
+      const mod = await import('../ui/build3d.js');
+      if (!alive) return;
+      if (!mod.webglOK()) throw new Error('이 기기·브라우저에서 WebGL을 쓸 수 없습니다');
+      $('sim').innerHTML = '';
+      v3 = mod.createSim3D($('sim'), { plan: R.gen.plan, gen: R.gen, useMap: store.get().useMap !== false });
+      main2d = false;
+    } catch (e) { console.warn(e); v3 = null; main2d = true; flash(`3D를 열 수 없어 2D 단면으로 보여 줍니다. (${e.message})`); }
+    v3Loading = false;
+    paintView(); draw(); kick();
   }
   function play(from0) {
     if (reduce) { ui.p = 1; ui.playing = false; draw(); paintPlay(); return; }
@@ -464,13 +506,23 @@ export function mount(root) {
     if (e.target.id === 'c-reset') { update({ cond: {} }, null, false); return; }
     if (e.target.closest('#sim-play')) { if (ui.playing) { ui.playing = false; paintPlay(); draw(); } else play(false); return; }
     if (e.target.closest('#sim-re')) { play(true); return; }
-    const vb = e.target.closest('[data-view]'); if (vb) { if (vb.dataset.view !== ui.view || (vb.dataset.view === '3d' && !v3)) setView(vb.dataset.view); return; }
-    if (e.target.closest('#sim-sp')) { ui.speed = SPEEDS[(SPEEDS.indexOf(ui.speed) + 1) % SPEEDS.length]; $('sim-sp').textContent = spLabel(ui.speed); try { localStorage.setItem('bim.simSpeed', String(ui.speed)); } catch { /* 저장소 없음 */ } return; }
+    const pb = e.target.closest('[data-pop]'); if (pb) { setPop(pb.dataset.pop); return; }
+    if (e.target.closest('#pop-x')) { setPop(ui.pop); return; }
+    if (e.target.closest('#pip-x')) { setPop('2d'); return; }
+    if (e.target.closest('#pip-big')) { ui.big2d = !ui.big2d; paintView(); draw(); return; }
+    const tg = e.target.closest('[data-tog]'); if (tg) { const k = tg.dataset.tog, cls = k === 'nav' ? 'no-nav' : 'no-side'; ws.classList.toggle(cls); try { localStorage.setItem(k === 'nav' ? 'bim.simNav' : 'bim.simSide', ws.classList.contains(cls) ? '0' : '1'); } catch { /* 저장소 없음 */ } return; }
+    if (e.target.closest('#sws-fs')) { if (document.fullscreenElement) document.exitFullscreen?.(); else ws.requestFullscreen?.().catch(() => {}); return; }
+    const spb = e.target.closest('[data-sp]'); if (spb) { ui.speed = +spb.dataset.sp; root.querySelectorAll('[data-sp]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.sp === ui.speed))); try { localStorage.setItem('bim.simSpeed2', String(ui.speed)); } catch { /* 저장소 없음 */ } return; }
     const stp = e.target.closest('[data-step]'); if (stp) { const n = stepsOf().length; ui.p = Math.min(0.999, (+stp.dataset.step + 0.02) / n); ui.playing = false; paintPlay(); draw(); return; }
     const sd = e.target.closest('.stage-done.locked .sd-r'); if (sd) { e.preventDefault(); showWp(done); $('wz-sec').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     const gn = e.target.closest('#go-next.locked'); if (gn) { e.preventDefault(); showWp(Math.min(done, N - 1)); $('wz-sec').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   });
-  root.addEventListener('keydown', (e) => { const tr = e.target.closest('tr[data-goto]'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); tr.click(); } });
+  root.addEventListener('keydown', (e) => {
+    const tr = e.target.closest('tr[data-goto]'); if (tr && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); tr.click(); return; }
+    if (e.key === 'Escape' && ui.pop && !document.fullscreenElement) { setPop(ui.pop); }
+  });
+  const onFs = () => { ws.classList.toggle('fs', document.fullscreenElement === ws); };
+  document.addEventListener('fullscreenchange', onFs);
   let q = 0, pend = null;
   root.addEventListener('input', (e) => {
     const t = e.target;
@@ -495,7 +547,7 @@ export function mount(root) {
   renderAll();
   paintView();
   showWp(ui.cur, { autoplay: !reduce });
-  if (ui.view === '3d') { ui.view = '2d'; setView('3d'); }
+  init3D();
   setTimeout(gate, 0);
-  return () => { alive = false; if (v3) { v3.dispose(); v3 = null; } if (ui.raf) cancelAnimationFrame(ui.raf); io.disconnect(); document.removeEventListener('visibilitychange', onVis); mqN.removeEventListener('change', onMq); tip(null); };
+  return () => { alive = false; if (v3) { v3.dispose(); v3 = null; } if (ui.raf) cancelAnimationFrame(ui.raf); io.disconnect(); document.removeEventListener('visibilitychange', onVis); document.removeEventListener('fullscreenchange', onFs); mqN.removeEventListener('change', onMq); tip(null); };
 }
