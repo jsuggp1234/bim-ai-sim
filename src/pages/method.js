@@ -39,6 +39,7 @@ const tone = (v, goodIfNeg = true) => (Math.abs(v) < 1e-9 ? '' : (v < 0) === goo
 const CIRC = '①②③④⑤⑥⑦⑧⑨⑩⑪⑫';
 
 const SPEEDS = [0.5, 1, 2, 4];
+const AMB = 0.55; // 주변 움직임 속도 배율
 const spLabel = (v) => (v === 0.5 ? '½' : v) + '×';
 
 export function mount(root) {
@@ -296,15 +297,15 @@ export function mount(root) {
     const S = stepsOf();
     $('sim-steps').innerHTML = S.map((s, i) => `<li><button type="button" data-step="${i}"><span>${String(i + 1).padStart(2, '0')}</span>${escH(s.t)}</button></li>`).join('');
   }
-  // 한 단계에 약 8초 (1× 기준) — 공종 하나가 24~64초에 걸쳐 재생된다
-  const dur = () => Math.max(24, Math.min(64, stepsOf().length * 8)) / ui.speed;
+  // 한 단계에 약 15초 (1× 기준) — 공종 하나가 45~120초에 걸쳐 천천히 재생된다
+  const dur = () => Math.max(45, Math.min(120, stepsOf().length * 15)) / ui.speed;
   function loop(ts) {
     ui.raf = 0;
     if (!alive) return;
     const dt = ui.last ? Math.min(0.1, (ts - ui.last) / 1000) : 0; ui.last = ts;
     let need = false;
     if (ui.vis && !document.hidden) {
-      ui.T += dt;
+      ui.T += dt * AMB; // 장비·차량·사람의 움직임은 실제보다 느긋하게
       if (ui.playing) { ui.p = Math.min(1, ui.p + dt / dur()); if (ui.p >= 1) { ui.playing = false; paintPlay(); } need = true; }
       if (ui.roiT < 1) { ui.roiT = Math.min(1, ui.roiT + dt / 0.7); need = true; }
       if (!reduce) need = true; // 장비·진동 같은 주변 움직임

@@ -10,6 +10,7 @@ import { WP_BY_ID } from '../sim/methods.js';
 import { dateAt, ym } from '../sim/process.js';
 import { HOIST, elevSpeed } from '../sim/impact-more.js';
 import { buildCity } from './city3d.js';
+import { buildMethods, skinTex } from './method3d.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const MEPS = ['hvac', 'plumb', 'fire', 'elec', 'ict'], ROOMS = ['part', 'floor', 'ceil', 'paint'];
@@ -70,7 +71,7 @@ export function createSim3D(host, opts = {}) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   const wrap = document.createElement('div'); wrap.className = 's3';
   wrap.innerHTML = `<div class="s3-hud"><span class="s3-c"></span><b class="s3-t"></b></div><div class="s3-hud r"><span class="s3-d"></span><b class="s3-day"></b></div>
-    <div class="s3-lbs"></div><div class="s3-mks"></div><div class="s3-help">드래그 회전 · 휠/두 손가락 확대 · 우클릭 이동</div><button type="button" class="chipbtn s3-fit">시점 맞춤</button>`;
+    <div class="s3-lbs"></div><div class="s3-mks"></div><div class="s3-help">드래그 회전 · 휠/두 손가락 확대 · 우클릭 이동</div><div class="seg s3-vw" role="group" aria-label="3D 시점"><button type="button" data-v3="all" aria-pressed="true">전체 보기</button><button type="button" data-v3="focus" aria-pressed="false">작업 부위</button></div>`;
   wrap.prepend(renderer.domElement);
   host.appendChild(wrap);
   const $ = (s) => wrap.querySelector(s);
@@ -79,6 +80,7 @@ export function createSim3D(host, opts = {}) {
   scene.background = BG;
   scene.fog = new THREE.Fog(BG, 600, 1400);
   const cam = new THREE.PerspectiveCamera(38, 16 / 9, 0.5, 4000);
+  if (window.__S3DEBUG) window.__s3cam = cam;
   const ctl = new OrbitControls(cam, renderer.domElement);
   ctl.enableDamping = true; ctl.dampingFactor = 0.09; ctl.maxPolarAngle = Math.PI * 0.495; ctl.minDistance = 8; ctl.maxDistance = 1600; ctl.screenSpacePanning = true;
   scene.add(new THREE.HemisphereLight(0xf2f4ff, 0x40362a, 1.15));
@@ -87,7 +89,12 @@ export function createSim3D(host, opts = {}) {
 
   let userMoved = false, follow = { t: new THREE.Vector3(), has: false }, lastWp = null, built = null, disposed = false;
   ctl.addEventListener('start', () => { userMoved = true; });
-  $('.s3-fit').addEventListener('click', () => { userMoved = false; lastWp = null; });
+  // 시점: 전체 보기(기본, 현장·건물 전체를 고정 시점으로) · 작업 부위(작업 전선을 따라감). 다시 누르면 시점을 되돌린다
+  let viewMode = 'all';
+  try { if (localStorage.getItem('bim.sim3dView') === 'focus') viewMode = 'focus'; } catch { /* 저장소 없음 */ }
+  const paintVw = () => wrap.querySelectorAll('[data-v3]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v3 === viewMode)));
+  paintVw();
+  wrap.querySelectorAll('[data-v3]').forEach(b => b.addEventListener('click', () => { viewMode = b.dataset.v3; userMoved = false; lastWp = null; paintVw(); try { localStorage.setItem('bim.sim3dView', viewMode); } catch { /* 저장소 없음 */ } }));
 
   // 공유 형상·재질
   const BOX = new THREE.BoxGeometry(1, 1, 1); BOX.translate(0, 0, 0);
@@ -95,6 +102,7 @@ export function createSim3D(host, opts = {}) {
   const CONE = new THREE.ConeGeometry(0.5, 1, 8);
   const mats = new Map(), accMats = new Map(), all = [];
   const clipZ = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0.02); // z ≤ 0 만 남김
+  const clipUp = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0.3); // 지상(y > 0.3)과 겹치는 곳만 자를 때
   const clipList = [];
   function mat(color, o = {}) {
     const key = `${color}|${o.op ?? 1}|${o.em ?? 0}|${o.clip ? 1 : 0}|${o.wire ? 1 : 0}`;
@@ -111,7 +119,7 @@ export function createSim3D(host, opts = {}) {
   }
   function accOf(m) {
     if (accMats.has(m)) return accMats.get(m);
-    const a = m.clone(); a.color = m.color.clone().lerp(ACC, 0.6); a.emissive = ACC.clone(); a.emissiveIntensity = 0.12; if (m.clippingPlanes) { a.clippingPlanes = m.clippingPlanes; clipList.push(a); }
+    const a = m.clone(); a.color = m.color.clone().lerp(ACC, 0.12); a.emissive = ACC.clone(); a.emissiveIntensity = 0.05; if (m.clippingPlanes) { a.clippingPlanes = m.clippingPlanes; clipList.push(a); }
     accMats.set(m, a); return a;
   }
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
@@ -257,11 +265,12 @@ export function createSim3D(host, opts = {}) {
     // --- 외장 (층마다: 앞뒤 · 양옆) ---
     const [skC, skOp] = SKIN_C[ids.skin] || [COL.glass, 0.35];
     const glassy = skOp < 1;
-    const texX = glassy ? gridTex('#d6e4f2', 4, 0.9) : gridTex('#6b6b70', 2, 0.6), texZ = texX.clone();
+    const sTex = skinTex(ids.skin), cellW = sTex ? sTex.userData.cell : glassy ? 1.5 : 3;
+    const texX = sTex || (glassy ? gridTex('#d6e4f2', 4, 0.9) : gridTex('#6b6b70', 2, 0.6)), texZ = texX.clone();
     const fH = D.fh.length ? D.fh.reduce((a, b) => a + b, 0) / D.fh.length : 4;
     [texX, texZ].forEach(t => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.needsUpdate = true; });
-    texX.repeat.set((G.bx1 - G.bx0) / (glassy ? 1.5 : 3), 1); texZ.repeat.set(bd / (glassy ? 1.5 : 3), 1);
-    const skinMat = (tex) => { const m = new THREE.MeshStandardMaterial({ color: skC, map: tex, transparent: glassy, opacity: skOp, depthWrite: !glassy, roughness: glassy ? 0.15 : 0.8, metalness: glassy ? 0.3 : 0.05, side: THREE.DoubleSide, clippingPlanes: [] }); clipList.push(m); return m; };
+    texX.repeat.set((G.bx1 - G.bx0) / cellW, 1); texZ.repeat.set(bd / cellW, 1);
+    const skinMat = (tex) => { const m = new THREE.MeshStandardMaterial({ color: sTex && !glassy ? 0xffffff : skC, map: tex, transparent: glassy, opacity: skOp, depthWrite: !glassy, roughness: glassy ? 0.15 : 0.8, metalness: glassy ? 0.3 : 0.05, side: THREE.DoubleSide, clippingPlanes: [] }); clipList.push(m); return m; };
     const skinX = inst(BOX, skinMat(texX), NF * 2, 'skin'), skinZ = inst(BOX, skinMat(texZ), NF * 2, 'skin');
     // 창호·단열 (외장 안쪽 띠): 창호는 외장 띠 위에 테두리, 단열은 노란 층
     const glazI = inst(BOX, clipM(0xe7e7ea, { metal: 0.4 }), NF * 4, 'glaz');
@@ -302,6 +311,9 @@ export function createSim3D(host, opts = {}) {
     const fence = [0, 1, 2, 3].map(() => mesh(BOX, fenceM, 'prep'));
     const treeI = inst(CONE, mat(COL.tree), 60, 'land'), trunkI = inst(CYL, mat(COL.trunk), 60, 'land');
     const paveI = inst(BOX, mat(COL.pave), 4, 'land');
+
+    // 공법별 장면 (장비·부재·순서): 공통 부재를 숨기거나 덮어쓴다
+    const meth = buildMethods({ root, mat, clipM, inst, mesh, box, setBox, ibox, BOX, CYL, CONE, sc, D, clipList, R: { strata, bores, boreI, rigI, impI, walls, strutI, ancI, tdSlab, exc, trucks, pileI, matSlab, rig, bwpI, slabI, colI, core, formBox, acs, shoreI, rebarP, rebarTex, pourBox, cageI, sparkI, pump, boom, mixers, crane, mast, mastS, slew, jib, cjib, cwt, cab, apex, hookL, hookLoad, hMast, hCar, hCar2, skinX, skinZ, roofL, lv, strutZ, skinGlassy: glassy } });
 
     // ---------- 시각별 갱신 ----------
     function frameAt(st) {
@@ -381,7 +393,9 @@ export function createSim3D(host, opts = {}) {
       // 지상 골조
       const fl = structP * NF, nF = K('frame') ? Math.min(NF, Math.floor(fl)) : 0;
       slabI.count = nF; colI.count = colOff[nF];
-      ghost.visible = !K('frame') && !UNDER_WPS.has(wpId);
+      // 완성 볼륨 윤곽: 골조 전에는 건물 전체, 골조가 오르는 동안에는 아직 안 올라간 위쪽만 (전체 보기 위쪽 빈 하늘이 '올라갈 자리'로 읽히게)
+      ghost.visible = !UNDER_WPS.has(wpId) && (!K('frame') || nF < NF);
+      if (ghost.visible) { if (!K('frame') || nF === 0) setBox(ghost, G.bx0, G.bx1, 0, G.H, -bd / 2, bd / 2); else { const q = D.fp[NF - 1] || { x0: G.bx0, x1: G.bx1, z0: -bd / 2, z1: bd / 2 }; setBox(ghost, q.x0, q.x1, sc.floors[nF - 1].e1, G.H, q.z0, q.z1); } }
       const coreAhead = K('form') && sc.fx.coreAhead ? 4 : (ids.frame === 'hybrid' && K('frame') ? 3 : 0);
       const cn = Math.min(NF, nF + (structP > 0 ? coreAhead : 0)), ctop = K('frame') && cn > 0 ? sc.floors[cn - 1].e1 : 0;
       const hasCore = ctop > 0 && !['truss', 'module', 'stick', 'steel'].includes(ids.frame), cx0 = G.core.x0, cx1 = G.core.x1, cz = D.cz;
@@ -552,7 +566,8 @@ export function createSim3D(host, opts = {}) {
         for (let x = a; x <= b + 1e-6 && nrl < 214; x += sx) { ibox(railI, nrl++, x - 0.03, x + 0.03, y, y + 1.17, c, c + 0.06); if (!cutNow && nrl < 214) ibox(railI, nrl++, x - 0.03, x + 0.03, y, y + 1.17, d - 0.06, d); }
         for (let z = c; z <= d + 1e-6 && nrl < 218; z += sz) { ibox(railI, nrl++, a, a + 0.06, y, y + 1.17, z - 0.03, z + 0.03); if (nrl < 220) ibox(railI, nrl++, b - 0.06, b, y, y + 1.17, z - 0.03, z + 0.03); }
         // 추락 방지망: 짓는 층 아래 2개 층 바깥
-        const y0 = sc.floors[Math.max(0, nF - 2)].e0, y1 = y + 1.5, o = 0.9;
+        // 층고가 큰 물류·공장은 바닥에서 꼭대기까지 망이 덮어 골조가 안 보이므로 작업 층 아래 8m까지만
+        const y0 = Math.max(sc.floors[Math.max(0, nF - 2)].e0, y - 8), y1 = y + 1.5, o = 0.9;
         nets.forEach((n, i) => { n.visible = !(cutNow && i === 1); if (i === 0) setBox(n, a - o, b + o, y0, y1, c - o - 0.03, c - o); if (i === 1) setBox(n, a - o, b + o, y0, y1, d + o, d + o + 0.03); if (i === 2) setBox(n, a - o - 0.03, a - o, y0, y1, c - o, d + o); if (i === 3) setBox(n, b + o, b + o + 0.03, y0, y1, c - o, d + o); });
         // 낙하물 방지망: 10개 층마다 (짓는 층 3개 층 아래부터)
         for (let i = nF - 3; i > 0 && nfn < 16; i -= 10) { const yy = sc.floors[i].e1, p3 = D.fp[i]; ibox(fanI, nfn++, p3.x0 - 0.5, p3.x1 + 0.5, yy - 0.03, yy + 0.03, p3.z0 - 2.7, p3.z0 - 0.2, 0.35, 0); if (!cutNow) ibox(fanI, nfn++, p3.x0 - 0.5, p3.x1 + 0.5, yy - 0.03, yy + 0.03, p3.z1 + 0.2, p3.z1 + 2.7, -0.35, 0); ibox(fanI, nfn++, p3.x0 - 2.7, p3.x0 - 0.2, yy - 0.03, yy + 0.03, p3.z0 - 0.5, cutNow ? 0 : p3.z1 + 0.5, 0, -0.35); ibox(fanI, nfn++, p3.x1 + 0.2, p3.x1 + 2.7, yy - 0.03, yy + 0.03, p3.z0 - 0.5, cutNow ? 0 : p3.z1 + 0.5, 0, 0.35); }
@@ -565,15 +580,20 @@ export function createSim3D(host, opts = {}) {
       if (crane.visible && crane2) { occ.add(0); if (lanes.length > 1) occ.add(1); }
       if (trOn) { busy.add(0); busy.add(lanes.length - 1); }
       city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow });
+      const htop = hOn ? sc.floors[Math.min(NF, Math.max(1, Math.floor(fl))) - 1].e1 + (ids.hoist === 'jump' ? 0 : 3) : 0;
+      const dyn = meth.frame({ wpId, T, tau, K, P, dug, earthP, wallP, foundP, baseP, structP, skinP, topdown, underV, cutNow, nF, fl, fr, stage, active, f, fp, hasCore, ctop, cn, cx0, cx1, cz, top, Hc, nS, done, rtop, rfp, rp, matP, baseE, thick, plen, removeUpTo, pourNow, PX, MX, hOn, htop });
       owned.forEach(o => { if (o.count > o.instanceMatrix.count) o.count = o.instanceMatrix.count; }); // 용량을 넘는 인스턴스는 그리지 않는다
       // 강조: 지금 공종의 재질을 강조색으로
       // 설비 공종을 볼 때는 다른 설비·마감을, 실내 마감을 볼 때는 설비를 흐리게 (2D와 같은 규칙)
       const dimSet = MEPS.includes(wpId) ? DIM_FOR_MEP : ROOMS.includes(wpId) ? DIM_FOR_ROOM : null;
       byWp.forEach((list, wp) => { const on = wp === wpId || (wpId === 'mep' && sys[wp]) || (wpId === 'conc' && (wp === 'pour')); const dm = !on && dimSet && dimSet.has(wp); list.forEach(o => { const m = on ? accOf(o.userData.base) : dm ? dimOf(o.userData.base) : o.userData.base; if (o.material !== m) o.material = m; }); });
       // 실내 공종: 건물 앞쪽 절반을 잘라 속을 보인다
-      const cut = CUT_WPS.has(wpId);
-      clipList.forEach(m => { const want = cut ? 1 : 0; if (m.clippingPlanes.length !== want) { m.clippingPlanes = cut ? [clipZ] : []; m.needsUpdate = true; } });
-      return { top: Math.max(top, ctop) };
+      // 역타처럼 지하 공사 중에 지상 골조가 이미 올라가 있으면, 지상부만 앞쪽 절반을 잘라 아래 공사가 보이게 한다
+      const cut = CUT_WPS.has(wpId) ? 1 : UNDER_WPS.has(wpId) && top > 0.5 ? 2 : 0;
+      clipList.forEach(m => { const want = cut === 1 ? 1 : cut === 2 ? 2 : 0, ix = cut === 2; if (m.clippingPlanes.length !== want || m.clipIntersection !== ix) { m.clippingPlanes = cut === 1 ? [clipZ] : cut === 2 ? [clipZ, clipUp] : []; m.clipIntersection = ix; m.needsUpdate = true; } });
+      // 전체 보기 높이: 골조 전에는 완성 볼륨, 골조가 오르는 동안에는 지금 높이 + 크레인 여유까지
+      const hTop = Math.max(top, ctop), hView = !K('frame') || hTop >= G.H - 0.5 ? G.H : Math.min(G.H, hTop + Math.max(16, hTop * 0.25));
+      return { top: hTop, dyn, hv: hView };
     }
 
     function seg(o, x0, y0, z0, x1, y1, z1) {
@@ -589,7 +609,7 @@ export function createSim3D(host, opts = {}) {
     city.labels.forEach(l => labels.push({ under: false, ...l }));
     return {
       sc, D, root, frameAt, labels,
-      dispose() { city.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
+      dispose() { city.dispose(); meth.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
     };
   }
 
@@ -607,23 +627,40 @@ export function createSim3D(host, opts = {}) {
     const { sc, wpId, p, T, marks = [], at } = st;
     if (!built || built.sc !== sc) { built = build(sc); lastWp = null; }
     const win = winFor(sc, wpId), tau = win.s + clamp(p, 0, 1) * (win.e - win.s);
-    built.frameAt({ wpId, tau, T });
-    // 시점: 2D 카메라가 보는 범위를 따라간다
-    const roi = focusOf(sc, wpId, p), cx = (roi.x0 + roi.x1) / 2, ce = (roi.e0 + roi.e1) / 2, span = Math.max(roi.x1 - roi.x0, (roi.e1 - roi.e0) * cam.aspect);
-    const under = UNDER_WPS.has(wpId);
-    const tgt = new THREE.Vector3(cx, ce, under ? 0 : 0);
-    if (lastWp !== wpId) {
-      lastWp = wpId; userMoved = false;
-      const cutV = CUT_WPS.has(wpId), far = MEPS.includes(wpId) ? 1.7 : ROOMS.includes(wpId) ? 1.35 : 1.05;
-      const dist = clamp(span / (2 * Math.tan(cam.fov * Math.PI / 360)) / cam.aspect * far, 20, 1400);
-      const dir = new THREE.Vector3(under ? 0.42 : cutV ? 0.38 : 0.62, under ? 0.2 : cutV ? 0.3 : 0.42, 1).normalize();
-      follow.t.copy(tgt); follow.has = true;
-      if (!st.instant && ctl.target.lengthSq() > 0) { follow.anim = { t0: performance.now(), from: { p: cam.position.clone(), t: ctl.target.clone() }, to: { p: tgt.clone().addScaledVector(dir, dist), t: tgt.clone() } }; }
-      else { ctl.target.copy(tgt); cam.position.copy(tgt.clone().addScaledVector(dir, dist)); }
-    } else if (!userMoved) {
-      const d = tgt.clone().sub(ctl.target).multiplyScalar(0.08); ctl.target.add(d); cam.position.add(d);
+    const fres = built.frameAt({ wpId, tau, T });
+    // 시점: 전체 보기는 현장·건물 전체를 한 화면에 고정, 작업 부위는 2D 카메라가 보는 범위를 따라간다
+    const under = UNDER_WPS.has(wpId), cutV = CUT_WPS.has(wpId);
+    const now = performance.now(), dt = Math.min(0.25, (now - (follow.tl || now)) / 1000); follow.tl = now;
+    if (viewMode === 'all') {
+      // 건물이 올라가는 만큼 천천히 물러나며 지금 있는 것 전부를 화면에 담는다
+      const hv = fres && fres.hv != null ? fres.hv : sc.G.H;
+      if (lastWp !== wpId) {
+        lastWp = wpId; userMoved = false;
+        const v = wholeView(sc, built.D, wpId, cam, hv);
+        follow.has = true; follow.hv = hv; follow.goal = v;
+        if (!st.instant && ctl.target.lengthSq() > 0) follow.anim = { t0: now, from: { p: cam.position.clone(), t: ctl.target.clone() }, to: { p: v.pos, t: v.tgt } };
+        else { ctl.target.copy(v.tgt); cam.position.copy(v.pos); }
+      } else if (!userMoved && !follow.anim) {
+        if (Math.abs(hv - follow.hv) > 0.5) { follow.hv = hv; follow.goal = wholeView(sc, built.D, wpId, cam, hv); }
+        const g = follow.goal, k = 1 - Math.exp(-dt / 0.6);
+        if (g && k > 0) { cam.position.lerp(g.pos, k); ctl.target.lerp(g.tgt, k); }
+      }
+    } else {
+      const roi = focusOf(sc, wpId, p), cx = (roi.x0 + roi.x1) / 2, ce = (roi.e0 + roi.e1) / 2, span = Math.max(roi.x1 - roi.x0, (roi.e1 - roi.e0) * cam.aspect);
+      const tgt = new THREE.Vector3(cx, ce, 0);
+      if (lastWp !== wpId) {
+        lastWp = wpId; userMoved = false;
+        const far = MEPS.includes(wpId) ? 1.7 : ROOMS.includes(wpId) ? 1.35 : 1.05;
+        const dist = clamp(span / (2 * Math.tan(cam.fov * Math.PI / 360)) / cam.aspect * far, 20, 1400);
+        const dir = new THREE.Vector3(under ? 0.42 : cutV ? 0.38 : 0.62, under ? 0.2 : cutV ? 0.3 : 0.42, 1).normalize();
+        follow.t.copy(tgt); follow.has = true;
+        if (!st.instant && ctl.target.lengthSq() > 0) { follow.anim = { t0: performance.now(), from: { p: cam.position.clone(), t: ctl.target.clone() }, to: { p: tgt.clone().addScaledVector(dir, dist), t: tgt.clone() } }; }
+        else { ctl.target.copy(tgt); cam.position.copy(tgt.clone().addScaledVector(dir, dist)); }
+      } else if (!userMoved) {
+        const d = tgt.clone().sub(ctl.target).multiplyScalar(0.03); ctl.target.add(d); cam.position.add(d);
+      }
     }
-    if (follow.anim) { const k = clamp((performance.now() - follow.anim.t0) / 700, 0, 1), e = 1 - Math.pow(1 - k, 3); cam.position.lerpVectors(follow.anim.from.p, follow.anim.to.p, e); ctl.target.lerpVectors(follow.anim.from.t, follow.anim.to.t, e); if (k >= 1) follow.anim = null; }
+    if (follow.anim) { const k = clamp((now - follow.anim.t0) / 1100, 0, 1), e = 1 - Math.pow(1 - k, 3); cam.position.lerpVectors(follow.anim.from.p, follow.anim.to.p, e); ctl.target.lerpVectors(follow.anim.from.t, follow.anim.to.t, e); if (k >= 1) follow.anim = null; }
     ctl.update();
     renderer.render(scene, cam);
     // HUD
@@ -635,7 +672,7 @@ export function createSim3D(host, opts = {}) {
     const box = $('.s3-mks'), w = size[0], h = size[1];
     const html = marks.map(m => { const pos = atCache[m.mark]; if (!pos) return ''; const v = new THREE.Vector3(pos[0], pos[1], 0.5).project(cam); if (v.z > 1 || v.x < -1 || v.x > 1 || v.y < -1 || v.y > 1) return ''; return `<i class="s3-mk s${m.sev}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${m.n}</i>`; }).join('');
     if (mkHtml !== html) { box.innerHTML = html; mkHtml = html; }
-    const lh = built.labels.filter(l => (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId))).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
+    const lh = (fres && fres.dyn && fres.dyn.length ? built.labels.concat(fres.dyn) : built.labels).filter(l => (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId))).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
     if (lbHtml !== lh) { $('.s3-lbs').innerHTML = lh; lbHtml = lh; }
   }
   function dispose() {
@@ -648,6 +685,53 @@ export function createSim3D(host, opts = {}) {
   return { update, resize, dispose, el: wrap, canvas: renderer.domElement };
 }
 
+// 전체 보기 시점: 대지·건물(완성 높이)·인접 건물 일부·대로를 담는 상자를 카메라 방향에서 화면에 꼭 맞춘다
+function wholeView(sc, D, wpId, cam, hv = sc.G.H) {
+  const G = sc.G, under = UNDER_WPS.has(wpId), cutV = CUT_WPS.has(wpId);
+  // 대지 전체 + 건물(완성 높이)을 담는 상자들. 지하 공종은 단면(지층·흙막이·말뚝)과 장비 높이까지
+  // 상자 끝의 숫자는 화면 밖으로 조금 나가도 되는 정도 (대지 모서리 끝은 살짝 잘려도 괜찮다)
+  const dep = Math.max(G.depth || 0, 0), boxes = [];
+  if (under) boxes.push([-10, G.pw + 10, -Math.min(sc.dv - 1, Math.max(dep + 7, dep * 1.35, 12)), 22, -D.pd / 2 - 4, 4, 1]);
+  else {
+    boxes.push([-6, G.pw + 6, -Math.min(3, dep), 3, -D.pd / 2 - 1, D.pd / 2 + 1, 1.12]);
+    // 건물은 층마다 실제 바닥판 크기로 (저층부가 넓고 탑이 좁은 건물에서 빈 하늘이 남지 않게)
+    // hv: 담을 높이 (완성 높이 또는 지금 높이 + 여유)
+    const fl = sc.floors, n = fl.length, H = Math.min(G.H, hv);
+    let lastQ = null;
+    fl.forEach((f, i) => { const q = D.fp[i]; if (!q || f.e0 >= H) return; lastQ = q; boxes.push([q.x0 - 2, q.x1 + 2, i === 0 ? 0 : f.e0, Math.min(f.e1, H) + (i === n - 1 ? 6 : 0), q.z0 - 2, q.z1 + 2, 1]); });
+    if (!lastQ) boxes.push([G.bx0 - 3, G.bx1 + 3, 0, Math.max(8, H) + 6, -D.bd / 2 - 3, D.bd / 2 + 3, 1]);
+    // 양중 공종: 크레인 마스트 꼭대기까지
+    if (wpId === 'lift' || wpId === 'hoist') boxes.push([sc.crX - 3, sc.crX + 3, 0, Math.max(H, 24) + 14, -D.bd / 2 - 8, -D.bd / 2 - 2, 1]);
+    if (D.pod > 0) boxes.push([0, G.pw, 0, D.pod + 2, -D.pd / 2, D.pd / 2, 1]);
+  }
+  const lo = [0, 2, 4].map(k => Math.min(...boxes.map(b => b[k]))), hi = [1, 3, 5].map(k => Math.max(...boxes.map(b => b[k])));
+  // 지붕은 위에서 내려다봐야 재료 차이가 보인다
+  const dir = new THREE.Vector3(under ? 0.45 : cutV ? 0.42 : 0.62, under ? 0.5 : cutV ? 0.34 : wpId === 'roof' ? 0.85 : 0.4, 1).normalize();
+  const c = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2);
+  const up0 = new THREE.Vector3(0, 1, 0), right = new THREE.Vector3().crossVectors(up0, dir).normalize(), up = new THREE.Vector3().crossVectors(dir, right).normalize();
+  const tV = Math.tan(cam.fov * Math.PI / 360), tH = tV * cam.aspect;
+  const pts = []; boxes.forEach(b => { for (const x of [b[0], b[1]]) for (const y of [b[2], b[3]]) for (const z of [b[4], b[5]]) pts.push([new THREE.Vector3(x, y, z), b[6]]); });
+  // 1차: 원근 없이 어림한 거리 (모든 점이 카메라 앞에 오도록 넉넉하게)
+  let dist = 10;
+  for (const [q] of pts) {
+    const v = q.clone().sub(c), dx = Math.abs(v.dot(right)), dy = Math.abs(v.dot(up)), dz = v.dot(dir);
+    dist = Math.max(dist, dz + dx / tH, dz + dy / tV);
+  }
+  // 2차 원근 보정: 실제 투영 범위를 재서 가운데와 거리를 다시 맞춘다 (가까운 땅은 크게, 먼 꼭대기는 작게 보인다)
+  // 위쪽은 HUD(공법명·날짜)가 덮으므로 세로 중심을 조금 내리고, 가로는 화면 폭을 거의 다 쓴다
+  const tc = cam.clone(), FX = 0.95, FY = 0.88, YC = -0.04;
+  let zMin = Infinity; for (const [q] of pts) zMin = Math.min(zMin, -q.clone().sub(c).dot(dir));
+  for (let it = 0; it < 8; it++) {
+    tc.position.copy(c).addScaledVector(dir, dist); tc.lookAt(c); tc.updateMatrixWorld(); tc.updateProjectionMatrix();
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    pts.forEach(([q, s]) => { const v = q.clone().project(tc); x0 = Math.min(x0, v.x / s); x1 = Math.max(x1, v.x / s); y0 = Math.min(y0, v.y / s); y1 = Math.max(y1, v.y / s); });
+    const hx = dist * tH, hy = dist * tV;
+    c.addScaledVector(right, (x0 + x1) / 2 * hx).addScaledVector(up, ((y0 + y1) / 2 - YC) * hy);
+    const k = Math.max((x1 - x0) / 2 / FX, (y1 - y0) / 2 / FY);
+    dist = Math.max(dist * clamp(1 + (k - 1) * 0.9, 0.6, 1.6), -zMin + 12);
+  }
+  return { tgt: c, pos: c.clone().addScaledVector(dir, dist) };
+}
 // 격자 무늬 (철근 배근 · 커튼월 멀리언)
 function gridTex(color, lw = 6, alpha = 1) {
   const c = document.createElement('canvas'); c.width = c.height = 64;
