@@ -59,7 +59,7 @@ export function mount(root) {
   let R = pipeline();
   let done = getDone();
   const ui = { cur: Math.min(done, N - 1), grp: null, p: 0, T: 0, playing: false, speed: 1, roi: null, roiFrom: null, roiT: 1, raf: 0, last: 0, vis: true, at: null, atT: 0, pop: null, pip: false, big2d: false };
-  let v3 = null, v3Loading = false, main2d = false; // 3D가 기본 (WebGL이 없으면 2D 단면이 가운데로)
+  let v3 = null, v3Loading = false, main2d = false, v3Err = ''; // 3D가 기본 (WebGL이 없으면 2D 단면이 가운데로)
   try { const sp = +localStorage.getItem('bim.simSpeed2'); if (SPEEDS.includes(sp)) ui.speed = sp; const pp = localStorage.getItem('bim.simPop'); if (POPS.some(x => x[0] === pp) && pp !== '2d') ui.pop = pp; ui.pip = localStorage.getItem('bim.simPip') === '1'; } catch { /* 저장소 없음 */ }
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // 휴대폰 폭에서는 세로형 화면으로 다시 그린다
@@ -305,7 +305,7 @@ export function mount(root) {
       const S3 = stepsOf(), k3 = Math.min(S3.length - 1, Math.floor(ui.p * S3.length * 0.999)), s3 = S3[k3];
       const step = s3 && s3.opt !== '' ? { wp: L.wp.id, a: classify(L.wp.id, s3.opt, s3.w || s3.t), k: k3, n: S3.length } : null;
       try { v3.update({ sc: scene, wpId: L.wp.id, p: ui.p, T: ui.T, marks, at: ui.at, step }); }
-      catch (e) { console.error(e); v3.dispose(); v3 = null; main2d = true; paintView(); flash('3D 장면을 그리지 못해 2D 단면으로 보여 줍니다.'); return; }
+      catch (e) { if (v3Err !== e.message) { v3Err = e.message; console.error(e); } } // 한 장면이 실패해도 3D를 끄지 않는다 (2D 단면은 아이콘으로 열 때만)
     }
     const S = stepsOf(), k = Math.min(S.length - 1, Math.floor(ui.p * S.length * 0.999));
     $('sim-cap').innerHTML = `<span class="sc-n">${String(k + 1).padStart(2, '0')} / ${String(S.length).padStart(2, '0')}</span><b>${escH(S[k].t)}</b>${S[k].d ? `<span>${escH(S[k].d)}</span>` : ''}`;

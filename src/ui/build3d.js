@@ -140,6 +140,10 @@ export function createSim3D(host, opts = {}) {
   }
 
   let userMoved = false, follow = { t: new THREE.Vector3(), has: false }, lastWp = null, built = null, disposed = false;
+  // 장면 일부(장비·차량·사람 등)가 그리다 실패해도 3D는 끄지 않는다: 그 부분만 건너뛰고 같은 오류는 한 번만 알린다
+  const seenErr = new Set(); let badSc = null;
+  const report = (where, e) => { const k = where + '|' + (e && e.message); if (seenErr.has(k)) return; seenErr.add(k); console.error(`[3D] ${where}:`, e); if (window.__S3DEBUG) (window.__s3errs || (window.__s3errs = [])).push({ where, msg: String(e && e.message), stack: String(e && e.stack).split('\n').slice(0, 6).join(' | ') }); };
+  const safe = (where, fn, fb) => { try { return fn(); } catch (e) { report(where, e); return fb; } };
   // 넓은 주변 맥락: 먼저 자동 생성(바로), 실제 지도(OpenStreetMap)를 받으면 바꾼다
   const plan = opts.plan || (opts.gen && opts.gen.plan) || null, gen = opts.gen || null;
   let ctxSrc = null, ctxObj = null, ctxKey = '', ctxN = 0;
@@ -702,7 +706,7 @@ export function createSim3D(host, opts = {}) {
       if (crane.visible && crane2) { occ.add(0); if (lanes.length > 1) occ.add(1); }
       const io = { hot: [], tags: [], bays: {} };
       const htop = hOn ? sc.floors[Math.min(NF, Math.max(1, Math.floor(fl))) - 1].e1 + (ids.hoist === 'jump' ? 0 : 3) : 0;
-      const dyn = meth.frame({ wpId, T, tau, K, P, dug, earthP, wallP, foundP, baseP, structP, skinP, topdown, underV, cutNow, nF, fl, fr, stage, active, f, fp, hasCore, ctop, cn, cx0, cx1, cz, top, Hc, nS, done, rtop, rfp, rp, matP, baseE, thick, plen, removeUpTo, pourNow, PX, MX, hOn, htop, io });
+      const dyn = safe('공법 장면', () => meth.frame({ wpId, T, tau, K, P, dug, earthP, wallP, foundP, baseP, structP, skinP, topdown, underV, cutNow, nF, fl, fr, stage, active, f, fp, hasCore, ctop, cn, cx0, cx1, cz, top, Hc, nS, done, rtop, rfp, rp, matP, baseE, thick, plen, removeUpTo, pourNow, PX, MX, hOn, htop, io }), []);
       if (io.bays.pump) occ.add(0); // 펌프카가 선 차로
       // 물류: 덤프(상차 자리) · 레미콘(펌프카 호퍼) · 자재 트레일러(하역 자리)
       const dlvKind = !UNDER_WPS.has(wpId) && !pump.visible && !io.bays.pump && P(wpId) > 0 && P(wpId) < 1 ? DLV(wpId, aNow) : null;
@@ -710,7 +714,7 @@ export function createSim3D(host, opts = {}) {
       // 도로 하역 자리: 펌프·레미콘이 바깥 차로를 쓰고 있으면 그 반대쪽 끝으로
       const roadZ = () => { const z = clamp(-bd / 2 - 4, -pd / 2 + 4, pd / 2 - 12), pz = io.bays.pump ? io.bays.pump.z - io.bays.pump.nose * 5.6 : null; return pz == null || Math.abs(z - pz) > 26 ? z : [-pd / 2 + 12, pd / 2 - 12].sort((a, b) => Math.abs(b - pz) - Math.abs(a - pz))[0]; };
       if (dlvKind) { const ex = Math.max(G.bx1, ...D.fp.filter((q, i) => sc.floors[i] && sc.floors[i].e0 < 6).map(q => q.x1)), ws = pw - ex; dlvBay = ws >= 8.6 ? { x: ex + ws / 2 + 0.6, z: pd / 2 - 10.5, hx: 0, hz: 1, inside: true } : { road: true, z: roadZ() }; }
-      const fl3 = fleet.frame({ T, haul: trOn ? { bay: io.bays.haul || { road: true, z: pd / 2 - 8 } } : null, mix: io.bays.pump ? { pump: io.bays.pump } : null, dlv: dlvKind ? { bay: dlvBay, kind: dlvKind } : null });
+      const fl3 = safe('물류 차량', () => fleet.frame({ T, haul: trOn ? { bay: io.bays.haul || { road: true, z: pd / 2 - 8 } } : null, mix: io.bays.pump ? { pump: io.bays.pump } : null, dlv: dlvKind ? { bay: dlvBay, kind: dlvKind } : null }), { busy: new Set(), tags: [] });
       fl3.busy.forEach(l => busy.add(l));
       // 장비 둘레 사람: 굴착기·크람쉘 옆 신호수, 펌프카 호스 끝 호스 잡이·진동 다짐, 천공기 옆 신호수·유도원
       io.hot.forEach((h, i) => {
@@ -718,7 +722,7 @@ export function createSim3D(host, opts = {}) {
         else if (h.k === 'hose') { [-0.7, 0.7].forEach((o2, j) => work.push(crewAt('hose', h.x + o2, h.y + 0.02, h.z + 1.3, [h.x, h.z - 2], T, 50 + i * 2 + j))); work.push(crewAt('vibrate', h.x - 2.4, h.y + 0.02, h.z + 2.2, [h.x, h.z], T, 60 + i)); }
         else if (h.k === 'rig') { work.push(crewAt('signal', h.x + 5, h.y + 0.02, h.z + 5, [h.x, h.z], T, 70 + i)); work.push(crewAt('guide', h.x - 2.6, h.y + 0.02, h.z + 3.2, [h.x, h.z], T, 80 + i)); }
       });
-      city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow || !!dlvKind }); if (window.__S3DEBUG) window.__s3work = work;
+      safe('주변 가로·사람', () => city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow || !!dlvKind })); if (window.__S3DEBUG) window.__s3work = work;
       // 장비 이름표: 공법 장비 + 물류 차량 + 타워크레인·호이스트
       const eqTags = [...io.tags, ...fl3.tags];
       if (crane.visible && (FRW.includes(wpId) || wpId === 'skin')) eqTags.push({ t: { tower: '타워크레인 (T형)', luffing: '러핑 타워크레인', crawler: '크롤러 크레인', ringer: '링거 크레인', mobile: '이동식 크레인' }[ids.lift] || '크레인', p: [crane.position.x, (ids.lift === 'tower' || ids.lift === 'luffing' ? Hc : 30) + 5, crane.position.z], cls: 'eq' });
@@ -784,9 +788,9 @@ export function createSim3D(host, opts = {}) {
     if (disposed) return;
     resize();
     const { sc, wpId, p, T, marks = [], at } = st;
-    if (!built || built.sc !== sc) { built = build(sc); lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); if (window.__S3DEBUG) window.__s3dim = { pw: sc.G.pw, pd: built.D.pd, H: sc.G.H, depth: sc.G.depth, lanes: sc.city && sc.city.lanes, yard: sc.city && sc.city.yard }; }
+    if (!built || built.sc !== sc) { if (badSc === sc) return; const nb = safe('장면 만들기', () => build(sc), null); if (!nb) { badSc = sc; built = null; return; } built = nb; lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); if (window.__S3DEBUG) window.__s3dim = { pw: sc.G.pw, pd: built.D.pd, H: sc.G.H, depth: sc.G.depth, lanes: sc.city && sc.city.lanes, yard: sc.city && sc.city.yard }; }
     const win = winFor(sc, wpId), tau = win.s + clamp(p, 0, 1) * (win.e - win.s);
-    const fres = built.frameAt({ wpId, tau, T, step: st.step });
+    const fres = safe(`장면 진행 (${wpId})`, () => built.frameAt({ wpId, tau, T, step: st.step }), null);
     // 시점: 전체 보기는 현장·건물 전체를 한 화면에 고정, 작업 부위는 2D 카메라가 보는 범위를 따라간다
     const under = UNDER_WPS.has(wpId), cutV = CUT_WPS.has(wpId);
     const now = performance.now(), dt = Math.min(0.25, (now - (follow.tl || now)) / 1000); follow.tl = now;
@@ -821,7 +825,7 @@ export function createSim3D(host, opts = {}) {
     }
     if (follow.anim) { const k = clamp((now - follow.anim.t0) / 1100, 0, 1), e = 1 - Math.pow(1 - k, 3); cam.position.lerpVectors(follow.anim.from.p, follow.anim.to.p, e); ctl.target.lerpVectors(follow.anim.from.t, follow.anim.to.t, e); if (k >= 1) follow.anim = null; }
     ctl.update();
-    tickWater(); look.render(cam);
+    tickWater(); if (!window.__S3NORENDER) look.render(cam);
     // HUD
     const wp = WP_BY_ID[wpId], o = wp.multi ? `${sc.qa.length}개 기술` : (wp.opts.find(x => x.id === sc.ids[wpId]) || { name: '' }).name;
     $('.s3-c').textContent = `// SIM_${wp.code} · 3D`; $('.s3-t').textContent = o;
