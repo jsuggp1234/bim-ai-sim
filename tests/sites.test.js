@@ -9,7 +9,7 @@ import { SITE_IDS, resolveSite, xzToLL } from '../src/sim/sites.js';
 import { paramsForSite } from '../src/store.js';
 import { fallbackFor } from '../src/sim/ctxload.js';
 import { inPoly } from '../src/sim/ctxmodel.js';
-import { parseOSM } from '../src/sim/osm.js';
+import { parseOSM, assembleCoast } from '../src/sim/osm.js';
 import { findCrossings } from '../src/sim/scene/context3d.js';
 
 const run = (sel) => {
@@ -83,4 +83,27 @@ test('지도(OSM) 해석: 건물 높이, 도로 차선, 수면, 교차로', () =
     { pts: [[0, -300], [0, 300]], w: 14, rank: 4 },
   ]);
   assert.ok(cr.length === 1 && Math.abs(cr[0].x) < 1 && Math.abs(cr[0].z) < 1, JSON.stringify(cr));
+});
+
+test('해안선 → 바다 다각형: 왼쪽 육지, 섬은 구멍, 만(灣)', () => {
+  const B = 3600;
+  const isle = Array.from({ length: 25 }, (_, i) => { const a = i / 24 * Math.PI * 2; return [300 * Math.cos(a), 2000 - 300 * Math.sin(a)]; });
+  // 서→동으로 가는 해안선(z = 1200 근처, 두 조각) → 남쪽(z > 1200)이 바다
+  const seas = assembleCoast([[[-6000, 1150], [0, 1250]], [[0, 1250], [6000, 1180]], isle], B);
+  assert.equal(seas.length, 1);
+  const inSea = (x, z) => seas.some(w => inPoly(x, z, w.outer) && !w.holes.some(h => inPoly(x, z, h)));
+  assert.ok(!inSea(0, 0) && !inSea(-3000, 1000), '육지');
+  assert.ok(inSea(0, 3000) && inSea(-3500, 1500) && inSea(3500, 3500), '바다');
+  assert.ok(!inSea(0, 2000) && seas[0].holes.length === 1, '섬');
+  // 만: 남쪽 변으로 들어와 북쪽으로 파고들었다가 다시 남쪽 변으로 나간다 (동→서로 돌아 나오므로 안쪽이 바다)
+  const bay = assembleCoast([[[1500, 5000], [1500, 0], [-1500, 0], [-1500, 5000]].reverse()], B);
+  const inBay = (x, z) => bay.some(w => inPoly(x, z, w.outer));
+  assert.equal(bay.length, 1);
+  assert.ok(inBay(0, 2000) && !inBay(2500, 2000) && !inBay(0, -1000), JSON.stringify(bay[0].outer));
+  // 지도 해석에 붙어 수면으로 들어가고 '바다' 이름표가 생긴다
+  const site = resolveSite({ id: 'yongsan' });
+  const ll = (x, z) => { const [lat, lon] = xzToLL(site.lat, site.lng, x, z); return { lat, lon }; };
+  const ctx = parseOSM([{ type: 'way', id: 9, tags: { natural: 'coastline' }, nodes: [1, 2, 3], geometry: [ll(-6000, 900), ll(0, 950), ll(6000, 900)] }], site);
+  assert.ok(ctx.water.length === 1 && ctx.water[0].sea && inPoly(0, 2000, ctx.water[0].outer) && !inPoly(0, 0, ctx.water[0].outer));
+  assert.ok(ctx.labels.some(l => l.text === '바다'));
 });

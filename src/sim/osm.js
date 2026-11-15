@@ -10,10 +10,10 @@ const ENDPOINTS = [
   'https://overpass.kumi.systems/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
-const VER = 'v2';
+const VER = 'v3';
 
 export function queries(lat, lng, R = {}) {
-  const r = { bldg: 1000, major: 2300, minor: 1200, area: 2700, rail: 2300, peak: 8000, ...R };
+  const r = { bldg: 1000, major: 2300, minor: 1200, area: 2700, rail: 2300, peak: 8000, coast: 5200, ...R };
   const A = (rad) => `(around:${rad},${lat.toFixed(6)},${lng.toFixed(6)})`;
   const feat = `[out:json][timeout:90];(
 way["highway"~"^(motorway|trunk|primary|secondary|tertiary|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"]${A(r.major)};
@@ -26,6 +26,7 @@ way["leisure"~"^(park|garden|golf_course|pitch|playground)$"]${A(r.area)};relati
 way["landuse"~"^(forest|grass|recreation_ground|meadow|cemetery|village_green)$"]${A(r.area)};relation["landuse"~"^(forest|grass)$"]${A(r.area)};
 way["natural"~"^(wood|scrub|grassland)$"]${A(r.area)};relation["natural"="wood"]${A(r.area)};
 node["natural"="peak"]${A(r.peak)};
+way["natural"="coastline"]${A(r.coast)};
 );out geom qt;`;
   const bldg = `[out:json][timeout:90];(way["building"]${A(r.bldg)};relation["building"]${A(r.bldg)};);out geom qt;`;
   return { feat, bldg };
@@ -127,6 +128,79 @@ export function clipRing(ring, B) {
   return out;
 }
 
+// 해안선(natural=coastline) → 바다 다각형. OSM 해안선은 진행 방향 왼쪽이 육지, 오른쪽이 바다.
+// lines: [[x, z], ...] 조각들 (x 동쪽, z 남쪽), B: 상자 반폭. 반환 [{ outer, holes }] (x, z)
+// 수학 좌표(u = x, w = -z, 위가 북)에서: 해안선 조각을 상자로 자르고, 나간 점에서 상자 둘레를 시계 방향으로 돌아
+// 다음 들어오는 조각으로 이어 가면 바다가 늘 오른쪽에 있는 닫힌 고리(시계 방향)가 된다. 상자 안에 닫힌 반시계 고리는 섬.
+export function assembleCoast(lines, B) {
+  const key = (p) => p[0].toFixed(1) + ',' + p[1].toFixed(1);
+  const segs = lines.filter(l => l.length > 1).map(l => l.map(([x, z]) => [x, -z]));
+  // 1) 끝 → 처음이 같은 조각끼리 잇기
+  const starts = new Map(); segs.forEach((s, i) => { const k = key(s[0]); if (!starts.has(k)) starts.set(k, i); });
+  const ends = new Set(segs.map(s => key(s[s.length - 1])));
+  const used = new Uint8Array(segs.length), chains = [];
+  const order = [...segs.keys()].sort((a, b) => (ends.has(key(segs[a][0])) ? 1 : 0) - (ends.has(key(segs[b][0])) ? 1 : 0));
+  for (const i of order) {
+    if (used[i]) continue; used[i] = 1; let c = segs[i].slice(), g = 0;
+    while (g++ < 100000) { const j = starts.get(key(c[c.length - 1])); if (j == null || used[j]) break; used[j] = 1; c = c.concat(segs[j].slice(1)); }
+    chains.push(c);
+  }
+  const inBox = (p) => Math.abs(p[0]) <= B && Math.abs(p[1]) <= B;
+  const area = (r) => { let a = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
+  // 둘레 위치 s: 왼쪽 위(-B, B)에서 시계 방향으로 0..8B
+  const S = ([u, w]) => { const d = [Math.abs(w - B), Math.abs(u - B), Math.abs(w + B), Math.abs(u + B)], m = d.indexOf(Math.min(...d)); return m === 0 ? u + B : m === 1 ? 3 * B - w : m === 2 ? 5 * B - u : 7 * B + w; };
+  const CORNER = [[0, [-B, B]], [2 * B, [B, B]], [4 * B, [B, -B]], [6 * B, [-B, -B]]];
+  // 선분을 상자로 자르기 (Liang–Barsky) → [t0, t1] | null
+  const lb = (a, b) => {
+    let t0 = 0, t1 = 1; const dx = b[0] - a[0], dy = b[1] - a[1];
+    for (const [p, q] of [[-dx, a[0] + B], [dx, B - a[0]], [-dy, a[1] + B], [dy, B - a[1]]]) {
+      if (p === 0) { if (q < 0) return null; continue; }
+      const r = q / p; if (p < 0) { if (r > t1) return null; if (r > t0) t0 = r; } else { if (r < t0) return null; if (r < t1) t1 = r; }
+    }
+    return [t0, t1];
+  };
+  const L = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  const pieces = [], islands = [], lakes = [];
+  chains.forEach(c0 => {
+    let c = c0;
+    const closed = c.length > 3 && key(c[0]) === key(c[c.length - 1]);
+    if (closed) {
+      const ring = c.slice(0, -1);
+      if (ring.every(inBox)) { (area(ring) > 0 ? islands : lakes).push(ring); return; }
+      const k = ring.findIndex(p => !inBox(p)); c = [...ring.slice(k), ...ring.slice(0, k), ring[k]];
+    }
+    let cur = null;
+    for (let i = 0; i + 1 < c.length; i++) {
+      const a = c[i], b = c[i + 1], r = lb(a, b);
+      if (!r) { cur = null; continue; }
+      if (r[0] > 0) cur = { pts: [L(a, b, r[0])], sIn: S(L(a, b, r[0])) };
+      else if (!cur) cur = { pts: [a], sIn: null };
+      cur.pts.push(L(a, b, r[1]));
+      if (r[1] < 1) { cur.sOut = S(L(a, b, r[1])); if (cur.sIn != null) pieces.push(cur); cur = null; }
+    }
+  });
+  const P8 = 8 * B, fw = (a, b) => ((b - a) % P8 + P8) % P8;
+  const seas = [], done = new Set();
+  pieces.forEach(p0 => {
+    if (done.has(p0)) return;
+    const ring = []; let cur = p0, g = 0;
+    while (g++ < pieces.length + 2) {
+      done.add(cur); ring.push(...cur.pts);
+      let best = null, bd = Infinity;
+      pieces.forEach(q => { if (done.has(q) && q !== p0) return; const d = fw(cur.sOut, q.sIn); if (d < bd) { bd = d; best = q; } });
+      CORNER.map(([s, p]) => [fw(cur.sOut, s), p]).filter(([d]) => d > 0 && d < bd).sort((a, b) => a[0] - b[0]).forEach(([, p]) => ring.push(p));
+      if (!best || best === p0) break;
+      cur = best;
+    }
+    if (ring.length >= 3 && area(ring) < 0) seas.push({ outer: ring, holes: [] });
+  });
+  lakes.forEach(r => seas.push({ outer: r, holes: [] }));
+  if (!pieces.length && islands.length) seas.push({ outer: [[-B, B], [B, B], [B, -B], [-B, -B]], holes: [] });
+  islands.forEach(r => { const s = seas.find(w => inPoly(r[0][0], r[0][1], w.outer)); if (s) s.holes.push(r); });
+  const back = (r) => r.map(([u, w]) => [u, -w]);
+  return seas.map(s => ({ outer: back(s.outer), holes: s.holes.map(back) }));
+}
+
 const BUILD_KIND = (t, levels, h) => {
   const b = t.building;
   if (/^(apartments|dormitory)$/.test(b)) return levels >= 5 || h >= 15 ? 'res' : 'house';
@@ -160,7 +234,7 @@ export function parseOSM(elements, site) {
   const P = (g) => llToXZ(lat0, lng0, g.lat, g.lon);
   const BOUND = 3600;
   const nodeUse = new Map(); // 교차점 찾기: 차도 노드 사용 횟수
-  const roadsTmp = [];
+  const roadsTmp = [], coast = [];
   for (const el of elements) {
     const t = el.tags || {};
     if (el.type === 'node') {
@@ -226,6 +300,7 @@ export function parseOSM(elements, site) {
       ctx.rails.push({ pts: wayPts, bridge: isBridge(t), kind: t.railway });
       continue;
     }
+    if (t.natural === 'coastline' && el.type === 'way' && wayPts && wayPts.length > 1) { coast.push(wayPts); continue; }
     if ((t.waterway === 'stream' || t.waterway === 'canal') && el.type === 'way' && wayPts && !isTunnel(t)) {
       ctx.streams.push({ pts: wayPts, w: Math.min(30, num(t.width) || (t.waterway === 'canal' ? 10 : 6)), name: t.name || '' });
       continue;
@@ -242,6 +317,10 @@ export function parseOSM(elements, site) {
       });
     }
   }
+  // 바다: 해안선을 이어 상자 안의 바다 다각형으로 (섬은 구멍)
+  // 상자 변에 닿은 점은 수평선까지 밀어 바다가 지도 끝에서 끊기지 않게
+  const far = (r) => r.map(([x, z]) => [Math.abs(x) > BOUND - 0.01 ? Math.sign(x) * 24000 : x, Math.abs(z) > BOUND - 0.01 ? Math.sign(z) * 24000 : z]);
+  if (coast.length) assembleCoast(coast, BOUND).forEach(w => ctx.water.push({ outer: far(w.outer), holes: w.holes, name: '바다', sea: true }));
   // 교차점: 차도 노드가 두 길 이상에서 쓰이면, 각 길의 진행 방향(교차점에서 나가는 방향)을 모은다
   ctx.roads = roadsTmp;
   const xs = [];

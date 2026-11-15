@@ -16,8 +16,12 @@ import { readPalette } from '../sim/scene/palette.js';
 import { FACADE_U } from '../sim/scene/facade.js';
 import { simTex, simTexAniso, triplanar, keepTriplanar } from './simtex.js';
 import { buildSimContext } from './simctx.js';
+import { crewPlan, crewAt, CREW_KINDS } from './crew3d.js';
+import { buildFleet } from './fleet3d.js';
+import { ARCH } from './workstep.js';
 import { fallbackFor, osmFor, osmReady } from '../sim/ctxload.js';
 import { OSM_ATTRIB } from '../sim/osm.js';
+import { tickWater } from '../sim/scene/water.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const MEPS = ['hvac', 'plumb', 'fire', 'elec', 'ict'], ROOMS = ['part', 'floor', 'ceil', 'paint'];
@@ -25,6 +29,18 @@ const DIM_FOR_MEP = new Set([...MEPS, 'mep', 'part', 'paint', 'ceil', 'floor', '
 const DIM_FOR_ROOM = new Set([...MEPS, 'mep', 'insul', 'glaz', 'comm']);
 const lerp = (a, b, t) => a + (b - a) * t;
 
+// 자재 트레일러가 싣고 오는 것 (공종·작업 유형마다)
+function DLV(wpId, a) {
+  if (a === 'rebar' || wpId === 'rebar') return 'rebar';
+  if (a === 'form' || wpId === 'form') return 'form';
+  if (a === 'steel' || wpId === 'steel') return 'steel';
+  if (a === 'precast') return 'pc';
+  if (wpId === 'frame' || wpId === 'lift') return a === 'steel' ? 'steel' : 'rebar';
+  if (wpId === 'skin' || wpId === 'glaz' || a === 'curtain') return 'cw';
+  if (['hvac', 'plumb', 'fire', 'elec', 'ict', 'mep'].includes(wpId)) return 'mep';
+  if (['part', 'ceil', 'floor', 'paint', 'insul', 'roof', 'hoist', 'elev'].includes(wpId)) return 'pallet';
+  return null;
+}
 export function webglOK() {
   try { const c = document.createElement('canvas'); return !!(window.WebGLRenderingContext && (c.getContext('webgl2') || c.getContext('webgl'))); } catch { return false; }
 }
@@ -79,7 +95,7 @@ export function createSim3D(host, opts = {}) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const wrap = document.createElement('div'); wrap.className = 's3';
-  wrap.innerHTML = `<div class="s3-hud"><span class="s3-c"></span><b class="s3-t"></b></div><div class="s3-hud r"><span class="s3-d"></span><b class="s3-day"></b></div>
+  wrap.innerHTML = `<div class="s3-hud"><span class="s3-c"></span><b class="s3-t"></b></div><div class="s3-hud r"><span class="s3-d"></span><b class="s3-day"></b></div><div class="s3-now" hidden></div>
     <div class="s3-lbs"></div><div class="s3-mks"></div><div class="s3-help">드래그 회전 · 휠/두 손가락 확대 · 우클릭 이동</div><div class="s3-attr" hidden></div><div class="seg s3-vw" role="group" aria-label="3D 시점"><button type="button" data-v3="all" aria-pressed="true">전체 보기</button><button type="button" data-v3="focus" aria-pressed="false">작업 부위</button></div>`;
   wrap.prepend(renderer.domElement);
   host.appendChild(wrap);
@@ -101,7 +117,7 @@ export function createSim3D(host, opts = {}) {
   FACADE_U.uGlass.value.copy(P.glass); FACADE_U.uFilm.value.copy(P.film); FACADE_U.uInterior.value.copy(P.interior); FACADE_U.uLit.value.copy(P.lit); FACADE_U.uFrame.value.copy(P.frame); FACADE_U.uNight.value = 0;
   const cam = new THREE.PerspectiveCamera(38, 16 / 9, 0.6, 12000);
   if (window.__S3DEBUG) { window.__s3cam = cam; window.__s3r = renderer; }
-  const ctl = new OrbitControls(cam, renderer.domElement);
+  const ctl = new OrbitControls(cam, renderer.domElement); if (window.__S3DEBUG) window.__s3ctl = ctl;
   ctl.enableDamping = true; ctl.dampingFactor = 0.09; ctl.maxPolarAngle = Math.PI * 0.495; ctl.minDistance = 8; ctl.maxDistance = 3200; ctl.screenSpacePanning = true;
   // 해: 대로 쪽 앞에서 비스듬히 (보이는 면이 밝고, 그림자는 뒤·왼쪽으로)
   const sunDir = new THREE.Vector3(0.62, 0.78, 0.42).normalize();
@@ -147,7 +163,7 @@ export function createSim3D(host, opts = {}) {
       scene.add(ctxObj.group); ctxKey = key;
       built.city.ground.forEach(o => { o.visible = false; });
       const at = $('.s3-attr'); at.hidden = ctxSrc.source !== 'osm'; at.textContent = OSM_ATTRIB;
-      if (window.__S3DEBUG) window.__s3ctx = ctxObj.stats;
+      if (window.__S3DEBUG) { window.__s3ctx = ctxObj.stats; window.__s3ctxSrc = ctxSrc; window.__s3ctxObj = ctxObj; }
     } catch (e) { console.warn('주변 맥락', e); ctxObj = null; built.city.ground.forEach(o => { o.visible = true; }); }
   }
   ctl.addEventListener('start', () => { userMoved = true; });
@@ -243,6 +259,7 @@ export function createSim3D(host, opts = {}) {
     // 주변 가로: 대로·보도·건너편 블록·이면도로·인접 건물·통행 차량·매설물·출입구 (city3d.js)
     const city = buildCity({ root, mat, inst, ibox, box, mesh, BOX, CYL, CONE, sc, D, _p, _q, _s, _e, _m });
     const lanes = sc.city.lanes, laneX = (i) => city.laneX(Math.min(i, lanes.length - 1)) ?? pw + 12;
+    const fleet = buildFleet({ root, sc, D, city });
     const PX = laneX(0), MX = lanes.length > 1 ? laneX(1) : PX + 3.4, CRX = lanes.length > 1 ? (lanes[0].x0 + lanes[1].x1) / 2 : PX;
     const crane2 = ['crawler', 'ringer', 'mobile'].includes(ids.lift);
     // 안전 난간 · 추락 방지망 · 낙하물 방지망 · 자재 적치 (지금 짓는 층)
@@ -461,7 +478,7 @@ export function createSim3D(host, opts = {}) {
       exc.visible = dug > 0.3 && earthP < 1 && ['support', 'excav', 'water', 'wall'].includes(wpId);
       if (exc.visible) { const ex = pw * (0.3 + 0.35 * (0.5 + 0.5 * Math.sin(T * 0.4))); exc.position.set(ex, -dug, -pd / 4); exc.rotation.y = Math.sin(T * 0.4) > 0 ? 0 : Math.PI; const sw = Math.sin(T * 3); exArm.position.set(2.6, 3 + sw * 0.5, 0); exArm.rotation.z = 0.5 + sw * 0.2; exArm2.position.set(4.6, 1.6 + sw * 0.4, 0); exArm2.rotation.z = -1.1 + sw * 0.2; }
       const trOn = (earthP > 0 && earthP < 1) || (wpId === 'excav');
-      trucks.forEach((t, i) => { t.visible = trOn; if (!trOn) return; const li = i % 2 ? lanes.length - 1 : 0, L = lanes[li], zc = city.ZC, ph = (T * 0.05 + i / trucks.length) % 1; t.position.set((L.x0 + L.x1) / 2, 0.1, L.dir > 0 ? -zc + ph * 2 * zc : zc - ph * 2 * zc); t.rotation.y = L.dir > 0 ? 0 : Math.PI; t.userData.load.visible = !(i % 2); });
+      trucks.forEach(t => { t.visible = false; }); // 덤프는 물류 차량(fleet3d)이 게이트로 드나든다
       // 기초
       let np = 0;
       if (K('found') && foundP > 0 && ids.found !== 'mat') { const pileP = clamp(foundP / 0.6, 0, 1), base = -Math.max(depth, 1.2); pileXs.forEach((x, i) => { const lp = clamp(pileP * pileXs.length - i, 0, 1); if (lp <= 0) return; ibox(pileI, np++, x - pileW / 2, x + pileW / 2, base - plen * lp, base, 0.05, 0.05 + pileW); }); }
@@ -636,22 +653,33 @@ export function createSim3D(host, opts = {}) {
       }
       treeI.count = trunkI.count = ntr; paveI.count = npv2; [treeI, trunkI, paveI].forEach(o => { o.instanceMatrix.needsUpdate = true; });
 
-      // 작업자 · 안전 난간 · 방지망 · 자재 · 차로 점용 → 가로(city)
+      // 작업자: 지금 단계의 작업 유형에 맞춘 작업조 (crew3d.js: 관절 모형 · 동작 · 자리 옮기기 · 자재 나르기)
       const work = [];
-      const hsh = (i, k) => { const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return v - Math.floor(v); };
-      const crew = (n, x0, x1, y, z0, z1, seed = 0) => { if (!(x1 - x0 > 0.5 && z1 - z0 > 0.5)) return; for (let i = 0; i < n; i++) { const a = hsh(i + seed, 1), b = hsh(i + seed, 2), mv = i % 3 === 0 ? 0.08 * Math.sin(T * 0.3 + i) : 0; work.push([x0 + (x1 - x0) * clamp(0.08 + 0.84 * a + mv, 0.05, 0.95), y, z0 + (z1 - z0) * (0.08 + 0.84 * b), i % 3 === 0, i === 0]); } };
+      const aNow = st.step && st.step.wp === wpId && CREW_KINDS.includes(st.step.a) ? st.step.a : null;
+      const crewN = (k, f = 1) => Math.round(clamp(((ARCH[k] || ARCH.generic).crew || 4) * f, 2, 16));
+      const crewTags = [];
+      const team = (kind, n, x0, x1, y, z0, z1, seed, o) => {
+        if (!(x1 - x0 > 1 && z1 - z0 > 1)) return; const ws = crewPlan(kind, n, { x0, x1, y, z0, z1 }, T, seed, o); ws.forEach(w => work.push(w));
+        // 작업조 이름표 (멀리서도 무슨 일을 몇 명이 하는지): 사람이 셋 이상인 조만
+        if (ws.length >= 3 && ARCH[kind]) crewTags.push({ t: `${ARCH[kind].n} · ${ws.length}명`, p: [ws.reduce((s, w) => s + w.x, 0) / ws.length, y + 2.6, ws.reduce((s, w) => s + w.z, 0) / ws.length], cls: 'eq crew', n: ws.length });
+      };
       const FRW = ['frame', 'form', 'rebar', 'conc', 'pour', 'steel', 'lift'];
       const cutNow = CUT_WPS.has(wpId);
-      if (active) crew(FRW.includes(wpId) ? 12 : 4, fp.x0, fp.x1, f.e1 + 0.2, fp.z0, fp.z1, 0);
-      if (UNDER_WPS.has(wpId)) {
-        if (wpId === 'survey' || wpId === 'improve' || (wpId === 'wall' && dug < 0.3)) crew(4, 1, pw - 1, 0.02, -pd / 2 + 2, -1, 3);
-        else if (depth > 0.5) { const yU = wpId === 'base' && K('base') ? -depth + Math.min(depth, P('base') * nB * bsh) + 0.25 : matP > 0 ? baseE + thick * matP : -dug; crew(7, th + 1.5, pw - th - 1.5, yU + 0.02, -pd / 2 + th + 2, -2, 5); }
+      const stageKind = (sg) => (sg === 0 ? (steelF ? 'steel' : 'form') : sg === 1 ? 'rebar' : sg === 2 ? 'pour' : 'cure');
+      if (active) {
+        const mine = FRW.includes(wpId), kind = mine && aNow ? aNow : stageKind(stage), y = f.e1 + 0.2;
+        if (kind === 'pour') { const front = fp.x0 + (fp.x1 - fp.x0) * clamp((fr - 0.6) / 0.18, 0.05, 1); team('pour', crewN('pour', mine ? 1.1 : 0.6), Math.max(fp.x0, front - 7), Math.min(fp.x1, front + 1.5), y, fp.z0, cutNow ? 0 : fp.z1, 0); }
+        else team(kind, crewN(kind, mine ? 1.6 : 0.7), fp.x0, fp.x1, y, fp.z0, cutNow ? 0 : fp.z1, 0, { stock: [fp.x1 - 2.5, fp.z0 + 2.5] });
       }
-      if (cutNow && nF > 0) { const ki = clamp(Math.floor(clamp(P(wpId), 0, 0.999) * nF), 0, nF - 1), p3 = D.fp[ki]; crew(8, p3.x0 + 1, p3.x1 - 1, sc.floors[ki].e0 + 0.2, p3.z0 + 1, p3.z1 - 1, 9); if (ki > 0) crew(4, p3.x0 + 1, p3.x1 - 1, sc.floors[ki - 1].e0 + 0.2, p3.z0 + 1, p3.z1 - 1, 13); }
-      if (wpId === 'skin' && nS < nF) { const p3 = D.fp[nS]; crew(5, p3.x0 + 1, p3.x1 - 1, sc.floors[nS].e0 + 0.2, p3.z1 - 2.2, p3.z1 - 0.6, 17); }
-      if (wpId === 'roof' && done) crew(5, rfp.x0 + 1, rfp.x1 - 1, rtop + 0.4, rfp.z0 + 1, rfp.z1 - 1, 21);
-      if (wpId === 'land') { const strips = [[0.6, G.bx0 - 0.6], [G.bx1 + 0.6, pw - 0.6]].sort((a, b) => (b[1] - b[0]) - (a[1] - a[0])); crew(6, strips[0][0], strips[0][1], 0.3, -pd / 2 + 2, pd / 2 - 2, 25); }
-      if (wpId === 'prep' || wpId === 'plan' || wpId === 'qa') crew(3, pw + 0.5, pw + 4.2, 0.05, -pd / 2 + 2, pd / 2 - 14, 29);
+      if (UNDER_WPS.has(wpId)) {
+        if (wpId === 'survey' || wpId === 'improve' || (wpId === 'wall' && dug < 0.3)) { const k = aNow || 'inspect'; team(k, crewN(k, 1), 1, pw - 1, 0.02, -pd / 2 + 2, -1, 3); }
+        else if (depth > 0.5) { const yU = wpId === 'base' && K('base') ? -depth + Math.min(depth, P('base') * nB * bsh) + 0.25 : matP > 0 ? baseE + thick * matP : -dug; const k = aNow || 'dig'; team(k, crewN(k, 1.3), th + 1.5, pw - th - 1.5, yU + 0.02, -pd / 2 + th + 2, Math.min(pd / 6, 8), 5, { stock: [pw - th - 3, -pd / 2 + th + 3] }); }
+      }
+      if (cutNow && nF > 0) { const ki = clamp(Math.floor(clamp(P(wpId), 0, 0.999) * nF), 0, nF - 1), p3 = D.fp[ki], k = aNow || 'generic', lift = Math.max(0, (D.fh[ki] || 4) - 0.55 - 2.35); team(k, crewN(k, 1.5), p3.x0 + 1, p3.x1 - 1, sc.floors[ki].e0 + 0.2, p3.z0 + 1, p3.z1 - 1, 9, { stock: [p3.x1 - 3, p3.z0 + 3], lift }); if (ki > 0) team(k, crewN(k, 0.6), p3.x0 + 1, p3.x1 - 1, sc.floors[ki - 1].e0 + 0.2, p3.z0 + 1, p3.z1 - 1, 13, { lift }); }
+      if (wpId === 'skin' && nS < nF) { const p3 = D.fp[nS], k = aNow || 'curtain'; team(k, crewN(k, 1.1), p3.x0 + 1, p3.x1 - 1, sc.floors[nS].e0 + 0.2, p3.z1 - 2.2, p3.z1 - 0.6, 17, { face: [(p3.x0 + p3.x1) / 2, p3.z1 + 60] }); }
+      if (wpId === 'roof' && done) { const k = aNow || 'waterproof'; team(k, crewN(k, 1.1), rfp.x0 + 1, rfp.x1 - 1, rtop + 0.4, rfp.z0 + 1, rfp.z1 - 1, 21); }
+      if (wpId === 'land') { const strips = [[0.6, G.bx0 - 0.6], [G.bx1 + 0.6, pw - 0.6]].sort((a, b) => (b[1] - b[0]) - (a[1] - a[0])); team('landscape', 7, strips[0][0], strips[0][1], 0.3, -pd / 2 + 2, pd / 2 - 2, 25); }
+      if (wpId === 'prep' || wpId === 'plan' || wpId === 'qa') { const k = aNow || 'inspect'; team(k, 3, pw + 0.5, pw + 4.2, 0.05, -pd / 2 + 2, pd / 2 - 14, 29); }
       let nrl = 0, nfn = 0, nst = 0;
       if (active) {
         const y = f.e1 + 0.2, a = fp.x0 - 0.15, b = fp.x1 + 0.15, c = fp.z0 - 0.15, d = cutNow ? 0 : fp.z1 + 0.15;
@@ -672,10 +700,31 @@ export function createSim3D(host, opts = {}) {
       const occ = new Set(), busy = new Set();
       if (pump.visible) { occ.add(0); if (pourNow && lanes.length > 1) occ.add(1); }
       if (crane.visible && crane2) { occ.add(0); if (lanes.length > 1) occ.add(1); }
-      if (trOn) { busy.add(0); busy.add(lanes.length - 1); }
-      city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow });
+      const io = { hot: [], tags: [], bays: {} };
       const htop = hOn ? sc.floors[Math.min(NF, Math.max(1, Math.floor(fl))) - 1].e1 + (ids.hoist === 'jump' ? 0 : 3) : 0;
-      const dyn = meth.frame({ wpId, T, tau, K, P, dug, earthP, wallP, foundP, baseP, structP, skinP, topdown, underV, cutNow, nF, fl, fr, stage, active, f, fp, hasCore, ctop, cn, cx0, cx1, cz, top, Hc, nS, done, rtop, rfp, rp, matP, baseE, thick, plen, removeUpTo, pourNow, PX, MX, hOn, htop });
+      const dyn = meth.frame({ wpId, T, tau, K, P, dug, earthP, wallP, foundP, baseP, structP, skinP, topdown, underV, cutNow, nF, fl, fr, stage, active, f, fp, hasCore, ctop, cn, cx0, cx1, cz, top, Hc, nS, done, rtop, rfp, rp, matP, baseE, thick, plen, removeUpTo, pourNow, PX, MX, hOn, htop, io });
+      if (io.bays.pump) occ.add(0); // 펌프카가 선 차로
+      // 물류: 덤프(상차 자리) · 레미콘(펌프카 호퍼) · 자재 트레일러(하역 자리)
+      const dlvKind = !UNDER_WPS.has(wpId) && !pump.visible && !io.bays.pump && P(wpId) > 0 && P(wpId) < 1 ? DLV(wpId, aNow) : null;
+      let dlvBay = null; // 저층부(포디움)가 대지를 덮어 안에 설 자리가 없으면 도로 점용 하역
+      // 도로 하역 자리: 펌프·레미콘이 바깥 차로를 쓰고 있으면 그 반대쪽 끝으로
+      const roadZ = () => { const z = clamp(-bd / 2 - 4, -pd / 2 + 4, pd / 2 - 12), pz = io.bays.pump ? io.bays.pump.z - io.bays.pump.nose * 5.6 : null; return pz == null || Math.abs(z - pz) > 26 ? z : [-pd / 2 + 12, pd / 2 - 12].sort((a, b) => Math.abs(b - pz) - Math.abs(a - pz))[0]; };
+      if (dlvKind) { const ex = Math.max(G.bx1, ...D.fp.filter((q, i) => sc.floors[i] && sc.floors[i].e0 < 6).map(q => q.x1)), ws = pw - ex; dlvBay = ws >= 8.6 ? { x: ex + ws / 2 + 0.6, z: pd / 2 - 10.5, hx: 0, hz: 1, inside: true } : { road: true, z: roadZ() }; }
+      const fl3 = fleet.frame({ T, haul: trOn ? { bay: io.bays.haul || { road: true, z: pd / 2 - 8 } } : null, mix: io.bays.pump ? { pump: io.bays.pump } : null, dlv: dlvKind ? { bay: dlvBay, kind: dlvKind } : null });
+      fl3.busy.forEach(l => busy.add(l));
+      // 장비 둘레 사람: 굴착기·크람쉘 옆 신호수, 펌프카 호스 끝 호스 잡이·진동 다짐, 천공기 옆 신호수·유도원
+      io.hot.forEach((h, i) => {
+        if (h.k === 'ex' || h.k === 'clam') work.push(crewAt('signal', h.x + 5, h.y + 0.02, h.z + 5, [h.x, h.z], T, 40 + i));
+        else if (h.k === 'hose') { [-0.7, 0.7].forEach((o2, j) => work.push(crewAt('hose', h.x + o2, h.y + 0.02, h.z + 1.3, [h.x, h.z - 2], T, 50 + i * 2 + j))); work.push(crewAt('vibrate', h.x - 2.4, h.y + 0.02, h.z + 2.2, [h.x, h.z], T, 60 + i)); }
+        else if (h.k === 'rig') { work.push(crewAt('signal', h.x + 5, h.y + 0.02, h.z + 5, [h.x, h.z], T, 70 + i)); work.push(crewAt('guide', h.x - 2.6, h.y + 0.02, h.z + 3.2, [h.x, h.z], T, 80 + i)); }
+      });
+      city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow || !!dlvKind }); if (window.__S3DEBUG) window.__s3work = work;
+      // 장비 이름표: 공법 장비 + 물류 차량 + 타워크레인·호이스트
+      const eqTags = [...io.tags, ...fl3.tags];
+      if (crane.visible && (FRW.includes(wpId) || wpId === 'skin')) eqTags.push({ t: { tower: '타워크레인 (T형)', luffing: '러핑 타워크레인', crawler: '크롤러 크레인', ringer: '링거 크레인', mobile: '이동식 크레인' }[ids.lift] || '크레인', p: [crane.position.x, (ids.lift === 'tower' || ids.lift === 'luffing' ? Hc : 30) + 5, crane.position.z], cls: 'eq' });
+      if (hOn && (wpId === 'hoist' || wpId === 'lift')) eqTags.push({ t: '호이스트 (인·화물용)', p: [G.bx1 + 2, htop + 3, 0], cls: 'eq' });
+      eqTags.slice(0, 12).forEach(t => dyn.push(t));
+      crewTags.sort((a, b) => b.n - a.n).slice(0, 3).forEach(t => dyn.push(t));
       owned.forEach(o => { if (o.count > o.instanceMatrix.count) o.count = o.instanceMatrix.count; }); // 용량을 넘는 인스턴스는 그리지 않는다
       // 강조: 지금 공종의 재질을 강조색으로
       // 설비 공종을 볼 때는 다른 설비·마감을, 실내 마감을 볼 때는 설비를 흐리게 (2D와 같은 규칙)
@@ -713,7 +762,7 @@ export function createSim3D(host, opts = {}) {
     city.labels.forEach(l => labels.push({ under: false, ...l }));
     return {
       sc, D, root, frameAt, labels, city,
-      dispose() { city.dispose(); meth.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
+      dispose() { city.dispose(); meth.dispose(); fleet.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
     };
   }
 
@@ -722,7 +771,8 @@ export function createSim3D(host, opts = {}) {
     root.traverse(o => { if (!o.isMesh) return; const m = o.material; o.receiveShadow = true; o.castShadow = !(m && m.transparent && m.opacity < 0.7) && !(m && m.emissiveIntensity > 0.9); });
   }
   // ---------- 매 프레임 ----------
-  let mkHtml = '', lbHtml = '', atCache = {}, size = [0, 0];
+  let mkHtml = '', lbHtml = '', atCache = {}, size = [0, 0], nowKey = null;
+  const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function resize() {
     const r = host.getBoundingClientRect(), w = Math.max(10, Math.round(r.width)), h = Math.max(10, Math.round(r.height));
     if (w === size[0] && h === size[1]) return;
@@ -734,9 +784,9 @@ export function createSim3D(host, opts = {}) {
     if (disposed) return;
     resize();
     const { sc, wpId, p, T, marks = [], at } = st;
-    if (!built || built.sc !== sc) { built = build(sc); lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); }
+    if (!built || built.sc !== sc) { built = build(sc); lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); if (window.__S3DEBUG) window.__s3dim = { pw: sc.G.pw, pd: built.D.pd, H: sc.G.H, depth: sc.G.depth, lanes: sc.city && sc.city.lanes, yard: sc.city && sc.city.yard }; }
     const win = winFor(sc, wpId), tau = win.s + clamp(p, 0, 1) * (win.e - win.s);
-    const fres = built.frameAt({ wpId, tau, T });
+    const fres = built.frameAt({ wpId, tau, T, step: st.step });
     // 시점: 전체 보기는 현장·건물 전체를 한 화면에 고정, 작업 부위는 2D 카메라가 보는 범위를 따라간다
     const under = UNDER_WPS.has(wpId), cutV = CUT_WPS.has(wpId);
     const now = performance.now(), dt = Math.min(0.25, (now - (follow.tl || now)) / 1000); follow.tl = now;
@@ -771,10 +821,13 @@ export function createSim3D(host, opts = {}) {
     }
     if (follow.anim) { const k = clamp((now - follow.anim.t0) / 1100, 0, 1), e = 1 - Math.pow(1 - k, 3); cam.position.lerpVectors(follow.anim.from.p, follow.anim.to.p, e); ctl.target.lerpVectors(follow.anim.from.t, follow.anim.to.t, e); if (k >= 1) follow.anim = null; }
     ctl.update();
-    look.render(cam);
+    tickWater(); look.render(cam);
     // HUD
     const wp = WP_BY_ID[wpId], o = wp.multi ? `${sc.qa.length}개 기술` : (wp.opts.find(x => x.id === sc.ids[wpId]) || { name: '' }).name;
     $('.s3-c').textContent = `// SIM_${wp.code} · 3D`; $('.s3-t').textContent = o;
+    // 지금 작업: 단계의 작업 유형 · 작업조 · 투입 장비 (workstep.js 표준 작업 기준)
+    const stp = st.step && st.step.wp === wpId ? st.step : null, nk = stp && !win.skip ? `${stp.a}|${stp.k}|${stp.n}` : '';
+    if (nk !== nowKey) { nowKey = nk; const A = stp && ARCH[stp.a], el = $('.s3-now'); el.hidden = !A || !nk; if (A && nk) el.innerHTML = `<b>지금 작업 · ${String(stp.k + 1).padStart(2, '0')}/${String(stp.n).padStart(2, '0')}</b><span>${esc(A.n)}</span><em>작업조 약 ${A.crew}명 · ${A.eq.map(esc).join(' · ')}</em>`; }
     $('.s3-d').textContent = `D+${Math.round(tau)} · ${ym(dateAt(sc.t0, tau))}`; $('.s3-day').textContent = win.skip ? '해당 공정 없음' : `${Math.round(win.e - win.s)}일 중 ${Math.round(clamp(p, 0, 1) * (win.e - win.s))}일째`;
     // 판정 표식: 단면 좌표(x, e)를 단면(z=0) 위에 띄운다
     if (at) atCache = at;

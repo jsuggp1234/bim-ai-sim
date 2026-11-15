@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { facadeMaterial, PAT, surf } from './facade.js';
+import { animateWater, shoreMask } from './water.js';
 import { terrainFn, inPoly, centroid, rng, hashStr, densify, ROAD_CLASS } from '../ctxmodel.js';
 
 const E = 3600; // 지면 텍스처 범위(±m)
@@ -262,6 +263,9 @@ export function buildContext(ctx, plan, P, opts = {}) {
     const wg = new THREE.ShapeGeometry(shapes); wg.rotateX(-Math.PI / 2);
     const ripple = rippleNormal(); textures.push(ripple);
     mats.water = surf({ color: P.water.clone(), normalMap: ripple, normalScale: new THREE.Vector2(0.22, 0.22) }, 0.1, 0.02);
+    // 흐르는 물결 + 물가(얕은 물빛 · 바다 거품). 강은 흐름 방향 없이 느리게, 바다는 조금 빠르게
+    const sm = shoreMask(ctx.water, lite ? 1200 : 1600, lite ? 512 : 768); if (sm) textures.push(sm.tex);
+    animateWater(mats.water, { shore: sm, flow: ctx.water.some(w => w.sea) ? [0.014, 0.008] : [0.009, 0.005] });
     water = keep(new THREE.Mesh(wg, mats.water)); water.position.y = 0.12; water.receiveShadow = true; water.name = 'water'; group.add(water);
   }
 

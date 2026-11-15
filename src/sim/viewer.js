@@ -11,6 +11,7 @@ import { readPalette } from './scene/palette.js';
 import { createLook } from './scene/look.js';
 import { fallbackFor, analysisBoxes } from './ctxload.js';
 import { OSM_ATTRIB } from './osm.js';
+import { tickWater } from './scene/water.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 const SUN_I = 4.6, MOON_I = 0.45;
@@ -336,7 +337,7 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     const dist = camera.position.distanceTo(controls.target);
     persp.near = Math.max(0.5, Math.min(25, dist / 250)); persp.aspect = asp; persp.updateProjectionMatrix();
     ortho.left = -orthoHalf * asp; ortho.right = orthoHalf * asp; ortho.top = orthoHalf; ortho.bottom = -orthoHalf; ortho.updateProjectionMatrix();
-    look.render(camera);
+    tickWater(); look.render(camera);
   }
   function frame() {
     if (!alive) return;

@@ -3,6 +3,8 @@
 // 인접 건물(층·창·상가·옥상 설비·지하층) · 이면도로 · 건너편·뒤쪽 블록 건물 · 현장 출입구(게이트·세륜·사무실) · 작업자·보행자.
 // 좌표: x는 단면 가로(대지 0 ~ pw), y는 높이, z는 도로 방향(대지 -pd/2 ~ pd/2, 단면은 z=0).
 import * as THREE from 'three';
+import { buildPeople, crewAt, PED_LOOK } from './crew3d.js';
+import { waterSurface } from '../sim/scene/water.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -94,7 +96,6 @@ export function buildCity(X) {
   const C = sc.city, G = sc.G, pw = G.pw, pd = D.pd, Z = D.Z, nb = sc.nb;
   const ZC = Z + 34;
   const geos = [], texs = [], mats2 = [];
-  const SPH = new THREE.SphereGeometry(0.5, 12, 8); geos.push(SPH);
   const R = rng(7 + Math.round(pw * 13) + Math.round((sc.cond.adj || 0) * 7));
   const labels = [];
   const lanes = C.lanes, laneX = (i) => (lanes[i] ? (lanes[i].x0 + lanes[i].x1) / 2 : null);
@@ -262,12 +263,29 @@ export function buildCity(X) {
 
   // ---------- 현장 출입구: 게이트 · 세륜 · 경비실 · 사무실 컨테이너 ----------
   const gz1 = pd / 2 + 3, gz0 = gz1 - 10, gx = C.fence;
-  const gateM = mat(0x5f6066, { metal: 0.4 }), washM = mat(0x2f7fd0, { em: 0.15 });
+  const gateM = mat(0x5f6066, { metal: 0.4 }), washM = mat(0x3d4b52);
   [gz0, gz1].forEach(z => box(gateM, null, gx - 0.25, gx + 0.25, 0, 3.6, z - 0.25, z + 0.25));
   box(gateM, null, gx - 0.1, gx + 0.1, 3.3, 3.6, gz0, gz1);
   box(mat(0xf2c94c, { em: 0.2 }), null, gx - 0.12, gx + 0.12, 3.6, 4.4, gz0 + 1, gz1 - 1); // 현장 안내판
-  box(washM, null, C.yard[0] + 0.6, C.yard[1] - 0.4, 0, 0.35, gz0 + 1.5, gz1 - 1.5);
-  const washR = inst(BOX, mat(0x8fa1b5, { metal: 0.5 }), 12, null); { let n = 0; for (let z = gz0 + 2; z < gz1 - 2; z += 1.2) ibox(washR, n++, C.yard[0] + 0.7, C.yard[1] - 0.5, 0.35, 0.45, z, z + 0.3); washR.count = Math.min(n, washR.instanceMatrix.count); }
+  // 세륜기: 콘크리트 턱 + 출렁이는 세척수 + 롤러 + 양옆 분사 노즐(차가 지날 때 바퀴에 물을 뿜는다)
+  const wx0 = C.yard[0] + 0.6, wx1 = C.yard[1] - 0.4, wz0 = gz0 + 1.5, wz1 = gz1 - 1.5, washConc = mat(0xa9a7a1, { tex: 'conc' });
+  box(washM, null, wx0, wx1, 0, 0.05, wz0, wz1);
+  const washW = waterSurface(0x557f8c, { scale: 1 / 2.2, ns: 0.6, still: false, flow: [0.09, 0.05], rough: 0.08 }); mats2.push(washW);
+  box(washW, null, wx0, wx1, 0.05, 0.27, wz0, wz1);
+  [[wz0 - 0.3, wz0], [wz1, wz1 + 0.3]].forEach(([a, b]) => box(washConc, null, wx0 - 0.25, wx1 + 0.25, 0, 0.32, a, b));
+  [[wx0 - 0.25, wx0], [wx1, wx1 + 0.25]].forEach(([a, b]) => box(washConc, null, a, b, 0, 0.5, wz0, wz1));
+  const washR = inst(BOX, mat(0x8fa1b5, { metal: 0.5 }), 12, null); { let n = 0; for (let z = gz0 + 2; z < gz1 - 2; z += 1.2) ibox(washR, n++, wx0 + 0.1, wx1 - 0.1, 0.3, 0.4, z, z + 0.3); washR.count = Math.min(n, washR.instanceMatrix.count); }
+  const nozM = mat(0x6f7f92, { metal: 0.6 });
+  [wx0 - 0.12, wx1 + 0.12].forEach(x => { box(nozM, null, x - 0.05, x + 0.05, 0.5, 1.1, wz0 + 0.2, wz0 + 0.3); box(nozM, null, x - 0.05, x + 0.05, 1.0, 1.1, wz0 + 0.2, wz1 - 0.2); box(nozM, null, x - 0.05, x + 0.05, 0.5, 1.1, wz1 - 0.3, wz1 - 0.2); });
+  const sprayM = new THREE.MeshStandardMaterial({ color: 0xe4f1f8, transparent: true, opacity: 0.38, depthWrite: false, roughness: 0.3, emissive: 0x9fc6e0, emissiveIntensity: 0.3, side: THREE.DoubleSide }); mats2.push(sprayM);
+  const sprayG = new THREE.ConeGeometry(0.32, 1.2, 10, 1, true); geos.push(sprayG);
+  const sprayI = inst(sprayG, sprayM, 16, null); sprayI.userData.noMirror = true;
+  const _sq = new THREE.Quaternion(), _sp = new THREE.Vector3(), _ss = new THREE.Vector3(), _sm = new THREE.Matrix4(), _up = new THREE.Vector3(0, 1, 0), _dir = new THREE.Vector3();
+  function washSpray(on, T) {
+    let n = 0;
+    if (on) [[wx0 - 0.12, 1], [wx1 + 0.12, -1]].forEach(([x, s]) => { for (let z = wz0 + 0.8; z < wz1 - 0.5 && n < 16; z += 1.05) { _dir.set(-s, 0.75, 0).normalize(); _sq.setFromUnitVectors(_up, _dir); const f = 0.85 + 0.2 * Math.sin(T * 23 + z * 3.1); _ss.set(f, f * (0.9 + 0.15 * Math.sin(T * 17 + z)), f); _sp.set(x, 1.0, z).addScaledVector(_dir, -0.6 * _ss.y); _sm.compose(_sp, _sq, _ss); sprayI.setMatrixAt(n++, _sm); } });
+    sprayI.count = n; sprayI.instanceMatrix.needsUpdate = true;
+  }
   box(mat(0xe7e7ea), null, gx + 0.5, gx + 2.1, 0.18, 2.6, gz0 - 2.4, gz0 - 0.6); // 경비실
   labels.push({ t: '현장 출입구 · 세륜', p: [gx + 1, 4.8, (gz0 + gz1) / 2], over: true });
   // 가설 사무실 (야드 안, 2단 적층)
@@ -288,24 +306,8 @@ export function buildCity(X) {
   lanes.forEach((L, li) => { for (let j = 0; j < 4; j++) { let r = R(), v = VEH[0]; for (const x of VEH) { r -= x.p; if (r <= 0) { v = x; break; } } vehs.push({ li, v, ph: (j + R() * 0.6) / 4, sp: 7 + R() * 5, c: CAR_C[Math.floor(R() * CAR_C.length)] }); } });
   vehs.forEach((V, i) => { const c = new THREE.Color(V.v.k === 'bus' ? 0x2f7a52 : V.v.k === 'truck' ? 0xdcdcdf : V.c); bodyI.setColorAt(i, c); carI.setColorAt(i, c); });
   if (bodyI.instanceColor) bodyI.instanceColor.needsUpdate = true; if (carI.instanceColor) carI.instanceColor.needsUpdate = true;
-  // 사람 (작업자 · 보행자): 다리 · 상체(조끼/옷) · 머리(안전모)
-  const NP = 90;
-  const legI = inst(BOX, mat(0x2e3a52), NP, null), torsoI = inst(BOX, mat(0xffffff), NP, null), headI2 = inst(SPH, mat(0xffffff, { rough: 0.6 }), NP, null);
-  const VEST = new THREE.Color(0xff8a2b), SIGNAL = new THREE.Color(0xd9ff3a), HAT = new THREE.Color(0xffd23a), HATW = new THREE.Color(0xf2f2f0), SKIN = new THREE.Color(0x3a3a3f);
-  const CLOTH = [0x3f5f8f, 0x8a8f99, 0xa33a3a, 0x2b2d33, 0xd9d4c8].map(c => new THREE.Color(c));
-  let nP = 0;
-  function person(x, y, z, o = {}) {
-    if (nP >= NP) return;
-    const s = o.s || 1, ph = o.walk ? Math.sin(o.walk) * 0.12 : 0;
-    ibox(legI, nP, x - 0.16 * s, x + 0.16 * s, y, y + 0.82 * s, z - 0.12 * s + ph, z + 0.12 * s + ph);
-    ibox(torsoI, nP, x - 0.24 * s, x + 0.24 * s, y + 0.8 * s, y + 1.45 * s, z - 0.15 * s, z + 0.15 * s);
-    ibox(headI2, nP, x - 0.15 * s, x + 0.15 * s, y + 1.47 * s, y + 1.8 * s, z - 0.15 * s, z + 0.15 * s);
-    torsoI.setColorAt(nP, o.ped ? CLOTH[o.ped % CLOTH.length] : o.signal ? SIGNAL : VEST);
-    headI2.setColorAt(nP, o.ped ? SKIN : o.white ? HATW : HAT);
-    nP++;
-  }
-  // 칼라 버퍼를 미리 만들어 둔다 (첫 렌더 전에 instanceColor가 있어야 셰이더가 맞게 만들어진다)
-  for (let i = 0; i < NP; i++) { torsoI.setColorAt(i, VEST); headI2.setColorAt(i, HAT); }
+  // 사람 (작업자 · 보행자): 관절 있는 모형 (crew3d.js)
+  const people = buildPeople({ root }, 160);
   // 차로 점용 콘 · 안내판
   const coneI = inst(CONE, mat(0xff7a1a, { em: 0.2 }), 80, null), barI = inst(BOX, mat(0xffffff, { em: 0.3 }), 6, null);
 
@@ -338,19 +340,18 @@ export function buildCity(X) {
     bodyI.count = cabI.count = Math.min(nb3, bodyI.instanceMatrix.count); carI.count = carW.count = Math.min(nc3, carI.instanceMatrix.count);
     [bodyI, cabI, headL, tailL, whI, carI, carW].forEach(o => { o.instanceMatrix.needsUpdate = true; });
     if (bodyI.instanceColor) bodyI.instanceColor.needsUpdate = true; if (carI.instanceColor) carI.instanceColor.needsUpdate = true;
+    // 세륜: 차가 드나드는 동안 분사 (지나가는 몇 초씩)
+    washSpray(gateBusy && (T % 22) < 9, T);
     // 사람
-    nP = 0;
+    people.begin();
     // 보행자 (보도 양쪽, 오가며)
-    for (let i = 0; i < 16; i++) { const sw = i % 2 ? C.sw2 : C.sw, dir = i % 4 < 2 ? 1 : -1, sp = 1.2 + (i % 3) * 0.2, s = ((T * sp / (2 * ZC) + i * 0.137) % 1) * 2 * ZC; let z = dir > 0 ? -ZC + s : ZC - s; if (i % 2 === 0 && z > gz0 - 1 && z < gz1 + 1) continue; const x = sw[0] + 0.8 + ((i * 0.37) % 1) * (sw[1] - sw[0] - 1.6); person(x, 0.18, z, { ped: 1 + i, walk: T * 6 + i }); }
+    for (let i = 0; i < 16; i++) { const sw = i % 2 ? C.sw2 : C.sw, dir = i % 4 < 2 ? 1 : -1, sp = 1.2 + (i % 3) * 0.2, s = ((T * sp / (2 * ZC) + i * 0.137) % 1) * 2 * ZC; let z = dir > 0 ? -ZC + s : ZC - s; if (i % 2 === 0 && z > gz0 - 1 && z < gz1 + 1) continue; const x = sw[0] + 0.8 + ((i * 0.37) % 1) * (sw[1] - sw[0] - 1.6); people.add(x, 0.18, z, dir > 0 ? 0 : Math.PI, 'walk', T, (T * sp + i * 3.1) * 4.6, PED_LOOK(i)); }
     // 신호수 (게이트 · 점용 차로)
-    person(gx + 1.2, 0.18, gz1 + 1.2, { signal: true, walk: gateBusy ? T * 3 : 0 });
-    if (occ.size) { const xo = (lanes[Math.max(...occ)].x1) + 0.6; person(Math.min(xo, C.road[1] - 0.6), 0.1, pd / 2 + 8, { signal: true }); person(Math.min(xo, C.road[1] - 0.6), 0.1, -pd / 2 - 8, { signal: true }); }
-    // 작업자 (build3d가 넘긴 자리)
-    work.forEach((w, i) => person(w[0], w[1], w[2], { walk: w[3] ? T * 4 + i : 0, white: w[4] }));
-    for (let i = nP; i < NP; i++) ibox(legI, i, 0, 0, -999, -999, 0, 0);
-    legI.count = torsoI.count = headI2.count = Math.min(nP, headI2.instanceMatrix.count);
-    [legI, torsoI, headI2].forEach(o => { o.instanceMatrix.needsUpdate = true; });
-    if (torsoI.instanceColor) torsoI.instanceColor.needsUpdate = true; if (headI2.instanceColor) headI2.instanceColor.needsUpdate = true;
+    const g1 = crewAt(gateBusy ? 'signal' : 'stand', gx + 1.2, 0.18, gz1 + 1.2, [gx + 8, gz1 + 1.2], T, 1); people.add(g1.x, g1.y, g1.z, g1.yaw, g1.act, g1.t, 0, g1.lk);
+    if (occ.size) { const xo = Math.min((lanes[Math.max(...occ)].x1) + 0.6, C.road[1] - 0.6); [pd / 2 + 8, -pd / 2 - 8].forEach((zz, k) => { const s2 = crewAt('signal', xo, 0.1, zz, [xo, zz + (k ? -10 : 10)], T, 2 + k); people.add(s2.x, s2.y, s2.z, s2.yaw, s2.act, s2.t, 0, s2.lk); }); }
+    // 작업자 (build3d가 넘긴 자리와 동작)
+    work.forEach(w => people.add(w.x, w.y, w.z, w.yaw, w.act, w.t, w.ph, w.lk));
+    people.end();
     // 점용 차로 표시: 콘 줄 + 화살표 판
     let nc = 0, nb2 = 0;
     if (occ.size) {
@@ -374,8 +375,8 @@ export function buildCity(X) {
     ofc.count = Math.min(n, ofc.instanceMatrix.count); ofcW.count = Math.min(nw, ofcW.instanceMatrix.count); stair.count = Math.min(ns, stair.instanceMatrix.count); [ofc, ofcW, stair].forEach(o => { o.instanceMatrix.needsUpdate = true; });
   }
   return {
-    frame, offices, labels, laneX, ZC, zx, surfs, ground, zone,
-    dispose() { geos.forEach(g => g.dispose()); texs.forEach(t => t.dispose()); mats2.forEach(m => m.dispose()); },
+    frame, offices, labels, laneX, ZC, zx, surfs, ground, zone, gate: { x: gx, z0: gz0, z1: gz1 },
+    dispose() { people.dispose(); geos.forEach(g => g.dispose()); texs.forEach(t => t.dispose()); mats2.forEach(m => m.dispose()); },
   };
 }
 const lerp = (a, b, t) => a + (b - a) * t;

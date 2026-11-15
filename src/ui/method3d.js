@@ -3,6 +3,7 @@
 // 공통 부재를 숨기거나 덮어쓴 다음 공법 고유의 장비·부재·이름표를 더한다.
 import * as THREE from 'three';
 import { keepTriplanar } from './simtex.js';
+import { waterSurface } from '../sim/scene/water.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -101,7 +102,9 @@ export function buildMethods(X) {
   const pcyl = (g, m, wp, x, y, z, r, h, ax = 'y') => { const o = mesh(CYL, m, wp, g); o.position.set(x, y, z); o.scale.set(2 * r, h, 2 * r); if (ax === 'z') o.rotation.x = Math.PI / 2; else if (ax === 'x') o.rotation.z = Math.PI / 2; return o; };
   const segO = (o, ax, ay, az, bx, by, bz, w, d = w) => { DIR.set(bx - ax, by - ay, bz - az); const L = Math.max(0.01, DIR.length()); DIR.multiplyScalar(1 / L); o.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2); o.quaternion.setFromUnitVectors(UP, DIR); o.scale.set(w, L, d); return o; };
   const link = (g, m, wp, ...a) => segO(mesh(BOX, m, wp, g), ...a);
-  const place = (g, x, y, z, yaw = 0) => { g.visible = true; g.position.set(x, y, z); g.rotation.set(0, yaw, 0); };
+  // 장비 이름표: 자리를 잡은 장비(userData.eq)는 그 위에 이름을 띄운다
+  const tagsNow = new Map();
+  const place = (g, x, y, z, yaw = 0) => { g.visible = true; g.position.set(x, y, z); g.rotation.set(0, yaw, 0); if (g.userData.eq) tagsNow.set(g, [x, y + g.userData.eqH, z]); };
 
   // 재질
   const EQ = mat(EQC, { metal: 0.3, rough: 0.5 }), DARK = mat(0x2b2c30, { rough: 0.9 }), DARK2 = mat(0x4a4c52, { metal: 0.3, rough: 0.6 });
@@ -109,7 +112,7 @@ export function buildMethods(X) {
   const STEEL = mat(0x7f93a8, { metal: 0.55, rough: 0.45 }), CONC = mat(0xa3a3a8), CONC_L = mat(0xc9c9cd);
   const ORANGE = mat(0xff8a3d, { metal: 0.2 }), REDM = mat(0xe5484d), WOODM = mat(0xc58a4a);
   const TINT = mat(0xfffffe), TINTC = clipM(0xfffffd), TINTS = clipM(0xfffffc, { metal: 0.5, rough: 0.45 });
-  const FLASH = mat(0xffb547, { em: 1.4 }), DUST = mat(0xb9b2a5, { op: 0.4 }), RING = mat(0xff6b3d, { op: 0.55, em: 0.5 }), WATERM = mat(0x3d8fd6, { op: 0.45, em: 0.2 });
+  const FLASH = mat(0xffb547, { em: 1.4 }), DUST = mat(0xb9b2a5, { op: 0.4 }), RING = mat(0xff6b3d, { op: 0.55, em: 0.5 });
   const topSoil = sc.strata.length ? sc.strata[0][2] : 'soil';
   const SOILC = { fill: 0x9c8462, sand: 0xc9a86a, clay: 0x8f6e4e, soil: 0xa88a5e, wr: 0x7a7f8a, rock: 0x4c4f57 };
   const soilM = new THREE.MeshStandardMaterial({ color: SOILC[topSoil] ?? 0xa88a5e, roughness: 0.95, side: THREE.DoubleSide }); own.mats.push(soilM);
@@ -325,7 +328,8 @@ export function buildMethods(X) {
   const wtM = new THREE.MeshStandardMaterial({ color: 0x3d8fd6, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, roughness: 0.3 }); own.mats.push(wtM);
   const wtGeo = geo(new THREE.PlaneGeometry(1, 1, 48, 10).rotateX(-Math.PI / 2)); const wtable = new THREE.Mesh(wtGeo, wtM); wtable.visible = false; root.add(wtable);
   const wtBase = Float32Array.from(wtGeo.attributes.position.array);
-  const waterIn = pool(BOX, WATERM, 2, 'water'); waterIn.im.userData.noMirror = true;
+  const PITW = waterSurface(0x5b6f62, { opacity: 0.86, scale: 1 / 4, ns: 0.45 }); own.mats.push(PITW); // 굴착 바닥에 고인 흙탕물
+  const waterIn = pool(BOX, PITW, 2, 'water'); waterIn.im.userData.noMirror = true;
 
   // ================= 굴착 =================
   const EX = ids.excav;
@@ -408,6 +412,8 @@ export function buildMethods(X) {
   const heatP = pool(BOX, clipM(0xff5a3d, { em: 0.9 }), ids.pour === 'winter' ? 24 : 2, 'pour');
   const cpbP = pool(BOX, mat(0xd9822b, { metal: 0.3 }), 8, 'pour');
   const pumps = [0, 1, 2].map(() => pumpTruck()), mixers = [0, 1, 2, 3].map(() => mixerTruck());
+  // 펌프카는 레미콘이 오는 차로 방향을 마주 보게 세운다 (뒤 호퍼에 레미콘이 후진해 붙는다)
+  const LNS = sc.city.lanes, PNOSE = -(LNS[LNS.length > 1 ? 1 : 0] || { dir: -1 }).dir, PYAW = PNOSE > 0 ? 0 : Math.PI;
   let stat = null; if (ids.pour === 'cpb' || ids.pour === 'highp') { stat = grp(); [0, 1].forEach(i => { const z0 = i * 3.4; pbox(stat, mat(ids.pour === 'highp' ? 0xe5484d : 0xd9822b), 'pour', -1.1, 1.1, 0.4, 2.4, z0, z0 + 2.9); pbox(stat, DARK2, null, -1.15, 1.15, 0, 0.45, z0 + 0.1, z0 + 2.8); const h = mesh(CONE, DARK2, null, stat); h.position.set(0, 2.9, z0 + 0.6); h.scale.set(1.4, 1, 1.4); h.rotation.z = Math.PI; }); }
   const wldP = pool(BOX, TINTC, 160, 'steel', true);
   const lasP = pool(BOX, mat(0xff2a2a, { em: 1.6 }), 8, 'steel');
@@ -468,10 +474,28 @@ export function buildMethods(X) {
   const ghostM = (m, op) => { const k = m.uuid + op; if (!ghostOf.has(k)) { const g = keepTriplanar(m, m.clone()); g.transparent = true; g.opacity = op; g.depthWrite = false; own.mats.push(g); ghostOf.set(k, g); } return ghostOf.get(k); };
   function xray(mode) { R.strata.forEach(L => L.pieces.forEach((o, i) => { const want = mode === 2 ? ghostM(L.m, 0.42) : mode === 1 && i === 3 ? ghostM(L.m, 0.13) : L.m; if (o.material !== want) o.material = want; })); }
 
+  // ================= 장비 이름 =================
+  const nm = (o, n, h) => { const g = o && (o.isObject3D ? o : o.g); if (g && g.isObject3D) { g.userData.eq = n; g.userData.eqH = h; } };
+  nm(ex1, '백호 0.7㎥', 6.5); nm(ex2, '백호 0.6㎥', 6); nm(ex3, EX === 'splitter' ? '유압 할암기' : '브레이커 백호', 6);
+  nm(clam, '크람쉘 · 크롤러 크레인', 26); nm(drill, '크롤러 드릴', 10);
+  nm(wCrane, WL === 'dwall' ? '굴착 그래브 · 크롤러 크레인' : '진동 해머 · 크롤러 크레인', 24); if (wRig) nm(wRig, WL === 'scw' ? '3축 오거 (SCW)' : '어스오거 천공기', wRig.H + 2);
+  nm(nailRig, '네일 천공기', 5); nm(ancRig, '앵커 천공기', 5);
+  if (imRig) nm(imRig, IM === 'dcm' ? '심층혼합 처리기' : IM === 'scp' ? 'SCP 타설기' : 'PBD 타입기', imRig.H + 2); nm(imPlant, IM === 'dcm' ? '시멘트 사일로 · 배합 플랜트' : '진공 펌프', 11);
+  if (fRig) nm(fRig, FD === 'bored' ? '크롤러 크레인 (철근망 인양)' : FD === 'micro' ? '마이크로파일 천공기' : '항타기 (유압 해머)', FD === 'bored' ? 22 : (fRig.H || 18) + 2); nm(rcd, 'RCD 굴착기', 9);
+  pumps.forEach(p => nm(p, '붐 펌프카', 6)); mixers.forEach(m => nm(m, '레미콘', 4.8));
+  nm(cptT, 'CPT 관입 차량', 5); nm(tripod, '시추기', 8); nm(geoBox, '물리탐사 장비', 3); nm(drone, '드론 측량', 2); nm(stat, ids.pour === 'highp' ? '초고압 콘크리트 펌프' : '고정식 콘크리트 펌프', 4.5);
+  nm(gondola, '곤돌라', 3); nm(mewp, '고소 작업대', 4);
+  // 작업구대 (복공판): 순타 깊은 굴착에서 게이트 옆 흙막이 안쪽 위에 깔아 크람쉘·덤프가 올라선다
+  const DECK = { x0: pw - 12, x1: pw, z0: pd / 2 - 16, z1: pd / 2, cx: pw - 3.6, cz: pd / 2 - 13 };
+  const deckOn0 = !!clam && SP !== 'topdown' && pw > 20;
+  const wdP = deckOn0 ? pool(BOX, mat(0x7d8288, { metal: 0.45, rough: 0.55, tex: 'steel' }), 4, 'excav') : null, deckJ = deckOn0 ? pool(BOX, DARK2, 40, 'excav') : null;
+  const deckB = deckOn0 ? pool(BOX, mat(0x5f6b78, { metal: 0.5, rough: 0.5 }), 60, 'excav') : null, deckR = deckOn0 ? pool(BOX, mat(0xffd23a, { em: 0.12 }), 24, 'excav') : null;
+  [wdP, deckJ, deckB, deckR].forEach(q => { if (q) q.im.userData.noMirror = true; });
+
   // ================= 매 프레임 =================
   function frame(S) {
-    pools.forEach(P => { P.n = 0; }); eqs.forEach(g => { g.visible = false; });
-    const dyn = [], { wpId, T, K, P } = S;
+    pools.forEach(P => { P.n = 0; }); eqs.forEach(g => { g.visible = false; }); tagsNow.clear();
+    const dyn = [], { wpId, T, K, P } = S, io = S.io || { hot: [], tags: [], bays: {} };
     const lab = (k, x, y, z, txt) => { if (k !== wpId) return; const t = txt || (SIG[k] && SIG[k][ids[k]]); if (t && !dyn.some(d => d.t === t)) dyn.push({ t, p: [x, y, z], cls: 'm' }); };
     const dug = S.dug, under = S.underV;
     const steelCol = (i) => (i < S.nF - 3 && K('steel') ? (ids.steel === 'bolt' ? 0xe2dfd5 : ids.steel === 'weld' || ids.steel === 'robot' ? 0xc4cad2 : 0x7f93a8) : 0x7f93a8);
@@ -528,7 +552,7 @@ export function buildMethods(X) {
         if (IM === 'scp' && (z > -1.5 || lp < 1)) for (let m = 1; m < bot * lp; m += 1.2) imBulb.cyl(x, z, -m - 0.25, -m + 0.25, 0.5);
       });
       const nx = Math.min(imPts.length - 1, Math.floor(on));
-      if (wpId === 'improve' && on < imPts.length) { const [x, z] = imPts[nx], lp = frac(on); place(imRig.g, x - imRig.reach, 0, z, 0); imRig.tool.position.y = lerp(imRig.H - imRig.La, -bot, Math.sin(Math.PI * lp)); lab('improve', x, imRig.H + 2.5, z); }
+      if (wpId === 'improve' && on < imPts.length) { const [x, z] = imPts[nx], lp = frac(on); place(imRig.g, x - imRig.reach, 0, z, 0); io.hot.push({ k: 'rig', x, y: 0, z }); imRig.tool.position.y = lerp(imRig.H - imRig.La, -bot, Math.sin(Math.PI * lp)); lab('improve', x, imRig.H + 2.5, z); }
       if ((IM === 'pbd' || IM === 'vac') && ip > 0.12 && !(dug > 0.5)) { imMisc.tint(imMisc.box(-5, pw + 5, 0, 0.5, -pd / 2 + 0.5, -0.2), 0xd8c08a); }
       if (IM === 'pbd' && ip > 0.4 && P('wall') <= 0) { const hh = 5 * clamp((ip - 0.4) / 0.3, 0, 1) * (ip > 0.9 ? (1 - ip) * 10 : 1); for (let k = 0; k < 3; k++) imMisc.tint(imMisc.box(-3 + k * 3, pw + 3 - k * 3, 0.5 + hh * k / 3, 0.5 + hh * (k + 1) / 3, -pd / 2 + 1 + k * 2.5, -0.4), [0xb4935f, 0xa8875a, 0x9c7d52][k]); if (hh > 0.5) lab('improve', pw / 2, hh + 3, -pd / 4, '선행재하 성토 · 압밀 침하 기다림'); }
       if (IM === 'vac' && ip > 0.3 && P('wall') <= 0) { imMisc.tint(imMisc.box(-6, pw + 6, 0.5, 0.58, -pd / 2, 0), 0x2d4a3a); for (let z = -pd / 2 + 4; z < 0; z += 8) imMisc.tint(imMisc.box(-5, pw + 5, 0.58, 0.8, z - 0.15, z + 0.15), 0x2f7fd0); place(imPlant, -9, 0, -pd / 4); }
@@ -554,8 +578,8 @@ export function buildMethods(X) {
       if (wpId === 'wall' && act >= 0 && act < n) {
         const ei = wOrd[act], [x, z, tx, tz, nx, nz] = pathAt(wEl[ei]), lp = clamp(prog - act, 0, 1), fx = -nx, fz = -nz, yaw = yawOf(fx, fz);
         const batch = frac(wallP * Math.max(8, Math.min(26, Math.round(Ltot / 6))));
-        if (wRig) { place(wRig.g, x - fx * wRig.reach, 0, z - fz * wRig.reach, yaw); wRig.tool.position.y = lerp(wRig.H - wRig.La, -emb, Math.sin(Math.PI * batch)); }
-        if (wCrane) { const R2 = wCrane.tip.x; place(wCrane.g, x - fx * R2, 0, z - fz * R2, yaw); wCrane.turn.rotation.y = 0;
+        if (wRig) { place(wRig.g, x - fx * wRig.reach, 0, z - fz * wRig.reach, yaw); io.hot.push({ k: 'rig', x, y: 0, z }); wRig.tool.position.y = lerp(wRig.H - wRig.La, -emb, Math.sin(Math.PI * batch)); }
+        if (wCrane) { const R2 = wCrane.tip.x; place(wCrane.g, x - fx * R2, 0, z - fz * R2, yaw); io.hot.push({ k: 'rig', x, y: 0, z }); wCrane.turn.rotation.y = 0;
           if (WL === 'sheet') { wCrane.hang(topY + emb * (1 - lp) + 3.0); for (let k = 0; k < 3; k++) { const r = 1 + frac(T * 0.22 + k / 3) * 22; wRing.put(x, 0.15, z, r, 1, r); } }
           else { const de = Math.min(emb, emb * lp / 0.7); wCrane.hang(lp < 0.7 ? 0.4 - de + 7.2 : 6); slurP.ob(x, (0.1 - de) / 2, z, wSp - 0.1, de + 0.1, th, yawOf(tx, tz)); }
         }
@@ -573,7 +597,7 @@ export function buildMethods(X) {
         wP.box(0, th, -dn, 0.2, -pd / 2, 0); wP.box(pw - th, pw, -dn, 0.2, -pd / 2, 0); wP.box(0, pw, -dn, 0.2, -pd / 2, -pd / 2 + th); // 숏크리트 면
         for (let m = 1.0; m < dn; m += 1.5) for (let s = 0.75; s < Ltot; s += 1.5) { const [x, z, tx, tz, nx, nz] = pathAt(s); nailHead.ob(x + nx * (th / 2 + 0.04), -m, z + nz * (th / 2 + 0.04), 0.34, 0.34, 0.07, yawOf(tx, tz)); }
         const Ln = 0.6 * depth + 3, a = 0.18; for (let m = 1.0; m < dn; m += 1.5) { nailBar.seg(th, -m, 0.22, th - Ln * Math.cos(a), -m - Ln * Math.sin(a), 0.22, 0.09); nailBar.seg(pw - th, -m, 0.22, pw - th + Ln * Math.cos(a), -m - Ln * Math.sin(a), 0.22, 0.09); }
-        if ((wpId === 'wall' || wpId === 'excav' || wpId === 'support') && dn < depth - 0.3) { place(nailRig, th + 2.4, -dn, -pd / 4, Math.PI); }
+        if ((wpId === 'wall' || wpId === 'excav' || wpId === 'support') && dn < depth - 0.3) { place(nailRig, th + 2.4, -dn, -pd / 4, Math.PI); io.hot.push({ k: 'rig', x: th + 2.4, y: -dn, z: -pd / 4 }); }
       }
       if (wpId === 'wall' || wpId === 'excav') lab('wall', th + 3, 4, -pd / 4);
     }
@@ -611,7 +635,7 @@ export function buildMethods(X) {
           for (let s = 1; s < Ltot; s += 2.0) { const [x, z, tx, tz, nx, nz] = pathAt(s); supJ.ob(x + nx * (th / 2 + 0.52), y, z + nz * (th / 2 + 0.52), 0.5, 0.5, 0.12, yawOf(tx, tz)); supP.seg(x + nx * (th / 2 + 0.5), y, z + nz * (th / 2 + 0.5), x + nx * (th / 2 + 0.85), y + 0.12, z + nz * (th / 2 + 0.85), 0.14); }
           [[th, -1], [pw - th, 1]].forEach(([x, s2]) => { const bx = x + s2 * (La - 8) * Math.cos(a), be = -m - (La - 8) * Math.sin(a), tx2 = x + s2 * La * Math.cos(a), te = -m - La * Math.sin(a), bad = s2 < 0 && tx2 < sc.nb.x1; ancT.tint(ancT.seg(x, -m, 0.24, bx, be, 0.24, 0.1), bad ? 0xe5484d : 0xd9d9de); ancG.seg(bx, be, 0.24, tx2, te, 0.24, 0.5); if (bad && m === lv[0]) lab('support', tx2 + 2, te, 0.4, '앵커가 인접 대지 아래로 들어감'); });
         });
-        if (dug > 0.5 && dug < depth - 0.2 && (wpId === 'support' || wpId === 'excav')) place(ancRig, th + 2.6, -dug, -pd / 4, Math.PI);
+        if (dug > 0.5 && dug < depth - 0.2 && (wpId === 'support' || wpId === 'excav')) place(ancRig, th + 2.6, -dug, -pd / 4, Math.PI); io.hot.push({ k: 'rig', x: th + 2.6, y: -dug, z: -pd / 4 });
         if (dug > 1.9) lab('support', pw * 0.5, -dug + 3, -pd / 4);
       } else if (SP === 'raker') {
         const m = lv[0] ?? 1.5, bw = Math.min(depth * 0.9, pw * 0.22);
@@ -658,9 +682,23 @@ export function buildMethods(X) {
     const exOn = dug > 0.3 && S.earthP < 1 && ['support', 'excav', 'water', 'wall'].includes(wpId), rockNow = dug > cond.rockDepth && K('excav');
     if (exOn && ex1) {
       const sl = WL === 'open' ? Math.min(1.2 * dug, pw * 0.3) : 0, xa = th + 3 + sl, xb = pw - th - 3 - sl;
-      const e1x = clamp(lerp(xa, xb, 0.42 + 0.16 * Math.sin(T * 0.06)), xa, xb); place(ex1, e1x, -dug, -pd / 4 - 1, Math.PI); ex1.userData.pose(frac(T * 0.16), 1.6);
-      if (ex2) { place(ex2, clamp(pw * 0.75, xa, xb), -dug, -pd / 3 - 1, 0); ex2.userData.pose(frac(T * 0.16 + 0.5), -1.5); }
-      if (clam && dug > (SP === 'topdown' ? 2 : 7)) { const tx = SP === 'topdown' ? pw * 0.12 : pw - 6.5, oz = -pd / 4; const R2 = clam.tip.x; place(clam.g, tx + R2, SP === 'topdown' ? 0.25 : 0, oz, Math.PI); const yy = -dug + 2 + Math.abs(Math.sin(T * 0.35)) * Math.min(dug - 1, 14); clam.hang(yy - (SP === 'topdown' ? 0.25 : 0)); const open = 0.5 + 0.5 * Math.sin(T * 0.7); clam.att.userData.halves.forEach(h => { h.rotation.x = h.userData.s * 0.35 * open; }); }
+      const e1x = clamp(lerp(xa, xb, 0.42 + 0.16 * Math.sin(T * 0.06)), xa, xb); place(ex1, e1x, -dug, -pd / 4 - 1, Math.PI); ex1.userData.pose(frac(T * 0.16), 1.6); io.hot.push({ k: 'ex', x: e1x, y: -dug, z: -pd / 4 - 1 });
+      if (ex2) { place(ex2, clamp(pw * 0.75, xa, xb), -dug, -pd / 3 - 1, 0); ex2.userData.pose(frac(T * 0.16 + 0.5), -1.5); io.hot.push({ k: 'ex', x: clamp(pw * 0.75, xa, xb), y: -dug, z: -pd / 3 - 1 }); }
+      if (clam && dug > (SP === 'topdown' ? 2 : 7)) {
+        const td = SP === 'topdown', R2 = clam.tip.x, y0 = td ? 0.25 : 0.2, cx = td ? pw * 0.12 + R2 : deckOn0 ? DECK.cx : pw - 6.5 + R2, cz = td ? -pd / 4 : deckOn0 ? DECK.cz : -pd / 4;
+        place(clam.g, cx, y0, cz, Math.PI);
+        // 24초 순환: 내려가며 벌림 → 바닥에서 오므려 퍼 담음 → 올림 → 90° 선회 → 덤프 위에서 벌려 비움 → 되돌아옴
+        const ph = frac(T / 24), yb = -dug + 1.4, yt = 5.2;
+        const yy = ph < 0.2 ? lerp(yt, yb, sstep(0, 0.2, ph)) : ph < 0.3 ? yb : ph < 0.42 ? lerp(yb, yt, sstep(0.3, 0.42, ph)) : ph < 0.94 ? yt : yt;
+        const sw = deckOn0 || td ? sstep(0.42, 0.56, ph) * (1 - sstep(0.8, 0.94, ph)) : 0; clam.turn.rotation.y = sw * Math.PI / 2;
+        clam.hang(yy - y0);
+        const open = ph < 0.2 ? 1 : ph < 0.3 ? 1 - sstep(0.2, 0.28, ph) : ph > 0.6 && ph < 0.76 ? sstep(0.6, 0.66, ph) : 0;
+        clam.att.userData.halves.forEach(h => { h.rotation.x = h.userData.s * 0.4 * open; });
+        if (deckOn0 || td) io.bays.haul = { x: cx + 1.1, z: cz + R2, hx: 1, hz: 0, inside: true };
+        io.hot.push({ k: 'clam', x: cx - R2 + 3, y: -dug, z: cz + 2 });
+        if (wpId === 'excav' && ph > 0.6 && ph < 0.76) for (let k = 0; k < 3; k++) dustP.put(cx + 0.3 * k, yt - 1 - k * 0.7, cz + R2, 1.2 + k * 0.4, 0.9, 1.2 + k * 0.4);
+      }
+      if (deckOn0 && !io.bays.haul && dug > 1) io.bays.haul = { x: DECK.cx + 1.1, z: pd / 2 - 3.3, hx: 1, hz: 0, inside: true };
       if (rockNow && (EX === 'blast' || EX === 'mix')) {
         const bx = pw * (EX === 'mix' ? 0.7 : 0.5), bz = -pd / 4 - 6, ph = frac(T * 0.08);
         place(drill, bx - 7, -dug, bz + 1, 0);
@@ -679,6 +717,20 @@ export function buildMethods(X) {
       else if (wpId === 'excav') lab('excav', e1x, -dug + 7, -pd / 4 - 1, (EX === 'blast' || EX === 'splitter') && !rockNow ? `${SIG.excav[EX]} (GL−${Math.round(cond.rockDepth)}m 암반부터)` : undefined);
     }
 
+    // 작업구대 (복공판 + 주형보 + 받침보 + 기둥 + 난간)
+    if (deckOn0 && dug > 1 && S.earthP < 1) {
+      const { x0, x1, z0, z1 } = DECK;
+      wdP.box(x0, x1, 0.05, 0.25, z0, z1);
+      for (let x = x0 + 2; x < x1 - 0.5; x += 2) deckJ.box(x - 0.03, x + 0.03, 0.25, 0.27, z0, z1);
+      for (let z = z0 + 3; z < z1 - 0.5; z += 3) deckJ.box(x0, x1, 0.25, 0.27, z - 0.03, z + 0.03);
+      for (let x = x0 + 0.6; x < x1; x += 2.8) deckB.box(x - 0.18, x + 0.18, -0.7, 0.05, z0, z1);
+      for (let z = z0 + 1; z < z1; z += 4) deckB.box(x0, x1, -1.3, -0.7, z - 0.2, z + 0.2);
+      for (let x = x0 + 1; x < x1 - 0.5; x += 5.5) for (let z = z0 + 1; z < z1; z += 8) deckB.box(x - 0.2, x + 0.2, -dug - 0.4, -1.3, z - 0.2, z + 0.2);
+      [[0.62, 0.05], [1.15, 0.06]].forEach(([y, t]) => { deckR.box(x0, x0 + 0.06, 0.25 + y, 0.25 + y + t, z0, z1); deckR.box(x0, x1 - 4, 0.25 + y, 0.25 + y + t, z0, z0 + 0.06); });
+      for (let z = z0; z <= z1; z += 2) deckR.box(x0, x0 + 0.06, 0.25, 1.45, z - 0.03, z + 0.03);
+      if (wpId === 'excav') io.tags.push({ t: '작업구대 (복공판)', p: [x0 + 2, 1.8, z0 + 2], cls: 'eq dim' });
+    }
+
     // ---------- 기초 ----------
     R.rig.visible = false; R.pileI.count = 0;
     const foundOn = K('found') && P('found') > 0, foundP = P('found'), baseE = S.baseE, thick = S.thick, plen = S.plen;
@@ -694,8 +746,8 @@ export function buildMethods(X) {
         }
         if (wpId === 'found' && act >= 0 && act < n) {
           const [x, z] = piles[act], lp = clamp(prog - act, 0, 1);
-          if (FD === 'bored') { place(rcd, x, baseE + 1.5, z, 0); rcd.userData.kelly.rotation.y = T * 2; rcd.userData.kelly.position.y = 5 - 3 * Math.sin(Math.PI * clamp(lp / 0.55, 0, 1)); const R2 = fRig.tip.x; place(fRig.g, x + 2.5, baseE, z + R2, Math.PI / 2); fRig.hang(lp > 0.45 && lp < 0.6 ? 7 : 12); }
-          else { place(fRig.g, x, baseE, z + fRig.reach, Math.PI / 2); const top = (FD === 'micro' ? 0.6 : 0.6 + plen * (1 - lp)); fRig.tool.position.y = FD === 'micro' ? lerp(fRig.H - fRig.La, -plen, Math.sin(Math.PI * lp)) : top; if (FD !== 'micro' && (cond.noise !== 'low' || FD === 'steel')) for (let k = 0; k < 3; k++) { const r = 1 + frac(T * 0.25 + k / 3) * 20; fRing.put(x, baseE + 0.3, z, r, 1, r); } }
+          if (FD === 'bored') { place(rcd, x, baseE + 1.5, z, 0); io.hot.push({ k: 'rig', x, y: baseE, z }); rcd.userData.kelly.rotation.y = T * 2; rcd.userData.kelly.position.y = 5 - 3 * Math.sin(Math.PI * clamp(lp / 0.55, 0, 1)); const R2 = fRig.tip.x; place(fRig.g, x + 2.5, baseE, z + R2, Math.PI / 2); fRig.hang(lp > 0.45 && lp < 0.6 ? 7 : 12); }
+          else { place(fRig.g, x, baseE, z + fRig.reach, Math.PI / 2); io.hot.push({ k: 'rig', x, y: baseE, z }); const top = (FD === 'micro' ? 0.6 : 0.6 + plen * (1 - lp)); fRig.tool.position.y = FD === 'micro' ? lerp(fRig.H - fRig.La, -plen, Math.sin(Math.PI * lp)) : top; if (FD !== 'micro' && (cond.noise !== 'low' || FD === 'steel')) for (let k = 0; k < 3; k++) { const r = 1 + frac(T * 0.25 + k / 3) * 20; fRing.put(x, baseE + 0.3, z, r, 1, r); } }
           lab('found', x, baseE + 22, z);
         } else if (wpId === 'found') lab('found', pw * 0.5, baseE + thick + 3, -pd / 4);
       }
@@ -711,8 +763,7 @@ export function buildMethods(X) {
       } else matRb.forEach(o => { o.visible = false; });
       if (matP > 0 && matP < 1 && (wpId === 'found' || wpId === 'pour')) {
         const np = ids.pour === 'multi' ? 3 : 2, zc0 = -pd / 4;
-        for (let i = 0; i < np; i++) { const pt = pumps[i], z = zc0 + (i - (np - 1) / 2) * 13; place(pt.g, S.PX, 0.1, z, 0); const tx = 2 + (pw - 4) * clamp(0.15 + 0.7 * matP + (i - 1) * 0.08, 0.05, 0.95); aimBoom(pt, new THREE.Vector3(S.PX, 3.3, z - 2.6), new THREE.Vector3(tx, baseE + thick * matP + 0.4, z + 3 * Math.sin(T * 0.2 + i))); }
-        for (let i = 0; i < Math.min(4, np + 1); i++) { place(mixers[i], S.MX, 0.1, zc0 + 6 + (i - 1) * 11, 0); mixers[i].userData.drum.rotation.y = T * 1.6; }
+        for (let i = 0; i < np; i++) { const pt = pumps[i], z = zc0 + (i - (np - 1) / 2) * 13; place(pt.g, S.PX, 0.1, z, PYAW); if (i === 0) io.bays.pump = { x: S.PX, z, nose: PNOSE }; const tx = 2 + (pw - 4) * clamp(0.15 + 0.7 * matP + (i - 1) * 0.08, 0.05, 0.95); { const hz = new THREE.Vector3(tx, baseE + thick * matP + 0.4, z + 3 * Math.sin(T * 0.2 + i)); aimBoom(pt, new THREE.Vector3(S.PX, 3.3, z - 2.6 * PNOSE), hz); io.hot.push({ k: 'hose', x: hz.x, y: hz.y - 0.1, z: hz.z }); } }
         lab('found', pw * 0.5, baseE + thick + 3, -pd / 4, ids.pour === 'multi' ? '매트 대량 타설 · 펌프카 3대 동시' : '매트 타설 · 펌프카 2대');
       }
     } else matRb.forEach(o => { o.visible = false; });
@@ -883,12 +934,12 @@ export function buildMethods(X) {
       if (S.cutNow) tgt.z = Math.min(tgt.z, -1);
       if (PR === 'boom' || PR === 'winter' || PR === 'multi') {
         const np = PR === 'multi' ? 3 : 1; let far = false;
-        for (let i = 0; i < np; i++) { const pt = pumps[i], z = -bd / 4 + (i - (np - 1) / 2) * 14; place(pt.g, S.PX, 0.1, z, 0); const t2 = tgt.clone(); if (np > 1) t2.x = fp.x0 + (fp.x1 - fp.x0) * clamp(pf + (i - 1) * 0.22, 0.05, 0.95); far = aimBoom(pt, new THREE.Vector3(S.PX, 3.3, z - 2.6), t2) || far; }
-        for (let i = 0; i < (PR === 'multi' ? 4 : 2); i++) { place(mixers[i], S.MX, 0.1, -bd / 4 + 8 + i * 10, 0); mixers[i].userData.drum.rotation.y = T * 1.6; }
+        for (let i = 0; i < np; i++) { const pt = pumps[i], z = -bd / 4 + (i - (np - 1) / 2) * 14; place(pt.g, S.PX, 0.1, z, PYAW); if (i === 0) io.bays.pump = { x: S.PX, z, nose: PNOSE }; const t2 = tgt.clone(); if (np > 1) t2.x = fp.x0 + (fp.x1 - fp.x0) * clamp(pf + (i - 1) * 0.22, 0.05, 0.95); far = aimBoom(pt, new THREE.Vector3(S.PX, 3.3, z - 2.6 * PNOSE), t2) || far; io.hot.push({ k: 'hose', x: t2.x, y: f.e1 + 0.2, z: t2.z }); }
         if (far && wpId === 'pour') lab('pour', S.PX, 50, -bd / 4, `붐 도달 58m 초과 · ${Math.round(f.e1)}m는 고정 배관 필요`);
         else if (wpId === 'pour') lab('pour', S.PX, Math.min(f.e1 + 12, 60), -bd / 4);
       } else if (PR === 'cpb' || PR === 'highp') {
-        const sx = pw + 2.4, sz = -bd / 4 - 6; place(stat, sx, 0, sz, 0);
+        // 고정식 펌프는 바깥 차로(점용)에 두고, 레미콘이 뒤 호퍼에 후진해 붙는다 (펌프 뒤끝이 레미콘 쪽)
+        const sx = S.PX, sz = -bd / 4 - 6, hz = sz - PNOSE * 6.6; place(stat, sx, 0.1, sz, PNOSE < 0 ? 0 : Math.PI); io.bays.pump = { x: sx, z: hz + PNOSE * 5.6, nose: PNOSE };
         const rx = G.bx1 + 0.45, rz = -bd / 4, wd = PR === 'highp' ? 0.34 : 0.22;
         pipeP.seg(sx, 1.6, sz + 1.5, rx, 1.6, rz, wd); pipeP.seg(rx, 1.6, rz, rx, f.e1 + 0.6, rz, wd); pipeP.seg(rx, f.e1 + 0.6, rz, S.cx1 + 2.5, f.e1 + 0.6, rz, wd * 0.9);
         if (PR === 'highp') for (let y = 30; y < f.e1; y += 36) cpbP.box(rx - 0.5, rx + 0.5, y, y + 1.2, rz - 0.5, rz + 0.5);
@@ -990,6 +1041,7 @@ export function buildMethods(X) {
     }
 
     pools.forEach(Pp => { Pp.im.count = Math.min(Pp.n, Pp.im.instanceMatrix.count); Pp.im.instanceMatrix.needsUpdate = true; if (Pp.im.instanceColor) Pp.im.instanceColor.needsUpdate = true; });
+    tagsNow.forEach((p, g) => { if (g.visible) io.tags.push({ t: g.userData.eq, p, cls: 'eq' }); });
     return dyn;
   }
 

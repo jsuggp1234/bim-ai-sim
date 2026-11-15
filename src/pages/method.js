@@ -11,7 +11,7 @@ import { store } from '../store.js';
 import { dot, hbar, escH } from '../ui/sys.js';
 import { wpImpact, delta, vsBaseline, sectionGeom, wpLabel, optName } from '../sim/impact.js';
 import { makeScene, frame, roiFor, lerpRoi, winFor } from '../ui/buildsim.js';
-import { workFig, workInfo } from '../ui/workstep.js';
+import { workFig, workInfo, classify } from '../ui/workstep.js';
 
 // 받침 있으면 '이', 없으면 '가'
 const josaIGa = (w) => { const c = String(w).trim().slice(-1).charCodeAt(0); return c >= 0xAC00 && c <= 0xD7A3 && (c - 0xAC00) % 28 ? '이' : '가'; };
@@ -302,7 +302,9 @@ export function mount(root) {
       // 판정 표식 위치는 2D 장면이 계산한 단면 좌표를 그대로 쓴다 (2D 창이 닫혀 있으면 0.3초마다)
       const now = performance.now();
       if (!want2d && (!ui.at || now - ui.atT > 300)) { try { ui.at = frame(scene, L.wp.id, ui.p, ui.T, roi, [], { narrow: false }).at; } catch { ui.at = {}; } ui.atT = now; }
-      try { v3.update({ sc: scene, wpId: L.wp.id, p: ui.p, T: ui.T, marks, at: ui.at }); }
+      const S3 = stepsOf(), k3 = Math.min(S3.length - 1, Math.floor(ui.p * S3.length * 0.999)), s3 = S3[k3];
+      const step = s3 && s3.opt !== '' ? { wp: L.wp.id, a: classify(L.wp.id, s3.opt, s3.w || s3.t), k: k3, n: S3.length } : null;
+      try { v3.update({ sc: scene, wpId: L.wp.id, p: ui.p, T: ui.T, marks, at: ui.at, step }); }
       catch (e) { console.error(e); v3.dispose(); v3 = null; main2d = true; paintView(); flash('3D 장면을 그리지 못해 2D 단면으로 보여 줍니다.'); return; }
     }
     const S = stepsOf(), k = Math.min(S.length - 1, Math.floor(ui.p * S.length * 0.999));
