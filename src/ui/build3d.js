@@ -210,7 +210,8 @@ export function createSim3D(host, opts = {}) {
   }
   function accOf(m) {
     if (accMats.has(m)) return accMats.get(m);
-    const a = keepTriplanar(m, m.clone()); a.color = m.color.clone().lerp(ACC, 0.07); a.emissive = ACC.clone(); a.emissiveIntensity = 0.035;
+    const a = keepTriplanar(m, m.clone()); if (a.color) a.color = m.color.clone().lerp(ACC, 0.07);
+    if (a.emissive) { a.emissive = ACC.clone(); a.emissiveIntensity = 0.035; } // 발광이 없는 재질(MeshBasic: 철근 배근 판)에 emissive를 붙이면 그릴 때 오류가 난다
     accMats.set(m, a); return a;
   }
   const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
