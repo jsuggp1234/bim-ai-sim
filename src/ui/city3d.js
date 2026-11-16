@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { buildPeople, crewAt, PED_LOOK } from './crew3d.js';
 import { waterSurface } from '../sim/scene/water.js';
+import { speciesGeometries, pickSpecies, STREET_SP } from '../sim/scene/context3d.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
@@ -14,8 +15,8 @@ const VEH = [{ k: 'car', w: 1.8, h: 1.45, L: 4.6, p: 0.44 }, { k: 'suv', w: 1.9,
 
 // 입면 무늬 (4×4칸 한 장, 칸 = 3.2m × 3.4m). map(색)과 rm(초록 = 거칠기, 파랑 = 금속성)을 같은 배치로 그려
 // 유리는 매끈하게(하늘이 비친다), 벽은 거칠게. 칸마다 커튼·블라인드·실내 밝기를 조금씩 다르게
-function facadeTex(kind, seed) {
-  const R = rng(seed), N = 512, S = 128;
+function facadeTex(kind, seed, vr = 0) {
+  const R = rng(seed), N = 512, S = 128, VW = [1, 0.8, 1.16][vr % 3], VH = [1, 0.86, 1.08][vr % 3];
   const ca = document.createElement('canvas'), cb = document.createElement('canvas'); ca.width = ca.height = cb.width = cb.height = N;
   const x = ca.getContext('2d'), y = cb.getContext('2d');
   const both = (fs, rough, metal, X, Y, W, H) => { x.fillStyle = fs; x.fillRect(X, Y, W, H); y.fillStyle = `rgb(0,${Math.round(rough * 255)},${Math.round(metal * 255)})`; y.fillRect(X, Y, W, H); };
@@ -45,7 +46,7 @@ function facadeTex(kind, seed) {
       for (let k = 0; k < S; k += 10) { both('#aeb6c1', 0.5, 0.6, X + k, Y, 4, S); }
       if (j === 0) glass(X + 6, Y + 14, S - 12, 22, ['#7d97ae', '#4b5f72']);
     } else {
-      const ww = kind === 'house' ? 52 : kind === 'school' ? 96 : 76, wh = kind === 'house' ? 50 : kind === 'school' ? 58 : 62, ox = X + (S - ww) / 2, oy = Y + 26;
+      const ww = Math.min(116, Math.round((kind === 'house' ? 52 : kind === 'school' ? 96 : 76) * VW)), wh = Math.min(84, Math.round((kind === 'house' ? 50 : kind === 'school' ? 58 : 62) * VH)), ox = X + (S - ww) / 2, oy = Y + 26;
       both('#f0eee8', 0.6, 0.1, ox - 5, oy - 5, ww + 10, wh + 10); // 창틀
       glass(ox, oy, ww, wh, ['#6b8297', '#33414e']);
       both('#e9e7e2', 0.5, 0.2, ox + ww / 2 - 1.5, oy, 3, wh); // 가운데 창살
@@ -67,18 +68,6 @@ function profileGeo(pts) {
 }
 const CAR_BODY = [[-0.5, 0.2], [-0.5, 0.5], [-0.44, 0.56], [-0.27, 0.58], [-0.16, 0.9], [0.12, 0.92], [0.27, 0.6], [0.46, 0.55], [0.5, 0.46], [0.5, 0.2]];
 const CAR_GLASS = [[-0.255, 0.6], [-0.155, 0.865], [0.115, 0.885], [0.255, 0.62]];
-// 나무 수관: 울퉁불퉁한 덩어리 셋
-function crownGeo() {
-  const parts = [[0, 0.5, 0, 0.5], [0.22, 0.42, 0.12, 0.34], [-0.2, 0.4, -0.14, 0.36], [0.05, 0.72, -0.05, 0.32]].map(([cx, cy, cz, r], k) => {
-    const g = new THREE.IcosahedronGeometry(r, 1), p = g.attributes.position;
-    for (let i = 0; i < p.count; i++) { const n = Math.sin(p.getX(i) * 17.1 + k) * Math.cos(p.getY(i) * 13.7) * Math.sin(p.getZ(i) * 11.3 + k * 2); const s = 1 + n * 0.16; p.setXYZ(i, p.getX(i) * s + cx, p.getY(i) * s + cy, p.getZ(i) * s + cz); }
-    return g.index ? g.toNonIndexed() : g;
-  });
-  const pos = [], nrm = []; parts.forEach(g => { g.computeVertexNormals(); pos.push(...g.attributes.position.array); nrm.push(...g.attributes.normal.array); g.dispose(); });
-  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
-  g.computeBoundingBox(); const bb = g.boundingBox, c = bb.getCenter(new THREE.Vector3()), sz = bb.getSize(new THREE.Vector3());
-  g.translate(-c.x, -c.y, -c.z); g.scale(1 / sz.x, 1 / sz.y, 1 / sz.z); g.computeBoundingSphere(); return g;
-}
 // 상자 형상: 벽면 UV를 m 단위(칸 4개 = 텍스처 한 장)로
 function bldGeo(w, h, d, cw = 3.2, ch = 3.4) {
   const g = new THREE.BoxGeometry(w, h, d), p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv;
@@ -135,14 +124,23 @@ export function buildCity(X) {
   { const gr = inst(BOX, mat(0x3a3a3f, { metal: 0.5 }), 40, null); let ng = 0; for (let z = -ZC + 6; z < ZC; z += 20) { ibox(gr, ng++, C.curb + 0.05, C.curb + 0.55, 0.1, 0.13, z, z + 0.9); ibox(gr, ng++, C.road[1] - 0.55, C.road[1] - 0.05, 0.1, 0.13, z + 8, z + 8.9); } gr.count = Math.min(ng, gr.instanceMatrix.count); }
 
   // ---------- 가로수 · 가로등 · 신호등 · 버스 정류장 · 볼라드 ----------
-  const trunkM = mat(0x6b5a48, { rough: 0.95 }), leafM = mat(0xffffff, { rough: 0.85 });
-  const CROWN = crownGeo(); geos.push(CROWN);
-  const LEAF = [0x4d6b3a, 0x5b7a41, 0x46663c, 0x6a8448, 0x55703d].map(c => new THREE.Color(c));
-  const NT = 160, treeT = inst(CYL, trunkM, NT, null), treeA = inst(CROWN, leafM, NT, null), pitM = inst(BOX, mat(0x5b4a36, { tex: 'soil' }), NT, null); let nt = 0;
-  const tree = (x, z, h, r) => { const k = (Math.abs(Math.round(x * 7.1 + z * 3.3)) % 997) / 997; ibox(treeT, nt, x - 0.15, x + 0.15, 0.18, h * 0.6, z - 0.15, z + 0.15); ibox(treeA, nt, x - r * 1.15, x + r * 1.15, h * 0.42, h * 0.42 + r * 2.1, z - r * 1.15, z + r * 1.15, 0, 0); treeA.setColorAt(nt, LEAF[Math.floor(k * LEAF.length)]); ibox(pitM, nt, x - 0.7, x + 0.7, 0.18, 0.2, z - 0.7, z + 0.7); nt++; };
-  C.trees.forEach((t, i) => { for (let z = -ZC + 5 + i * 4; z < ZC - 3; z += 9) { if (i === 0 && Math.abs(z - pd / 2 - 3 + 5) < 7) continue; if (Math.abs(z - zx) < 4) continue; tree(t.x, z, t.h, t.r); } });
-  if (C.left.trees) C.left.trees.forEach(t => { for (let z = -ZC + 6; z < ZC; z += 11) tree(t.x, z, t.h, t.r); });
-  treeT.count = treeA.count = pitM.count = Math.min(nt, treeT.instanceMatrix.count); if (treeA.instanceColor) treeA.instanceColor.needsUpdate = true;
+  // 가로수: 줄마다 한 수종 (은행나무·느티나무·벚나무·버즘나무), 그루마다 키·폭·잎 색을 조금씩
+  const SPG = speciesGeometries({ trunk: new THREE.Color(0x6a5847), crown: new THREE.Color(0x5c7a45) }); Object.values(SPG).forEach(g => geos.push(g));
+  const treeM = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0 }); mats2.push(treeM);
+  const NT = 160, spI = {}, spN = {}, pitM = inst(BOX, mat(0x5b4a36, { tex: 'soil' }), NT, null); let nt = 0;
+  const tcol = new THREE.Color();
+  const tree = (x, z, h, r, sp) => {
+    if (!spI[sp]) { spI[sp] = inst(SPG[sp], treeM, NT, null); spN[sp] = 0; }
+    const im = spI[sp], i = spN[sp]; if (i >= NT) return; spN[sp]++;
+    const k = (Math.abs(Math.round(x * 7.1 + z * 3.3)) % 997) / 997, k2 = (Math.abs(Math.round(x * 3.9 - z * 5.7)) % 991) / 991;
+    X._p.set(x, 0.18, z); X._q.setFromEuler(X._e.set(0, k * 6.283, 0)); X._s.set(2.3 * r * (0.88 + 0.24 * k2), h * (0.92 + 0.16 * k), 2.3 * r * (0.88 + 0.24 * k)); X._m.compose(X._p, X._q, X._s); im.setMatrixAt(i, X._m);
+    const b = 0.86 + 0.26 * k; im.setColorAt(i, tcol.setRGB(b * (1 + (k2 - 0.5) * 0.08), b, b * (1 - (k2 - 0.5) * 0.1)));
+    ibox(pitM, nt, x - 0.7, x + 0.7, 0.18, 0.2, z - 0.7, z + 0.7); nt++;
+  };
+  const rowSp = C.trees.map(() => pickSpecies(STREET_SP, R())[0]), leftSp = pickSpecies(STREET_SP, R())[0];
+  C.trees.forEach((t, i) => { for (let z = -ZC + 5 + i * 4; z < ZC - 3; z += 9) { if (i === 0 && Math.abs(z - pd / 2 - 3 + 5) < 7) continue; if (Math.abs(z - zx) < 4) continue; tree(t.x, z, t.h, t.r, rowSp[i]); } });
+  if (C.left.trees) C.left.trees.forEach(t => { for (let z = -ZC + 6; z < ZC; z += 11) tree(t.x, z, t.h, t.r, leftSp); });
+  pitM.count = Math.min(nt, pitM.instanceMatrix.count); Object.keys(spI).forEach(k => { spI[k].count = spN[k]; if (spI[k].instanceColor) spI[k].instanceColor.needsUpdate = true; });
   const poleM = mat(0x8a8f99, { metal: 0.6, rough: 0.4 }), lampM = mat(0xfff1c8, { em: 1.1 });
   const poleI = inst(CYL, poleM, 60, null), armI = inst(BOX, poleM, 60, null), headI = inst(BOX, lampM, 60, null); let np = 0;
   C.lights.forEach(L => { for (let z = -ZC + 12; z < ZC; z += 26) { ibox(poleI, np, L.x - 0.1, L.x + 0.1, 0.18, L.h, z - 0.1, z + 0.1); ibox(armI, np, Math.min(L.x, L.x + L.dir * L.arm), Math.max(L.x, L.x + L.dir * L.arm), L.h - 0.1, L.h + 0.05, z - 0.06, z + 0.06); const hx = L.x + L.dir * L.arm; ibox(headI, np, hx - 0.45, hx + 0.45, L.h - 0.28, L.h - 0.1, z - 0.22, z + 0.22); np++; } });
@@ -197,11 +195,11 @@ export function buildCity(X) {
   if (Lf.car) { const x = Lf.car.x; box(mat(0x9aa3ad, { metal: 0.4 }), null, x - 0.9, x + 0.9, 0.35, 1.0, -pd / 4 - 2.3, -pd / 4 + 2.3); box(mat(0x2b3440, { metal: 0.5, rough: 0.3 }), null, x - 0.8, x + 0.8, 1.0, 1.45, -pd / 4 - 1.2, -pd / 4 + 1.2); }
 
   // ---------- 건물: 인접 · 건너편 · 뒤 블록 ----------
-  const TEX = {}; const texOf = (k) => { if (!TEX[k]) { TEX[k] = facadeTex(k, 11 + Object.keys(TEX).length * 31); texs.push(TEX[k].map, TEX[k].rm); } return TEX[k]; };
+  const TEX = {}; const texOf = (k, v = 0) => { const key = k + '#' + v; if (!TEX[key]) { TEX[key] = facadeTex(k, 11 + Object.keys(TEX).length * 31, v); texs.push(TEX[key].map, TEX[key].rm); } return TEX[key]; };
   const roofM = mat(0x8d8d93, { rough: 0.9 });
   const wallMats = new Map();
-  const wallMat = (k, tint) => { const key = k + tint; if (!wallMats.has(key)) { const T = texOf(k); const m = new THREE.MeshStandardMaterial({ map: T.map, roughnessMap: T.rm, metalnessMap: T.rm, color: tint, roughness: 1, metalness: 1, envMapIntensity: 1.1 }); mats2.push(m); wallMats.set(key, m); } return wallMats.get(key); };
-  const TINT = [0xffffff, 0xf2eee8, 0xe6eaf0, 0xf7f1e8, 0xe9e6df];
+  const wallMat = (k, tint, v = 0) => { const key = k + tint + '#' + v; if (!wallMats.has(key)) { const T = texOf(k, v); const m = new THREE.MeshStandardMaterial({ map: T.map, roughnessMap: T.rm, metalnessMap: T.rm, color: tint, roughness: 1, metalness: 1, envMapIntensity: 1.1 }); mats2.push(m); wallMats.set(key, m); } return wallMats.get(key); };
+  const TINT = [0xffffff, 0xf2eee8, 0xe6eaf0, 0xf7f1e8, 0xe9e6df, 0xf3e3cf, 0xdfe5e8, 0xe9dccb, 0xd9d9d6, 0xf5e9de];
   const roofTop = inst(BOX, mat(0xb5b5ba), 120, null), tankI = inst(CYL, mat(0xc9ccd3, { metal: 0.3 }), 60, null), oduI = inst(BOX, mat(0xd9d9de, { metal: 0.3 }), 160, null);
   const shopG = inst(BOX, mat(0xffe2a8, { em: 0.45, op: 0.85 }), 60, null), awn = inst(BOX, mat(0xffffff), 60, null), sign = inst(BOX, mat(0xffffff, { em: 0.6 }), 60, null);
   const balI = inst(BOX, mat(0xd2d0cb), 400, null);
@@ -211,7 +209,7 @@ export function buildCity(X) {
   function bld(x0, x1, z0, z1, h, k, face, o = {}) {
     if (!(x1 - x0 > 1 && z1 - z0 > 1 && h > 2)) return;
     const w = x1 - x0, d = z1 - z0, g = bldGeo(w, h, d); geos.push(g);
-    const wm = wallMat(k === 'school' ? 'school' : k, TINT[Math.floor(R() * TINT.length)]);
+    const wm = wallMat(k === 'school' ? 'school' : k, TINT[Math.floor(R() * TINT.length)], Math.floor(R() * 3));
     const m = new THREE.Mesh(g, [wm, wm, roofM, roofM, wm, wm]); m.position.set((x0 + x1) / 2, h / 2, (z0 + z1) / 2); root.add(m);
     // 옥상: 파라펫 · 계단탑 · 물탱크 · 실외기
     if (k !== 'house') { ibox(roofTop, nr++, x0, x1, h, h + 1.0, z0, z0 + 0.25); ibox(roofTop, nr++, x0, x1, h, h + 1.0, z1 - 0.25, z1); ibox(roofTop, nr++, x0, x0 + 0.25, h, h + 1.0, z0, z1); ibox(roofTop, nr++, x1 - 0.25, x1, h, h + 1.0, z0, z1); }
@@ -345,10 +343,11 @@ export function buildCity(X) {
     // 사람
     people.begin();
     // 보행자 (보도 양쪽, 오가며)
-    for (let i = 0; i < 16; i++) { const sw = i % 2 ? C.sw2 : C.sw, dir = i % 4 < 2 ? 1 : -1, sp = 1.2 + (i % 3) * 0.2, s = ((T * sp / (2 * ZC) + i * 0.137) % 1) * 2 * ZC; let z = dir > 0 ? -ZC + s : ZC - s; if (i % 2 === 0 && z > gz0 - 1 && z < gz1 + 1) continue; const x = sw[0] + 0.8 + ((i * 0.37) % 1) * (sw[1] - sw[0] - 1.6); people.add(x, 0.18, z, dir > 0 ? 0 : Math.PI, 'walk', T, (T * sp + i * 3.1) * 4.6, PED_LOOK(i)); }
+    const extra = []; // 누르면 대화할 수 있는 사람 (보행자 = 주민, 게이트 신호수 = 경비, 차로 신호수)
+    for (let i = 0; i < 16; i++) { const sw = i % 2 ? C.sw2 : C.sw, dir = i % 4 < 2 ? 1 : -1, sp = 1.2 + (i % 3) * 0.2, s = ((T * sp / (2 * ZC) + i * 0.137) % 1) * 2 * ZC; let z = dir > 0 ? -ZC + s : ZC - s; if (i % 2 === 0 && z > gz0 - 1 && z < gz1 + 1) continue; const x = sw[0] + 0.8 + ((i * 0.37) % 1) * (sw[1] - sw[0] - 1.6); people.add(x, 0.18, z, dir > 0 ? 0 : Math.PI, 'walk', T, (T * sp + i * 3.1) * 4.6, PED_LOOK(i)); extra.push({ id: 'ped' + i, x, y: 1.3, z, role: 'resident', seed: 300 + i }); }
     // 신호수 (게이트 · 점용 차로)
-    const g1 = crewAt(gateBusy ? 'signal' : 'stand', gx + 1.2, 0.18, gz1 + 1.2, [gx + 8, gz1 + 1.2], T, 1); people.add(g1.x, g1.y, g1.z, g1.yaw, g1.act, g1.t, 0, g1.lk);
-    if (occ.size) { const xo = Math.min((lanes[Math.max(...occ)].x1) + 0.6, C.road[1] - 0.6); [pd / 2 + 8, -pd / 2 - 8].forEach((zz, k) => { const s2 = crewAt('signal', xo, 0.1, zz, [xo, zz + (k ? -10 : 10)], T, 2 + k); people.add(s2.x, s2.y, s2.z, s2.yaw, s2.act, s2.t, 0, s2.lk); }); }
+    const g1 = crewAt(gateBusy ? 'signal' : 'stand', gx + 1.2, 0.18, gz1 + 1.2, [gx + 8, gz1 + 1.2], T, 1); people.add(g1.x, g1.y, g1.z, g1.yaw, g1.act, g1.t, 0, g1.lk); extra.push({ id: 'guard', x: g1.x, y: 1.3, z: g1.z, role: 'guard', seed: 11 });
+    if (occ.size) { const xo = Math.min((lanes[Math.max(...occ)].x1) + 0.6, C.road[1] - 0.6); [pd / 2 + 8, -pd / 2 - 8].forEach((zz, k) => { const s2 = crewAt('signal', xo, 0.1, zz, [xo, zz + (k ? -10 : 10)], T, 2 + k); people.add(s2.x, s2.y, s2.z, s2.yaw, s2.act, s2.t, 0, s2.lk); extra.push({ id: 'traffic' + k, x: s2.x, y: 1.2, z: s2.z, role: 'traffic', seed: 21 + k }); }); }
     // 작업자 (build3d가 넘긴 자리와 동작)
     work.forEach(w => people.add(w.x, w.y, w.z, w.yaw, w.act, w.t, w.ph, w.lk));
     people.end();
@@ -362,6 +361,7 @@ export function buildCity(X) {
       ibox(barI, nb2++, x0, xe, 0.4, 1.6, zb + 7, zb + 7.15); ibox(barI, nb2++, x0, xe, 0.4, 1.6, za - 7.15, za - 7);
     }
     coneI.count = Math.min(nc, coneI.instanceMatrix.count); barI.count = Math.min(nb2, barI.instanceMatrix.count); coneI.instanceMatrix.needsUpdate = barI.instanceMatrix.needsUpdate = true;
+    return { extra };
   }
   // 사무실: prep 진행률에 따라
   function offices(on, nBox) {

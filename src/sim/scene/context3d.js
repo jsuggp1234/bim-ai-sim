@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { facadeMaterial, PAT, surf } from './facade.js';
 import { animateWater, shoreMask } from './water.js';
+import { groundDetail } from './noise.js';
 import { terrainFn, inPoly, centroid, rng, hashStr, densify, ROAD_CLASS } from '../ctxmodel.js';
 
 const E = 3600; // 지면 텍스처 범위(±m)
@@ -157,6 +158,123 @@ export function repaintTree(g, P) {
   c.needsUpdate = true;
 }
 
+// 벽 색: 종류마다 실제 도시에서 흔한 색 몇 가지 (낮 팔레트 기준 비율로 곱해 다른 테마에서도 같은 관계)
+const KIND_REF = { res: 0xd6d0c3, house: 0xb48d76, com: 0xb6b9bc, tower: 0x8e9eab, ind: 0xc3c0b9, civic: 0xcbbfa6 };
+const KIND_PAL = {
+  res: [0xd6d0c3, 0xe4ddd0, 0xcfc9bd, 0xece8df, 0xd9cbb8, 0xc9c4bd, 0xdcc7b4, 0xb9b3a8, 0xe8e2d2, 0xc7b8a6],
+  house: [0xb48d76, 0xa35f47, 0xc9a27e, 0xe3ddd0, 0x8a7a6c, 0xd1b89c, 0x7f5a4a, 0xbfb3a3],
+  com: [0xb6b9bc, 0xc9c3b5, 0x9ea6ad, 0x7f858a, 0xd8d4cc, 0xa99b8a, 0xc2c7cc, 0x8f8a82],
+  tower: [0x8e9eab, 0x7b8f9e, 0x9aa8b0, 0x6f7f8a, 0xa7b5bd, 0x5f7484, 0xb4bcc0],
+  ind: [0xc3c0b9, 0xa9b8c6, 0xd6d6d2, 0x9fb3a2, 0xc9b9a0, 0xb5b5b0],
+  civic: [0xcbbfa6, 0xb07a5e, 0xd5cfc2, 0xa9a59c, 0xc4a98a],
+};
+const ROOF_TILE = [0x4f565e, 0x3f5a73, 0x7a4a3a, 0x5d6b5a, 0x8a5a44, 0x6b6b6b, 0x5a4a44];
+const _rc = new THREE.Color(), _pc = new THREE.Color();
+function wallColor(Pn, kind, R) {
+  const pal = KIND_PAL[kind] || KIND_PAL.com, ref = _rc.setHex(KIND_REF[kind] || KIND_REF.com), pick = _pc.setHex(pal[Math.floor(R() * pal.length) % pal.length]), b = 0.95 + R() * 0.08;
+  const base = Pn[KIND_COL[kind] || 'wCom'];
+  return new THREE.Color(Math.min(1, base.r * pick.r / ref.r * b), Math.min(1, base.g * pick.g / ref.g * b), Math.min(1, base.b * pick.b / ref.b * b));
+}
+// 모임지붕 (주택): 외접 상자 위에 처마를 내밀고 용마루를 긴 쪽으로. B에 정점을 넣는다
+function hipRoof(B, o, y, hr, e, c) {
+  const W = o.w / 2 + e, D = o.d / 2 + e, ca = Math.cos(o.a), sa = Math.sin(o.a);
+  const P = (lx, ly, lz) => [o.x + lx * ca - lz * sa, y + ly, o.z + lx * sa + lz * ca];
+  let faces;
+  if (o.w >= o.d) { const r = Math.max(0, o.w / 2 - o.d / 2); const A = P(-W, 0, -D), Bq = P(W, 0, -D), C = P(W, 0, D), Dd = P(-W, 0, D), R1 = P(-r, hr, 0), R2 = P(r, hr, 0); faces = [[Dd, C, R2, R1], [Bq, A, R1, R2], [A, Dd, R1], [C, Bq, R2]]; }
+  else { const r = Math.max(0, o.d / 2 - o.w / 2); const A = P(-W, 0, -D), Bq = P(W, 0, -D), C = P(W, 0, D), Dd = P(-W, 0, D), R1 = P(0, hr, -r), R2 = P(0, hr, r); faces = [[A, Dd, R2, R1], [C, Bq, R1, R2], [Bq, A, R1], [Dd, C, R2]]; }
+  faces.forEach(f => {
+    const [a, b, cc] = f, ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = cc[0] - a[0], vy = cc[1] - a[1], vz = cc[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const L = Math.hypot(nx, ny, nz) || 1; nx /= L; ny /= L; nz /= L;
+    const flip = ny < 0; if (flip) { nx = -nx; ny = -ny; nz = -nz; }
+    const ids = f.map(p => B.v(p[0], p[1], p[2], nx, ny, nz, c));
+    const tri = (i, j, k) => (flip ? B.tri(ids[i], ids[k], ids[j]) : B.tri(ids[i], ids[j], ids[k]));
+    tri(0, 1, 2); if (f.length === 4) tri(0, 2, 3);
+  });
+}
+
+// ---------- 수종 ----------
+// 높이 1 기준 한 그루 (줄기 + 수관 덩어리, 정점색). 수종마다 수관 모양·잎 색·줄기 색이 다르다.
+// zelkova 느티나무(넓게 퍼진 둥근 수관) · plane 버즘나무(크고 둥근) · ginkgo 은행나무(좁은 원뿔형, 연두) · cherry 벚나무(낮고 넓은 우산형) ·
+// pine 소나무(굽은 붉은 줄기, 납작한 잎 뭉치 여럿, 짙은 청록) · conifer 메타세쿼이아·전나무(좁고 높은 원뿔) · shrub 관목(낮은 덤불)
+export const TREE_SPECIES = {
+  zelkova: { tint: [1.0, 1.0, 1.0], bark: [1, 1, 1] },
+  plane: { tint: [1.08, 1.07, 0.92], bark: [1.35, 1.3, 1.15] },
+  ginkgo: { tint: [1.24, 1.2, 0.74], bark: [0.92, 0.86, 0.84] },
+  cherry: { tint: [0.93, 0.97, 0.9], bark: [0.72, 0.6, 0.6] },
+  pine: { tint: [0.7, 0.84, 0.86], bark: [1.4, 0.82, 0.66] },
+  conifer: { tint: [0.9, 1.08, 0.82], bark: [1.05, 0.8, 0.7] },
+  shrub: { tint: [0.84, 1.04, 0.78], bark: [1, 1, 1] },
+};
+function lump(r, cx, cy, cz, sx = 1, sy = 1, sz = 1, det = 1, seed = 0) {
+  const g = new THREE.IcosahedronGeometry(r, det), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), n = 1 + 0.11 * Math.sin(x * 23.1 + seed * 3.7) * Math.cos(y * 19.7 - seed) + 0.06 * Math.sin(z * 31.3 + seed * 1.3);
+    p.setXYZ(i, x * n * sx + cx, y * n * sy + cy, z * n * sz + cz);
+  }
+  return g;
+}
+function trunkSeg(x0, y0, z0, x1, y1, z1, r0, r1, seg = 6) {
+  const L = Math.hypot(x1 - x0, y1 - y0, z1 - z0), g = new THREE.CylinderGeometry(r1, r0, L, seg, 1, true);
+  g.translate(0, L / 2, 0);
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(x1 - x0, y1 - y0, z1 - z0).normalize());
+  g.applyQuaternion(q); g.translate(x0, y0, z0); return g;
+}
+function speciesGeometry(id) {
+  const T = [], C = [];
+  const ring = (n, rad, y, r, sy = 1, a0 = 0) => { for (let k = 0; k < n; k++) { const a = a0 + k / n * Math.PI * 2; C.push(lump(r, Math.cos(a) * rad, y + 0.03 * Math.sin(k * 2.3), Math.sin(a) * rad, 1, sy, 1, 0, k + n)); } };
+  if (id === 'zelkova') {
+    T.push(trunkSeg(0, 0, 0, 0, 0.3, 0, 0.05, 0.04), trunkSeg(0, 0.28, 0, 0.12, 0.55, 0.05, 0.035, 0.02), trunkSeg(0, 0.28, 0, -0.1, 0.56, -0.07, 0.033, 0.02), trunkSeg(0, 0.28, 0, 0.02, 0.6, -0.1, 0.03, 0.02));
+    C.push(lump(0.34, 0, 0.7, 0, 1.3, 0.72, 1.3, 1, 1), lump(0.2, 0.06, 0.88, -0.03, 1, 0.9, 1, 0, 2)); ring(4, 0.3, 0.6, 0.22, 0.85, 0.4);
+  } else if (id === 'plane') {
+    T.push(trunkSeg(0, 0, 0, 0.02, 0.4, 0, 0.055, 0.04), trunkSeg(0.02, 0.38, 0, 0.12, 0.62, 0.06, 0.03, 0.02), trunkSeg(0.02, 0.38, 0, -0.1, 0.6, -0.05, 0.03, 0.02));
+    C.push(lump(0.36, 0, 0.68, 0, 1.1, 0.95, 1.1, 1, 3), lump(0.22, 0, 0.9, 0, 1, 0.8, 1, 0, 4)); ring(3, 0.27, 0.56, 0.21, 0.9, 1.1);
+  } else if (id === 'ginkgo') {
+    T.push(trunkSeg(0, 0, 0, 0, 0.62, 0, 0.04, 0.022));
+    C.push(lump(0.19, 0, 0.4, 0, 1, 1.1, 1, 1, 5), lump(0.18, 0.02, 0.57, 0.01, 0.95, 1.1, 0.95, 1, 6), lump(0.15, -0.01, 0.73, 0, 0.9, 1.15, 0.9, 0, 7), lump(0.1, 0, 0.88, 0, 0.9, 1.2, 0.9, 0, 8), lump(0.11, 0.1, 0.5, -0.06, 1, 1, 1, 0, 9), lump(0.1, -0.09, 0.62, 0.07, 1, 1, 1, 0, 10));
+  } else if (id === 'cherry') {
+    T.push(trunkSeg(0, 0, 0, 0.03, 0.26, 0, 0.055, 0.045), trunkSeg(0.03, 0.25, 0, 0.22, 0.48, 0.08, 0.035, 0.02), trunkSeg(0.03, 0.25, 0, -0.2, 0.47, -0.06, 0.035, 0.02), trunkSeg(0.03, 0.25, 0, 0, 0.5, -0.2, 0.03, 0.02));
+    C.push(lump(0.4, 0, 0.6, 0, 1.4, 0.5, 1.4, 1, 11), lump(0.24, 0.05, 0.74, 0.02, 1.2, 0.6, 1.2, 0, 12)); ring(5, 0.4, 0.52, 0.2, 0.7, 0.3);
+  } else if (id === 'pine') {
+    T.push(trunkSeg(0, 0, 0, 0.06, 0.32, 0.02, 0.045, 0.036), trunkSeg(0.06, 0.32, 0.02, -0.02, 0.62, -0.02, 0.036, 0.026), trunkSeg(-0.02, 0.62, -0.02, 0.05, 0.84, 0.03, 0.026, 0.015), trunkSeg(0.06, 0.4, 0.02, 0.22, 0.58, -0.1, 0.02, 0.01), trunkSeg(-0.01, 0.58, -0.02, -0.2, 0.7, 0.08, 0.018, 0.01));
+    C.push(lump(0.21, 0.07, 0.86, 0.02, 1.3, 0.45, 1.2, 1, 13), lump(0.19, -0.18, 0.72, 0.09, 1.25, 0.42, 1.15, 1, 14), lump(0.18, 0.24, 0.62, -0.11, 1.2, 0.42, 1.2, 0, 15), lump(0.15, 0.02, 0.98, -0.03, 1.2, 0.45, 1.1, 0, 16), lump(0.13, -0.04, 0.58, -0.18, 1.2, 0.4, 1.1, 0, 17));
+  } else if (id === 'conifer') {
+    T.push(trunkSeg(0, 0, 0, 0, 0.3, 0, 0.035, 0.03));
+    const cone = new THREE.ConeGeometry(0.17, 0.86, 8, 4); cone.translate(0, 0.57, 0);
+    const p = cone.attributes.position; for (let i = 0; i < p.count; i++) { const y = p.getY(i), n = 1 + 0.12 * Math.sin(y * 60 + p.getX(i) * 20) * (y < 0.98 ? 1 : 0); p.setXYZ(i, p.getX(i) * n, y, p.getZ(i) * n); }
+    C.push(cone);
+  } else {
+    C.push(lump(0.42, 0, 0.36, 0, 1.25, 0.82, 1.15, 1, 18), lump(0.3, 0.32, 0.28, 0.12, 1, 0.8, 1, 0, 19), lump(0.28, -0.3, 0.27, -0.1, 1, 0.8, 1, 0, 20));
+  }
+  const parts = [...T, ...C].map(x => { if (x.attributes.uv) x.deleteAttribute('uv'); return x.index ? x.toNonIndexed() : x; });
+  const g = mergeGeometries(parts); parts.forEach(x => x.dispose());
+  const split = T.reduce((n, x) => n + (x.index ? x.index.count : x.attributes.position.count), 0);
+  g.computeBoundingBox(); const bb = g.boundingBox, h = bb.max.y || 1; g.scale(1 / h, 1 / h, 1 / h);
+  const n = g.attributes.position.count, shade = new Float32Array(n);
+  let c0 = Infinity; for (let i = split; i < n; i++) c0 = Math.min(c0, g.attributes.position.getY(i));
+  for (let i = 0; i < n; i++) shade[i] = i < split ? 1 : 0.62 + 0.48 * Math.min(1, Math.max(0, (g.attributes.position.getY(i) - c0) / Math.max(0.1, 1 - c0)));
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+  g.userData.split = split; g.userData.shade = shade; g.userData.sp = id;
+  g.computeVertexNormals();
+  return g;
+}
+// 수종별 형상 (정점색은 P의 줄기·잎 색 × 수종 색)
+export function speciesGeometries(P) {
+  const out = {};
+  Object.keys(TREE_SPECIES).forEach(id => { out[id] = speciesGeometry(id); repaintSpecies(out[id], P); });
+  return out;
+}
+export function repaintSpecies(g, P) {
+  const c = g.attributes.color, s = g.userData.split, sh = g.userData.shade, S = TREE_SPECIES[g.userData.sp] || TREE_SPECIES.zelkova;
+  for (let i = 0; i < c.count; i++) { const k = i < s ? P.trunk : P.crown, t = i < s ? S.bark : S.tint, f = sh ? sh[i] : 1; c.setXYZ(i, k.r * t[0] * f, k.g * t[1] * f, k.b * t[2] * f); }
+  c.needsUpdate = true;
+}
+// 가로수 수종 (길 하나에 한 수종: 한국 가로수는 은행나무·벚나무·느티나무·버즘나무가 많다)
+export const STREET_SP = [['ginkgo', 0.36, 8, 11], ['zelkova', 0.28, 8, 12], ['cherry', 0.18, 6, 8], ['plane', 0.18, 9, 13]];
+// 공원·숲 수종 섞기 [수종, 비율, 최소·최대 높이]
+const PARK_SP = [['zelkova', 0.22, 7, 12], ['cherry', 0.14, 5, 8], ['pine', 0.2, 6, 11], ['conifer', 0.1, 10, 18], ['plane', 0.08, 9, 14], ['ginkgo', 0.06, 8, 12], ['shrub', 0.2, 1.2, 2.2]];
+const FOREST_SP = [['pine', 0.46, 8, 14], ['zelkova', 0.26, 8, 14], ['conifer', 0.12, 12, 20], ['cherry', 0.06, 6, 9], ['shrub', 0.1, 1.5, 2.6]];
+export function pickSpecies(list, r) { let t = r * list.reduce((s, x) => s + x[1], 0); for (const x of list) { t -= x[1]; if (t <= 0) return x; } return list[list.length - 1]; }
+
 // 물결 법선 지도: 여러 방향 사인파를 더한 높이장 → 법선 (타일링)
 function rippleNormal(n = 256) {
   const c = document.createElement('canvas'); c.width = c.height = n;
@@ -182,12 +300,47 @@ function grainPattern(g2, n = 96) {
   return g2.createPattern(c, 'repeat');
 }
 
+// 완만한 기복: 실제 땅처럼 수백 m 단위로 오르내리는 굴곡 (±3~5m). 사업지 둘레 25m 안은 평평하게(가로 모형과 이어지게),
+// 물가(강·바다·개천)와 지면 끝은 0으로. base: 산 지형
+function vn2(seed) {
+  const h = (i, j) => { let n = Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(seed, 1442695041); n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967295; };
+  return (u, v) => { const i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j, su = fu * fu * (3 - 2 * fu), sv = fv * fv * (3 - 2 * fv), a = h(i, j), b = h(i + 1, j), c = h(i, j + 1), d = h(i + 1, j + 1); return a + (b - a) * su + (c - a) * sv + (a - b - c + d) * su * sv; };
+}
+export function relief(base, ctx, plan, off = false) {
+  if (off || typeof document === 'undefined' || !plan || !plan.SITE) return base;
+  const S = plan.SITE, n1 = vn2(17), n2 = vn2(29), n3 = vn2(43);
+  // 물 가림판: 물·개천을 칠하고 흐리게 한 작은 지도 (1 = 물가)
+  const M = 192, K2 = M / (2 * E), cv = document.createElement('canvas'); cv.width = cv.height = M;
+  const g = cv.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, M, M); g.filter = 'blur(3px)'; g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineCap = 'round';
+  (ctx.water || []).forEach(w => { g.beginPath(); w.outer.forEach(([x, z], i) => (i ? g.lineTo((x + E) * K2, (z + E) * K2) : g.moveTo((x + E) * K2, (z + E) * K2))); g.closePath(); g.fill(); g.lineWidth = 4; g.stroke(); });
+  (ctx.streams || []).forEach(st => { g.beginPath(); st.pts.forEach(([x, z], i) => (i ? g.lineTo((x + E) * K2, (z + E) * K2) : g.moveTo((x + E) * K2, (z + E) * K2))); g.lineWidth = 5; g.stroke(); });
+  let wm = null; try { wm = g.getImageData(0, 0, M, M).data; } catch (e) { wm = null; }
+  const wAt = (x, z) => {
+    if (!wm) return 0;
+    const u = clamp01((x + E) * K2 - 0.5, M - 1.001), v = clamp01((z + E) * K2 - 0.5, M - 1.001), i = Math.floor(u), j = Math.floor(v), fu = u - i, fv = v - j;
+    const at = (a, b) => wm[(b * M + a) * 4] / 255;
+    return (at(i, j) * (1 - fu) + at(i + 1, j) * fu) * (1 - fv) + (at(i, j + 1) * (1 - fu) + at(i + 1, j + 1) * fu) * fv;
+  };
+  const fn = (x, z) => {
+    const h0 = base(x, z);
+    const [u, v] = plan.toSite(x, z), du = Math.max(0, u - S.u1, S.u0 - u), dv = Math.max(0, v - S.v1, S.v0 - v), dd = Math.hypot(du, dv);
+    if (dd < 25) return h0;
+    const edge = smooth((E - 120 - Math.max(Math.abs(x), Math.abs(z))) / 500);
+    const k = smooth((dd - 25) / 280) * edge * (1 - Math.min(1, wAt(x, z) * 1.6)); if (k <= 0) return h0;
+    const r = 6.5 * (n1(x / 640, z / 640) - 0.42) + 2.6 * (n2(x / 230 + 3.1, z / 230 - 7.7) - 0.5) + 0.9 * (n3(x / 110, z / 110) - 0.5);
+    return h0 + r * k * (1 + Math.min(1, dd / 1500) * 0.6);
+  };
+  fn.rolling = true;
+  return fn;
+}
+const clamp01 = (v, hi) => Math.max(0, Math.min(hi, v));
+
 // ---------- 본체 ----------
 export function buildContext(ctx, plan, P, opts = {}) {
   const lite = !!opts.lite;
   const group = new THREE.Group(); group.name = 'context';
-  const terrain = terrainFn(ctx.peaks, plan);
   const S = plan.SITE;
+  const terrain = relief(terrainFn(ctx.peaks, plan), ctx, plan, opts.flat);
   ctx.roads.forEach(r => { const C = ROAD_CLASS[r.kind] || ROAD_CLASS.residential; if (r.rank == null) r.rank = C.rank; if (!r.lanes) r.lanes = C.lanes; if (r.sw == null) r.sw = C.sw; });
   const insideSite = (x, z, m = 0) => { const [u, v] = plan.toSite(x, z); return u > S.u0 - m && u < S.u1 + m && v > S.v0 - m && v < S.v1 + m; };
   const R0 = Math.max(S.u1 - S.u0, S.v1 - S.v0) / 2;
@@ -243,10 +396,10 @@ export function buildContext(ctx, plan, P, opts = {}) {
     tex.needsUpdate = true;
   }
   paintGround(P);
-  const hasHills = ctx.peaks.length > 0;
+  const hasHills = ctx.peaks.length > 0 || !!terrain.rolling;
   const tg = new THREE.PlaneGeometry(2 * E, 2 * E, hasHills ? (lite ? 120 : 200) : 1, hasHills ? (lite ? 120 : 200) : 1); tg.rotateX(-Math.PI / 2);
   if (hasHills) { const p = tg.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, terrain(p.getX(i), p.getZ(i))); tg.computeVertexNormals(); }
-  mats.ground = surf({ map: tex }, 1);
+  mats.ground = groundDetail(surf({ map: tex }, 1), 0.2, 0.05);
   const ground = keep(new THREE.Mesh(tg, mats.ground)); ground.receiveShadow = true; ground.name = 'ground'; group.add(ground);
   mats.outer = surf({ color: P.ground.clone() }, 1);
   const og = new THREE.RingGeometry(E * 0.999, 40000, 8, 1); og.rotateX(-Math.PI / 2); og.rotateY(Math.PI / 8);
@@ -348,9 +501,10 @@ export function buildContext(ctx, plan, P, opts = {}) {
     });
   }
 
-  ctx.roads.forEach(r => {
+  ctx.roads.forEach((r, ri) => {
     if (r.pts.length < 2) return;
     const rank = r.rank || 3, sw = r.sw || 0;
+    const stSp = pickSpecies(STREET_SP, (hashStr('st' + (r.id || ri) + ':' + (r.name || '')) % 1000) / 1000);
     const b = r.bridge ? bridges.find(x => x.r === r) : null;
     const near = r.pts.some(p => Math.hypot(p[0], p[1]) < markR);
     const pts = hasHills || b ? densify(r.pts, 20) : r.pts;
@@ -372,7 +526,7 @@ export function buildContext(ctx, plan, P, opts = {}) {
         [1, -1].forEach(sd => {
           const o = sd * (hw + sw * 0.62), tx2 = x + DF.nx[i] * o, tz = z + DF.nz[i] * o;
           if (nearCross(tx2, tz, 7) || insideSite(tx2, tz, 2) || inBuilding(tx2, tz, 0.8) || inWater(tx2, tz)) return;
-          streetTrees.push([tx2, terrain(tx2, tz) + 0.12, tz, 7 + (hashStr(i + ':' + sd + ':' + Math.round(x)) % 100) / 100 * 3]);
+          streetTrees.push([tx2, terrain(tx2, tz) + 0.12, tz, stSp[2] + (hashStr(i + ':' + sd + ':' + Math.round(x)) % 100) / 100 * (stSp[3] - stSp[2]), stSp[0]]);
         });
       }
     }
@@ -438,8 +592,8 @@ export function buildContext(ctx, plan, P, opts = {}) {
       quad(BM, S4, y, W.white);
     });
   });
-  mats.walk = surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }, 0.95);
-  mats.asph = surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -5 }, 0.88);
+  mats.walk = groundDetail(surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }, 0.95), 0.08, 0.015);
+  mats.asph = groundDetail(surf({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -5 }, 0.88), 0.12, 0.01);
   mats.mark = dashMaterial({ polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -9 });
   mats.deck = surf({ vertexColors: true }, 0.85);
   const walkM = keep(new THREE.Mesh(BW.geo(), mats.walk)); walkM.receiveShadow = true; group.add(walkM);
@@ -457,7 +611,8 @@ export function buildContext(ctx, plan, P, opts = {}) {
   }
 
   // ===== 건물 =====
-  const BWall = new Buf(), BRoof = new Buf(), ranges = [], roofBoxes = [], specials = [];
+  const BWall = new Buf(), BRoof = new Buf(), ranges = [], roofBoxes = [], specials = [], roofTanks = [], roofUnits = [];
+  const TANK_C = [0x8fb3cf, 0xd9cdb5, 0xe8e8e4, 0x6f9fc8, 0xc9c2b0];
   const edges = [];
   const tmpC = new THREE.Color();
   ctx.buildings.forEach((b, bi) => {
@@ -469,7 +624,7 @@ export function buildContext(ctx, plan, P, opts = {}) {
     if (b.onHill) { specials.push({ x: cx, z: cz, y: base, h: b.h, name: b.name }); ranges.push(null); return; }
     const R = rng(hashStr('b' + (b.id || bi)));
     const kind = KIND_COL[b.kind] ? b.kind : 'com';
-    const wallC = P[KIND_COL[kind]].clone().multiplyScalar(0.95 + R() * 0.08);
+    const wallC = wallColor(P, kind, R);
     const roofC = P.roof.clone().multiplyScalar(0.93 + R() * 0.07);
     const lv = Math.max(1, b.levels || Math.round(b.h / KIND_FH[kind]));
     const fh = Math.max(2.6, Math.min(6.5, b.h / lv));
@@ -513,7 +668,13 @@ export function buildContext(ctx, plan, P, opts = {}) {
         if (ny >= 0) BRoof.tri(ids[i], ids[j], ids[k]); else BRoof.tri(ids[i], ids[k], ids[j]);
       });
     } catch (e) { /* 꼬인 다각형은 지붕 생략 */ }
-    ranges.push([w0, BWall.n - w0, r0, BRoof.n - r0, wallC, roofC]);
+    // 주택은 절반 넘게 모임지붕(기와·강판색), 낮은 공동주택(빌라)·주택 옥상에는 물탱크
+    const rFlat = BRoof.n - r0, Rp = rng(hashStr('r' + (b.id || bi)));
+    let pC = null;
+    if (!far && kind === 'house' && b.h < 13 && Rp() < 0.62) { const o = obb(ring); if (o.w * o.d < 520 && o.w > 3 && o.d > 3) { pC = new THREE.Color(ROOF_TILE[Math.floor(Rp() * ROOF_TILE.length)]).multiplyScalar(0.9 + Rp() * 0.15); hipRoof(BRoof, o, y1, Math.min(o.w, o.d) * (0.24 + Rp() * 0.14), 0.45, pC); } }
+    if (!far && !pC && (kind === 'res' || kind === 'house') && b.h < 24 && Rp() < 0.55) { const o = obb(ring); if (o.w * o.d > 40) { const r = 0.7 + Rp() * 0.35; roofTanks.push([o.x + Math.cos(o.a) * o.w * 0.22, y1, o.z + Math.sin(o.a) * o.w * 0.22, r, 1.3 + Rp() * 0.6, TANK_C[Math.floor(Rp() * TANK_C.length)]]); } }
+    if (!far && (kind === 'com' || kind === 'tower' || kind === 'civic') && b.h > 9) { const o = obb(ring); if (o.w * o.d > 120) { const n = 2 + Math.floor(Rp() * 5), ca = Math.cos(o.a), sa = Math.sin(o.a); for (let k = 0; k < n; k++) { const lx = -o.w * 0.3 + (k % 3) * 1.4, lz = o.d * 0.22 + Math.floor(k / 3) * 1.3; roofUnits.push([o.x + lx * ca - lz * sa, y1, o.z + lx * sa + lz * ca, 1.0, 0.95, 0.75, o.a]); } if (b.h > 30 && Rp() < 0.5) roofTanks.push([o.x - ca * o.w * 0.25, y1, o.z - sa * o.w * 0.25, 1.6, 2.6, 0xd2d4d6]); } }
+    ranges.push([w0, BWall.n - w0, r0, rFlat, wallC, roofC, r0 + rFlat, BRoof.n - r0 - rFlat, pC]);
     // 옥탑
     if (b.h > 7 && !far) {
       const o = obb(ring); if (o.w * o.d < 90) return;
@@ -538,6 +699,18 @@ export function buildContext(ctx, plan, P, opts = {}) {
     const rb = new THREE.InstancedMesh(unit, mats.rbox, roofBoxes.length);
     roofBoxes.forEach(([x, y, z, w, h, d, a, c], i) => { put(rb, i, x, y, z, w, h, d, a); rb.setColorAt(i, c); });
     rb.castShadow = true; rb.receiveShadow = true; group.add(rb);
+  }
+  // 옥상 물탱크 · 실외기
+  if (roofTanks.length) {
+    const tg2 = new THREE.CylinderGeometry(0.5, 0.5, 1, 12); tg2.translate(0, 0.5, 0); geos.push(tg2);
+    const tm = new THREE.InstancedMesh(tg2, mats.rbox, roofTanks.length);
+    roofTanks.forEach(([x, y, z, r, h, c], i) => { put(tm, i, x, y, z, 2 * r, h, 2 * r, 0); tm.setColorAt(i, tmpC.setHex(c)); });
+    tm.castShadow = true; tm.receiveShadow = true; group.add(tm);
+  }
+  if (roofUnits.length) {
+    const um = new THREE.InstancedMesh(unit, mats.rbox, roofUnits.length);
+    roofUnits.forEach(([x, y, z, w, h, d, a], i) => { put(um, i, x, y, z, w, h, d, a); um.setColorAt(i, tmpC.setHex(0xdcdcd8)); });
+    um.castShadow = true; group.add(um);
   }
   // 전망 탑 (남산 N서울타워 같은 산 위 탑)
   specials.forEach(sp => {
@@ -565,17 +738,24 @@ export function buildContext(ctx, plan, P, opts = {}) {
     for (let t = 0, got = 0; t < want * 3 && got < want && trees.length < cap; t++) {
       const x = x0 + R() * (x1 - x0), z = z0 + R() * (z1 - z0);
       if (!inPoly(x, z, g.outer) || (g.holes || []).some(h => inPoly(x, z, h)) || insideSite(x, z, 3) || inWater(x, z) || inBuilding(x, z)) continue;
-      trees.push([x, terrain(x, z), z, (g.kind === 'forest' ? 8 : 6) + R() * 6]); got++;
+      const sp = pickSpecies(g.kind === 'forest' ? FOREST_SP : PARK_SP, R());
+      trees.push([x, terrain(x, z), z, sp[2] + R() * (sp[3] - sp[2]), sp[0]]); got++;
     }
   });
-  const treeG = treeGeometry(P); geos.push(treeG);
+  // 수종마다 InstancedMesh 하나. 그루마다 키·폭·방향·잎 색(밝기와 색조)을 조금씩 다르게
+  const spG = speciesGeometries(P); Object.values(spG).forEach(g => geos.push(g));
   mats.tree = surf({ vertexColors: true, flatShading: true }, 0.95);
-  let treeMesh = null;
-  if (trees.length) {
-    treeMesh = new THREE.InstancedMesh(treeG, mats.tree, Math.min(trees.length, cap));
-    trees.slice(0, cap).forEach(([x, y, z, h], i) => { put(treeMesh, i, x, y, z, h, h, h, (x * 7.3 + z) % 6.28); treeMesh.setColorAt(i, tmpC.setScalar(0.88 + ((x * 13.1 + z * 7.7) % 1 + 1) % 1 * 0.2)); });
-    treeMesh.castShadow = true; treeMesh.receiveShadow = true; group.add(treeMesh);
-  }
+  const treeMeshes = []; let nTrees = 0;
+  { const bySp = {}; trees.slice(0, cap).forEach(t => { const k = spG[t[4]] ? t[4] : 'zelkova'; (bySp[k] || (bySp[k] = [])).push(t); });
+    Object.entries(bySp).forEach(([k, list]) => {
+      const im = new THREE.InstancedMesh(spG[k], mats.tree, list.length);
+      list.forEach(([x, y, z, h], i) => {
+        const r1 = ((x * 13.1 + z * 7.7) % 1 + 1) % 1, r2 = ((x * 3.7 - z * 11.3) % 1 + 1) % 1, r3 = ((x * 5.9 + z * 2.3) % 1 + 1) % 1, wf = 0.82 + r2 * 0.38;
+        put(im, i, x, y, z, h * wf, h, h * (0.86 + r3 * 0.3), (x * 7.3 + z) % 6.28);
+        const b = 0.84 + r1 * 0.28; im.setColorAt(i, tmpC.setRGB(b * (1 + (r2 - 0.5) * 0.08), b * (1 + (r3 - 0.5) * 0.06), b * (1 - (r2 - 0.5) * 0.1)));
+      });
+      im.castShadow = true; im.receiveShadow = true; im.name = 'trees-' + k; group.add(im); treeMeshes.push(im); nTrees += list.length;
+    }); }
 
   // ===== 선 =====
   mats.edge = new THREE.LineBasicMaterial({ color: P.edge.clone(), transparent: true, opacity: 0.16 });
@@ -613,10 +793,10 @@ export function buildContext(ctx, plan, P, opts = {}) {
       const r = ranges[i]; if (!r) return;
       const kind = KIND_COL[b.kind] ? b.kind : 'com';
       const R = rng(hashStr('b' + (b.id || i)));
-      r[4] = Pn[KIND_COL[kind]].clone().multiplyScalar(0.95 + R() * 0.08); r[5] = Pn.roof.clone().multiplyScalar(0.93 + R() * 0.07);
+      r[4] = wallColor(Pn, kind, R); r[5] = Pn.roof.clone().multiplyScalar(0.93 + R() * 0.07);
     });
     setHeat(heatFn);
-    repaintTree(treeG, Pn);
+    Object.values(spG).forEach(g => repaintSpecies(g, Pn));
   }
   function recolor(g, c) { const a = g.attributes.color; for (let i = 0; i < a.count; i++) a.setXYZ(i, c.r, c.g, c.b); a.needsUpdate = true; }
   let heatFn = null;
@@ -630,6 +810,7 @@ export function buildContext(ctx, plan, P, opts = {}) {
       const cw = h || r[4], cr = h || r[5];
       for (let k = r[0]; k < r[0] + r[1]; k++) wc.setXYZ(k, cw.r, cw.g, cw.b);
       for (let k = r[2]; k < r[2] + r[3]; k++) rc.setXYZ(k, cr.r, cr.g, cr.b);
+      if (r[7]) { const cp = h || r[8] || r[5]; for (let k = r[6]; k < r[6] + r[7]; k++) rc.setXYZ(k, cp.r, cp.g, cp.b); }
     });
     wc.needsUpdate = true; rc.needsUpdate = true;
   }
@@ -641,5 +822,5 @@ export function buildContext(ctx, plan, P, opts = {}) {
   // 바닥을 뚫는 구멍(굴토)에서 지면을 감출 수 있게
   const stencilMats = [mats.ground, mats.outer];
   return { group, terrain, labels, update, setHeat, dispose, stencilMats, walls,
-    stats: { buildings: ctx.buildings.length, roads: ctx.roads.length, trees: treeMesh ? treeMesh.count : 0, crossings: crossings.length, source: ctx.source } };
+    stats: { buildings: ctx.buildings.length, roads: ctx.roads.length, trees: nTrees, species: treeMeshes.length, crossings: crossings.length, source: ctx.source } };
 }

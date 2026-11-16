@@ -23,6 +23,8 @@ import { ARCH } from './workstep.js';
 import { fallbackFor, osmFor, osmReady } from '../sim/ctxload.js';
 import { OSM_ATTRIB } from '../sim/osm.js';
 import { tickWater } from '../sim/scene/water.js';
+import { buildSiteLife, COMPANY } from './sitelife3d.js';
+import { talkFor, roleOfWorker, roleOfEquipment } from './talk.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const MEPS = ['hvac', 'plumb', 'fire', 'elec', 'ict'], ROOMS = ['part', 'floor', 'ceil', 'paint'];
@@ -40,6 +42,12 @@ function DLV(wpId, a) {
   if (wpId === 'skin' || wpId === 'glaz' || a === 'curtain') return 'cw';
   if (['hvac', 'plumb', 'fire', 'elec', 'ict', 'mep'].includes(wpId)) return 'mep';
   if (['part', 'ceil', 'floor', 'paint', 'insul', 'roof', 'hoist', 'elev'].includes(wpId)) return 'pallet';
+  // 땅속 공사·가설: 흙막이 H형강·버팀보 · 기초 철근 · 방수 자재 · 지반 개량 시멘트 · 가설 펜스·비계
+  if (wpId === 'wall' || wpId === 'support') return 'hbeam';
+  if (wpId === 'found' || wpId === 'base') return a === 'form' ? 'form' : 'rebar';
+  if (wpId === 'water' || wpId === 'bwp') return 'wp';
+  if (wpId === 'improve') return 'cement';
+  if (wpId === 'prep') return 'temp';
   return null;
 }
 export function webglOK() {
@@ -97,7 +105,8 @@ export function createSim3D(host, opts = {}) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const wrap = document.createElement('div'); wrap.className = 's3';
   wrap.innerHTML = `<div class="s3-hud"><span class="s3-c"></span><b class="s3-t"></b></div><div class="s3-hud r"><span class="s3-d"></span><b class="s3-day"></b></div><div class="s3-now" hidden></div>
-    <div class="s3-lbs"></div><div class="s3-mks"></div><div class="s3-help">드래그 회전 · 휠/두 손가락 확대 · 우클릭 이동</div><div class="s3-attr" hidden></div><div class="seg s3-vw" role="group" aria-label="3D 시점"><button type="button" data-v3="all" aria-pressed="true">전체 보기</button><button type="button" data-v3="focus" aria-pressed="false">작업 부위</button></div>`;
+    <div class="s3-lbs"></div><div class="s3-mks"></div><div class="s3-help">드래그 회전 · 휠/두 손가락 확대 · 우클릭 이동 · 사람을 누르면 이야기를 들어요</div><div class="s3-attr" hidden></div><div class="seg s3-vw" role="group" aria-label="3D 시점"><button type="button" data-v3="all" aria-pressed="true">전체 보기</button><button type="button" data-v3="focus" aria-pressed="false">작업 부위</button><button type="button" data-v3="life" aria-pressed="false">현장 사람들</button></div>
+    <div class="s3-talk" role="dialog" aria-label="현장 사람과 대화" hidden><div class="s3-tk-h"><i class="s3-tk-av" aria-hidden="true"></i><div class="s3-tk-who"><b class="s3-tk-n"></b><span class="s3-tk-m"></span></div><button type="button" class="s3-tk-x" aria-label="대화 닫기">×</button></div><p class="s3-tk-l" aria-live="polite"></p><div class="s3-tk-f"><span class="s3-tk-i"></span><button type="button" class="s3-tk-p">‹ 이전</button><button type="button" class="s3-tk-nx">다음 ›</button></div></div>`;
   wrap.prepend(renderer.domElement);
   host.appendChild(wrap);
   const $ = (s) => wrap.querySelector(s);
@@ -118,7 +127,7 @@ export function createSim3D(host, opts = {}) {
   FACADE_U.uGlass.value.copy(P.glass); FACADE_U.uFilm.value.copy(P.film); FACADE_U.uInterior.value.copy(P.interior); FACADE_U.uLit.value.copy(P.lit); FACADE_U.uFrame.value.copy(P.frame); FACADE_U.uNight.value = 0;
   const cam = new THREE.PerspectiveCamera(38, 16 / 9, 0.6, 12000);
   if (window.__S3DEBUG) { window.__s3cam = cam; window.__s3r = renderer; }
-  const ctl = new OrbitControls(cam, renderer.domElement); if (window.__S3DEBUG) window.__s3ctl = ctl;
+  const ctl = new OrbitControls(cam, renderer.domElement); if (window.__S3DEBUG) { window.__s3ctl = ctl; window.__s3render = () => { ctl.update(); look.render(cam); }; }
   ctl.enableDamping = true; ctl.dampingFactor = 0.09; ctl.maxPolarAngle = Math.PI * 0.495; ctl.minDistance = 8; ctl.maxDistance = 3200; ctl.screenSpacePanning = true;
   // 해: 대로 쪽 앞에서 비스듬히 (보이는 면이 밝고, 그림자는 뒤·왼쪽으로)
   const sunDir = new THREE.Vector3(0.62, 0.78, 0.42).normalize();
@@ -172,9 +181,9 @@ export function createSim3D(host, opts = {}) {
     } catch (e) { console.warn('주변 맥락', e); ctxObj = null; built.city.ground.forEach(o => { o.visible = true; }); }
   }
   ctl.addEventListener('start', () => { userMoved = true; });
-  // 시점: 전체 보기(기본, 현장·건물 전체를 고정 시점으로) · 작업 부위(작업 전선을 따라감). 다시 누르면 시점을 되돌린다
+  // 시점: 전체 보기(기본, 현장·건물 전체를 고정 시점으로) · 작업 부위(작업 전선을 따라감) · 현장 사람들(현장사무소·휴게실·TBM 마당). 다시 누르면 시점을 되돌린다
   let viewMode = 'all';
-  try { if (localStorage.getItem('bim.sim3dView') === 'focus') viewMode = 'focus'; } catch { /* 저장소 없음 */ }
+  try { const v = localStorage.getItem('bim.sim3dView'); if (v === 'focus' || v === 'life') viewMode = v; } catch { /* 저장소 없음 */ }
   const paintVw = () => wrap.querySelectorAll('[data-v3]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v3 === viewMode)));
   paintVw();
   wrap.querySelectorAll('[data-v3]').forEach(b => b.addEventListener('click', () => { viewMode = b.dataset.v3; userMoved = false; lastWp = null; paintVw(); try { localStorage.setItem('bim.sim3dView', viewMode); } catch { /* 저장소 없음 */ } }));
@@ -429,6 +438,8 @@ export function createSim3D(host, opts = {}) {
 
     // 야적장 (자재 더미·가설물): 건물 둘레 빈 땅
     const yard = safe('야적장 만들기', () => buildYard({ root, sc, D }), null);
+    // 현장 사람들: 현장 앞 가설 사무소 단지 (2층 현장사무소 · 근로자 휴게실 · TBM 마당 · 국기 · 공사 안내판)와 그곳 사람들의 하루
+    const lifeB = safe('현장 사람들 만들기', () => buildSiteLife({ root, mat, BOX, sc, D, city }), null);
     // 공법별 장면 (장비·부재·순서): 공통 부재를 숨기거나 덮어쓴다
     const meth = buildMethods({ root, mat, clipM, inst, mesh, box, setBox, ibox, BOX, CYL, CONE, sc, D, clipList, R: { strata, bores, boreI, rigI, impI, walls, strutI, ancI, tdSlab, exc, trucks, pileI, matSlab, rig, bwpI, slabI, colI, core, formBox, acs, shoreI, rebarP, rebarTex, pourBox, cageI, sparkI, pump, boom, mixers, crane, mast, mastS, slew, jib, cjib, cwt, cab, apex, hookL, hookLoad, hMast, hCar, hCar2, skinX, skinZ, roofL, lv, strutZ, skinGlassy: glassy } });
 
@@ -442,6 +453,7 @@ export function createSim3D(host, opts = {}) {
     function frameAt(st) {
       const { wpId, tau, T } = st;
       const K = (k) => sc.known.has(k), P = (k) => progAt(sc, k, tau);
+      const lifeV = !!st.life; // '현장 사람들' 시점: 땅속 공종이어도 앞쪽을 반투명하게 하지 않는다
       const surveyP = P('survey'), impP = P('improve'), wallP = P('wall'), earthP = P('excav'), foundP = P('found'), baseP = P('base');
       const structP = P('frame'), skinP = P('skin');
       const topdown = K('support') && ids.support === 'topdown';
@@ -453,7 +465,7 @@ export function createSim3D(host, opts = {}) {
         const yTop = Math.min(-L.a, -dug); u.visible = yTop > -L.b + 0.01; if (u.visible) setBox(u, 0, pw, -L.b, yTop, -pd / 2, 0);
       });
       // 지하 공종: 앞쪽 흙·지표는 반투명 (twin의 front 불투명도), 지하수위·지층선을 보인다
-      const underV = UNDER_WPS.has(wpId);
+      const underV = UNDER_WPS.has(wpId), seeV = underV && !lifeV;
       front.forEach(o => { o.visible = true; });
       pitLid.visible = dug < 0.6;
       const gwOn = underV && cond.gw < sc.dv && cond.gw > SURF;
@@ -658,8 +670,8 @@ export function createSim3D(host, opts = {}) {
       // 가설 울타리 · 사무실
       const prepOn = K('prep') && P('prep') > 0 && (K('land') ? P('land') : 0) < 0.85;
       const Hf = ({ std: 3, sound: 10, modular: 3, mini: 2 })[ids.prep] || 3, hfx = Hf * clamp(P('prep') * 1.4, 0, 1);
-      fence.forEach((o, i) => { o.visible = prepOn && !(underV && (i === 2 || i === 3)); if (!o.visible) return; const za = -pd / 2 - 3, zb = pd / 2 + 3; if (i === 0) setBox(o, pl - 0.15, pl + 0.15, 0, hfx, za, zb); if (i === 1) setBox(o, pl, pw + 5, 0, hfx, za - 0.15, za + 0.15); if (i === 2) setBox(o, pl, pw + 5, 0, Math.min(hfx, 3), zb - 0.15, zb + 0.15); if (i === 3) setBox(o, pw + 4.85, pw + 5.15, 0, Math.min(hfx, 3), za, zb - 10); });
-      city.offices(prepOn && P('prep') > 0.3, ids.prep === 'modular' ? 3 : ids.prep === 'mini' ? 1 : 2);
+      fence.forEach((o, i) => { o.visible = prepOn && !(seeV && (i === 2 || i === 3)); if (!o.visible) return; const za = -pd / 2 - 3, zb = pd / 2 + 3; if (i === 0) setBox(o, pl - 0.15, pl + 0.15, 0, hfx, za, zb); if (i === 1) setBox(o, pl, pw + 5, 0, hfx, za - 0.15, za + 0.15); if (i === 2) setBox(o, pl, pw + 5, 0, Math.min(hfx, 3), zb - 0.15, zb + 0.15); if (i === 3) setBox(o, pw + 4.85, pw + 5.15, 0, Math.min(hfx, 3), za, zb - 10); });
+      city.offices(false, 0); // 예전 대지 옆 컨테이너 대신 현장 앞 사무소 단지 (sitelife3d.js)
       if (yard) safe('야적장', () => yard.frame({ on: structP > 0 && !underV && !(K('land') && P('land') > 0.05) && (depth <= 0.5 || baseP >= 0.999 || (topdown && tdSlab.visible)), // 굴착한 터가 아직 열려 있으면 (지하 골조 전) 땅이 없으니 놓지 않는다
  phase: structP < 1 ? structP : 1 + 0.6 * Math.max(skinP, P('fin')) }));
       if (yard && window.__S3DEBUG) window.__s3yard = { n: yard.count, vis: yard.group.visible, structP, baseP, depth, prep: P('prep'), land: P('land') };
@@ -738,11 +750,12 @@ export function createSim3D(host, opts = {}) {
       const dyn = safe('공법 장면', () => meth.frame({ wpId, T, tau, K, P, dug, earthP, wallP, foundP, baseP, structP, skinP, topdown, underV, cutNow, nF, fl, fr, stage, active, f, fp, hasCore, ctop, cn, cx0, cx1, cz, top, Hc, nS, done, rtop, rfp, rp, matP, baseE, thick, plen, removeUpTo, pourNow, PX, MX, hOn, htop, io }), []);
       if (io.bays.pump) occ.add(0); // 펌프카가 선 차로
       // 물류: 덤프(상차 자리) · 레미콘(펌프카 호퍼) · 자재 트레일러(하역 자리)
-      const dlvKind = !UNDER_WPS.has(wpId) && !pump.visible && !io.bays.pump && P(wpId) > 0 && P(wpId) < 1 ? DLV(wpId, aNow) : null;
+      // 땅속 공사 중에도 덤프가 게이트를 쓰지 않을 때는 흙막이 H형강·기초 철근·방수 자재가 들어온다 (도로 점용 하역)
+      const dlvKind = !(underV && trOn) && !pump.visible && !io.bays.pump && P(wpId) > 0 && P(wpId) < 1 ? DLV(wpId, aNow) : null;
       let dlvBay = null; // 저층부(포디움)가 대지를 덮어 안에 설 자리가 없으면 도로 점용 하역
       // 도로 하역 자리: 펌프·레미콘이 바깥 차로를 쓰고 있으면 그 반대쪽 끝으로
       const roadZ = () => { const z = clamp(-bd / 2 - 4, -pd / 2 + 4, pd / 2 - 12), pz = io.bays.pump ? io.bays.pump.z - io.bays.pump.nose * 5.6 : null; return pz == null || Math.abs(z - pz) > 26 ? z : [-pd / 2 + 12, pd / 2 - 12].sort((a, b) => Math.abs(b - pz) - Math.abs(a - pz))[0]; };
-      if (dlvKind) { const ex = Math.max(G.bx1, ...D.fp.filter((q, i) => sc.floors[i] && sc.floors[i].e0 < 6).map(q => q.x1)), ws = pw - ex; dlvBay = ws >= 8.6 ? { x: ex + ws / 2 + 0.6, z: pd / 2 - 10.5, hx: 0, hz: 1, inside: true } : { road: true, z: roadZ() }; }
+      if (dlvKind) { const ex = Math.max(G.bx1, ...D.fp.filter((q, i) => sc.floors[i] && sc.floors[i].e0 < 6).map(q => q.x1)), ws = pw - ex; dlvBay = ws >= 8.6 && !underV ? { x: ex + ws / 2 + 0.6, z: pd / 2 - 10.5, hx: 0, hz: 1, inside: true } : { road: true, z: roadZ() }; }
       const fl3 = safe('물류 차량', () => fleet.frame({ T, haul: trOn ? { bay: io.bays.haul || { road: true, z: pd / 2 - 8 } } : null, mix: io.bays.pump ? { pump: io.bays.pump } : null, dlv: dlvKind ? { bay: dlvBay, kind: dlvKind } : null }), { busy: new Set(), tags: [] });
       fl3.busy.forEach(l => busy.add(l));
       // 장비 둘레 사람: 굴착기·크람쉘 옆 신호수, 펌프카 호스 끝 호스 잡이·진동 다짐, 천공기 옆 신호수·유도원
@@ -751,12 +764,21 @@ export function createSim3D(host, opts = {}) {
         else if (h.k === 'hose') { [-0.7, 0.7].forEach((o2, j) => work.push(crewAt('hose', h.x + o2, h.y + 0.02, h.z + 1.3, [h.x, h.z - 2], T, 50 + i * 2 + j))); work.push(crewAt('vibrate', h.x - 2.4, h.y + 0.02, h.z + 2.2, [h.x, h.z], T, 60 + i)); }
         else if (h.k === 'rig') { work.push(crewAt('signal', h.x + 5, h.y + 0.02, h.z + 5, [h.x, h.z], T, 70 + i)); work.push(crewAt('guide', h.x - 2.6, h.y + 0.02, h.z + 3.2, [h.x, h.z], T, 80 + i)); }
       });
-      safe('주변 가로·사람', () => city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow || !!dlvKind })); if (window.__S3DEBUG) window.__s3work = work;
+      // 현장 사람들: 아침 TBM · 사무소 앞 소장·감리 · 2층 복도 통화 · 휴게실 · 자재 반입 의논
+      const lifeOn = !!lifeB && (lifeV || (prepOn && P('prep') > 0.3 && !underV));
+      const lifeF = lifeB ? safe('현장 사람들', () => lifeB.frame({ T, on: lifeOn, crewN: clamp(work.length, 8, 16), wpId, dlv: !!dlvKind }), null) : null;
+      if (lifeF) { lifeF.people.forEach(q => work.push(q)); lifeF.labels.forEach(l => dyn.push(l)); }
+      const cf = safe('주변 가로·사람', () => city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow || !!dlvKind }), null); if (window.__S3DEBUG) window.__s3work = work;
+      // 누르면 대화할 수 있는 사람: 작업자 · 현장 사람들 · 보행자·신호수 (p: 몸 가운데, g: 발 높이)
+      const picks = [];
+      work.forEach((w, i) => picks.push({ id: w.pid || `w${w.kind || w.act}${w.sd ?? i}`, role: w.role || null, w, i, seed: w.seed ?? w.sd ?? i * 17 + 3, p: [w.x, w.y + 0.9, w.z], g: w.y }));
+      if (cf && cf.extra) cf.extra.forEach(e => picks.push({ id: e.id, role: e.role, seed: e.seed, p: [e.x, e.y - 0.3, e.z], g: e.y - 1.15 }));
       // 장비 이름표: 공법 장비 + 물류 차량 + 타워크레인·호이스트
       const eqTags = [...io.tags, ...fl3.tags];
       if (crane.visible && (FRW.includes(wpId) || wpId === 'skin')) eqTags.push({ t: { tower: '타워크레인 (T형)', luffing: '러핑 타워크레인', crawler: '크롤러 크레인', ringer: '링거 크레인', mobile: '이동식 크레인' }[ids.lift] || '크레인', p: [crane.position.x, (ids.lift === 'tower' || ids.lift === 'luffing' ? Hc : 30) + 5, crane.position.z], cls: 'eq' });
       if (hOn && (wpId === 'hoist' || wpId === 'lift')) eqTags.push({ t: '호이스트 (인·화물용)', p: [G.bx1 + 2, htop + 3, 0], cls: 'eq' });
-      eqTags.slice(0, 12).forEach(t => dyn.push(t));
+      // 장비 이름표를 누르면 그 장비 기사와 이야기 (굴착기·덤프·펌프카·크레인·천공기·트레일러)
+      eqTags.slice(0, 12).forEach((t, k) => { const r = roleOfEquipment(t.t); dyn.push(r ? { ...t, cls: (t.cls || 'eq') + ' who', pick: `eq${k}:${r}`, role: r, seed: 500 + k * 31 + String(t.t).length * 7 } : t); });
       crewTags.sort((a, b) => b.n - a.n).slice(0, 3).forEach(t => dyn.push(t));
       owned.forEach(o => { if (o.count > o.instanceMatrix.count) o.count = o.instanceMatrix.count; }); // 용량을 넘는 인스턴스는 그리지 않는다
       // 강조: 지금 공종의 재질을 강조색으로
@@ -768,18 +790,18 @@ export function createSim3D(host, opts = {}) {
       // 앞쪽 절반 복제본: 지하 공종에서는 흙·지표·흙막이를 반투명하게. 흙 덩어리 뒤쪽은 공법이 투시를 켰을 때만 흐리게
       // 역타 1층 바닥판: 지하를 보는 공종에서는 반투명 (그 밑 굴착·지하 골조가 보이게)
       if (underV && wpId !== 'support') tdSlab.material = ghostOf(tdSlab.material, 0.22);
-      city.surfs.forEach(o => { const b = o.userData.sbase || (o.userData.sbase = o.material), m = underV ? ghostOf(b, 0.32) : b; if (o.material !== m) o.material = m; });
+      city.surfs.forEach(o => { const b = o.userData.sbase || (o.userData.sbase = o.material), m = seeV ? ghostOf(b, 0.32) : b; if (o.material !== m) o.material = m; });
       twins.forEach(t => {
         const o = t.userData.src; let v = o.visible; for (let q = o.parent; v && q && q !== root; q = q.parent) v = q.visible;
         t.visible = v; if (!v) return;
         if (o.isInstancedMesh) { t.count = o.count; if (t.instanceColor !== o.instanceColor) t.instanceColor = o.instanceColor; }
         else { t.position.copy(o.position); t.quaternion.copy(o.quaternion); t.scale.copy(o.scale); }
-        const fm = underV && t.userData.front != null ? ghostOf(o.material, t.userData.front) : o.material;
+        const fm = seeV && t.userData.front != null ? ghostOf(o.material, t.userData.front) : o.material;
         if (t.material !== fm) t.material = fm;
       });
       // 전체 보기 높이: 골조 전에는 완성 볼륨, 골조가 오르는 동안에는 지금 높이 + 크레인 여유까지
       const hTop = Math.max(top, ctop), hView = !K('frame') || hTop >= G.H - 0.5 ? G.H : Math.min(G.H, hTop + Math.max(16, hTop * 0.25));
-      return { top: hTop, dyn, hv: hView };
+      return { top: hTop, dyn, hv: hView, picks };
     }
 
     function seg(o, x0, y0, z0, x1, y1, z1) {
@@ -794,8 +816,8 @@ export function createSim3D(host, opts = {}) {
     if (cond.gw < sc.dv) labels.push({ t: `▽ 지하수위 GL−${cond.gw}m`, p: [D.xr - 14, -cond.gw + 0.6, Z], under: true, cls: 'gw' });
     city.labels.forEach(l => labels.push({ under: false, ...l }));
     return {
-      sc, D, root, frameAt, labels, city,
-      dispose() { city.dispose(); meth.dispose(); fleet.dispose(); if (yard) yard.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
+      sc, D, root, frameAt, labels, city, lifeB,
+      dispose() { city.dispose(); meth.dispose(); fleet.dispose(); if (yard) yard.dispose(); if (lifeB) lifeB.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
     };
   }
 
@@ -803,6 +825,60 @@ export function createSim3D(host, opts = {}) {
   function shadowsOn(root) {
     root.traverse(o => { if (!o.isMesh) return; const m = o.material; o.receiveShadow = true; o.castShadow = !(m && m.transparent && m.opacity < 0.7) && !(m && m.emissiveIntensity > 0.9); });
   }
+  // ---------- 사람과 대화 (talk.js) ----------
+  // 사람(작업자·현장 사람들·보행자·신호수)을 누르거나, 현장소장·장비 이름표를 누르면 그 사람의 이야기 (실제 현장 사람들의 고충)
+  let picks = [], lbPicks = new Map(), talk = null, curTau = 0, curWp = null;
+  const selRing = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.72, 40), new THREE.MeshBasicMaterial({ color: 0xffc83d, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false }));
+  selRing.rotation.x = -Math.PI / 2; selRing.renderOrder = 20; selRing.visible = false; scene.add(selRing);
+  const tkEl = $('.s3-talk');
+  function paintTalk() {
+    if (!talk) { tkEl.hidden = true; selRing.visible = false; return; }
+    const { tk, k } = talk, n = tk.lines.length;
+    tkEl.hidden = false;
+    const av = $('.s3-tk-av'); av.textContent = tk.name.slice(0, 1); av.style.background = tk.hat || '#f4f4f0';
+    $('.s3-tk-n').textContent = tk.name; $('.s3-tk-m').textContent = tk.meta;
+    const l = $('.s3-tk-l'); l.textContent = `“${tk.lines[k]}”`; l.classList.remove('in'); void l.offsetWidth; l.classList.add('in');
+    $('.s3-tk-i').textContent = `${k + 1} / ${n}`;
+    $('.s3-tk-p').disabled = k === 0; const nx = $('.s3-tk-nx'); nx.textContent = k >= n - 1 ? '고마워요 ✓' : '다음 ›';
+  }
+  function openTalk(pk) {
+    if (!pk || !built) return;
+    const role = pk.role || (pk.w ? roleOfWorker(pk.w, pk.i) : 'labor');
+    const month = dateAt(built.sc.t0, curTau).getMonth() + 1;
+    const tk = talkFor(role, pk.seed, { month, wpId: curWp || '', boss: built.lifeB ? built.lifeB.names.boss : '', co: COMPANY });
+    talk = { id: pk.id, tk, k: 0 }; paintTalk();
+  }
+  const closeTalk = () => { talk = null; paintTalk(); };
+  $('.s3-tk-x').addEventListener('click', closeTalk);
+  $('.s3-tk-p').addEventListener('click', () => { if (talk && talk.k > 0) { talk.k--; paintTalk(); } });
+  $('.s3-tk-nx').addEventListener('click', () => { if (!talk) return; if (talk.k < talk.tk.lines.length - 1) { talk.k++; paintTalk(); } else closeTalk(); });
+  const onKey = (e) => { if (!talk) return; if (e.key === 'Escape') closeTalk(); else if (e.key === 'ArrowRight' && document.activeElement && wrap.contains(document.activeElement)) $('.s3-tk-nx').click(); };
+  document.addEventListener('keydown', onKey);
+  // 화면의 한 점에서 가장 가까운 사람 (몸 높이를 화면에 비춘 크기 안에서)
+  const _pv = new THREE.Vector3(), _pt = new THREE.Vector3();
+  function pickAt(px, py) {
+    const w = size[0], h = size[1]; let best = null, bs = Infinity;
+    picks.forEach(pk => {
+      _pv.set(pk.p[0], pk.p[1], pk.p[2]).project(cam); if (_pv.z > 1 || _pv.z < -1) return;
+      _pt.set(pk.p[0], pk.p[1] + 0.95, pk.p[2]).project(cam);
+      const sx = (_pv.x + 1) / 2 * w, sy = (1 - _pv.y) / 2 * h, r = Math.max(13, Math.abs((1 - _pt.y) / 2 * h - sy) * 1.15);
+      const d = Math.hypot(px - sx, py - sy) / r; if (d <= 1 && d + _pv.z * 0.05 < bs) { bs = d + _pv.z * 0.05; best = pk; }
+    });
+    return best;
+  }
+  let down = null;
+  renderer.domElement.addEventListener('pointerdown', (e) => { down = { x: e.clientX, y: e.clientY, t: performance.now() }; });
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    if (!down || e.button > 0) { down = null; return; }
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y), dt = performance.now() - down.t; down = null;
+    if (moved > 6 || dt > 600) return;
+    const r = renderer.domElement.getBoundingClientRect(), pk = pickAt(e.clientX - r.left, e.clientY - r.top);
+    if (pk) openTalk(pk); else if (talk) closeTalk();
+  });
+  // 이름표 (현장소장 · 장비): 이름표는 매 프레임 다시 그려지므로 누르는 순간(pointerdown)에 연다
+  $('.s3-lbs').addEventListener('pointerdown', (e) => { const el = e.target.closest('[data-pick]'); if (!el) return; e.preventDefault(); e.stopPropagation(); const id = el.dataset.pick, pk = picks.find(q => q.id === id) || lbPicks.get(id); if (pk) openTalk(pk); });
+  if (window.__S3DEBUG) window.__s3talk = (id) => { const pk = picks.find(q => q.id === id) || lbPicks.get(id) || (typeof id === 'object' ? id : null); openTalk(pk); return talk && talk.tk; };
+
   // ---------- 매 프레임 ----------
   let mkHtml = '', lbHtml = '', atCache = {}, size = [0, 0], nowKey = null;
   const esc = (t) => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -819,11 +895,26 @@ export function createSim3D(host, opts = {}) {
     const { sc, wpId, p, T, marks = [], at } = st;
     if (!built || built.sc !== sc) { if (badSc === sc) return; const nb = safe('장면 만들기', () => build(sc), null); if (!nb) { badSc = sc; built = null; return; } built = nb; lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); if (window.__S3DEBUG) window.__s3dim = { pw: sc.G.pw, pd: built.D.pd, bd: built.D.bd, bx0: sc.G.bx0, bx1: sc.G.bx1, crX: sc.crX, H: sc.G.H, depth: sc.G.depth, lanes: sc.city && sc.city.lanes, yard: sc.city && sc.city.yard }; }
     const win = winFor(sc, wpId), tau = win.s + clamp(p, 0, 1) * (win.e - win.s);
-    const fres = safe(`장면 진행 (${wpId})`, () => built.frameAt({ wpId, tau, T, step: st.step }), null);
+    const fres = safe(`장면 진행 (${wpId})`, () => built.frameAt({ wpId, tau, T, step: st.step, life: viewMode === 'life' }), null);
+    curTau = tau; curWp = wpId; picks = fres && fres.picks ? fres.picks : [];
+    if (window.__S3DEBUG) window.__s3picks = picks;
+    // 대화 중인 사람 발밑 고리 · 머리 위 이름
+    const selP = talk ? picks.find(q => q.id === talk.id) : null;
+    selRing.visible = !!selP; if (selP) { selRing.position.set(selP.p[0], selP.g + 0.06, selP.p[2]); const s = 1 + 0.08 * Math.sin(T * 5); selRing.scale.set(s, s, s); }
     // 시점: 전체 보기는 현장·건물 전체를 한 화면에 고정, 작업 부위는 2D 카메라가 보는 범위를 따라간다
     const under = UNDER_WPS.has(wpId), cutV = CUT_WPS.has(wpId);
     const now = performance.now(), dt = Math.min(0.25, (now - (follow.tl || now)) / 1000); follow.tl = now;
-    if (viewMode === 'all') {
+    if (viewMode === 'life' && built.lifeB) {
+      // 현장 사람들: 현장 앞 사무소 단지(사무소 · 휴게실 · TBM 마당)를 앞·대로 쪽에서 비스듬히 내려다본다
+      if (lastWp !== wpId) {
+        lastWp = wpId; userMoved = false;
+        const [x0, x1, z0, z1] = built.lifeB.life.box, c = new THREE.Vector3((x0 + x1) / 2 + 1.5, 1.6, (z0 + z1) / 2 - 1.5);
+        const dist = clamp(Math.max(x1 - x0, (z1 - z0) * 1.5) * 0.95 + 6, 26, 62), dir = new THREE.Vector3(0.42, 0.55, 1).normalize(), pos = c.clone().addScaledVector(dir, dist);
+        follow.has = true;
+        if (!st.instant && ctl.target.lengthSq() > 0) follow.anim = { t0: now, from: { p: cam.position.clone(), t: ctl.target.clone() }, to: { p: pos, t: c } };
+        else { ctl.target.copy(c); cam.position.copy(pos); }
+      }
+    } else if (viewMode === 'all' || viewMode === 'life') {
       // 건물이 올라가는 만큼 천천히 물러나며 지금 있는 것 전부를 화면에 담는다
       const hv = fres && fres.hv != null ? fres.hv : sc.G.H;
       if (lastWp !== wpId) {
@@ -867,7 +958,9 @@ export function createSim3D(host, opts = {}) {
     const box = $('.s3-mks'), w = size[0], h = size[1];
     const html = marks.map(m => { const pos = atCache[m.mark]; if (!pos) return ''; const v = new THREE.Vector3(pos[0], pos[1], 0.5).project(cam); if (v.z > 1 || v.x < -1 || v.x > 1 || v.y < -1 || v.y > 1) return ''; return `<i class="s3-mk s${m.sev}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${m.n}</i>`; }).join('');
     if (mkHtml !== html) { box.innerHTML = html; mkHtml = html; }
-    const lh = built.labels.concat(fres && fres.dyn ? fres.dyn : [], ctxObj && !UNDER_WPS.has(wpId) ? ctxObj.labels : []).filter(l => (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId))).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}" style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
+    const selL = selP ? [{ t: `💬 ${esc(talk.tk.name)}`, p: [selP.p[0], selP.g + 2.35, selP.p[2]], cls: 'eq sel' }] : [];
+    lbPicks = new Map();
+    const lh = built.labels.concat(fres && fres.dyn ? fres.dyn : [], selL, ctxObj && !UNDER_WPS.has(wpId) ? ctxObj.labels : []).filter(l => (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId)) && !(l.near && cam.position.distanceTo(_pv.set(l.p[0], l.p[1], l.p[2])) > l.near)).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; if (l.pick) lbPicks.set(l.pick, { id: l.pick, role: l.role, seed: l.seed ?? 7 }); return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}"${l.pick ? ` data-pick="${esc(l.pick)}" title="눌러서 이야기 듣기"` : ''} style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
     if (lbHtml !== lh) { $('.s3-lbs').innerHTML = lh; lbHtml = lh; }
   }
   function dispose() {
@@ -877,6 +970,7 @@ export function createSim3D(host, opts = {}) {
     if (ctxObj) { scene.remove(ctxObj.group); ctxObj.dispose(); ctxObj = null; }
     mats.forEach(m => m.dispose()); accMats.forEach(m => m.dispose()); dimMats.forEach(m => m.dispose()); ghostMats.forEach(k => k.forEach(m => m.dispose()));
     [BOX, CYL, CONE].forEach(g => g.dispose());
+    document.removeEventListener('keydown', onKey); scene.remove(selRing); selRing.geometry.dispose(); selRing.material.dispose();
     look.dispose(); ctl.dispose(); renderer.dispose(); renderer.forceContextLoss?.(); wrap.remove();
   }
   return { update, resize, dispose, el: wrap, canvas: renderer.domElement };

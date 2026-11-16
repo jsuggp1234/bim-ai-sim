@@ -25,31 +25,37 @@ float fh21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 vec4 facadeMask(vec2 m, float pat, float fh, float sd, vec2 fw) {
   if (pat < 0.5) return vec4(0.0);
   float fl = floor(m.y / fh); float y = m.y - fl * fh;
+  // 건물 난수로 칸 폭·창 비율·띠창 여부·1층 상가를 바꾼다 (같은 종류라도 건물마다 다르게)
+  float v1 = fract(sd * 7.13 + 0.11), v2 = fract(sd * 3.71 + 0.37), v3 = fract(sd * 11.9 + 0.73);
+  float pp = pat;
+  if (fl < 0.5 && ((pat > 3.5 && pat < 4.5 && v2 < 0.62) || (pat > 0.5 && pat < 1.5 && v2 < 0.22) || (pat > 5.5 && pat < 6.5 && v2 < 0.2))) pp = 3.0;
   float bay = 3.0, g = 0.0, band = 0.0, spd = 0.0, avg = 0.4, bavg = 0.1;
   float wx = fw.x * 0.75 + 0.015, wy = fw.y * 0.75 + 0.015;
-  if (pat < 1.5) {            // 공동주택: 발코니 통창 + 세대 경계벽 + 슬래브 띠
-    bay = 2.9; float u = mod(m.x, bay);
-    float pier = 1.0 - fbox(mod(m.x + 0.3, bay * 4.0), 0.0, 0.6, wx);
-    g = fbox(u, 0.12, bay - 0.12, wx) * fbox(y, 0.34, fh - 0.3, wy) * pier;
-    band = 1.0 - fbox(y, 0.24, fh + 1.0, wy); avg = 0.56; bavg = 0.08;
-  } else if (pat < 2.5) {     // 커튼월: 1.5m 멀리언, 바닥 쪽 스팬드럴
-    bay = 1.5; float u = mod(m.x, bay);
+  if (pp < 1.5) {            // 공동주택: 발코니 통창 + 세대 경계벽 + 슬래브 띠
+    bay = 2.6 + 0.9 * v1; float u = mod(m.x, bay);
+    float pier = 1.0 - fbox(mod(m.x + 0.3, bay * (3.0 + floor(v2 * 3.0))), 0.0, 0.6, wx);
+    g = fbox(u, 0.12, bay - 0.12, wx) * fbox(y, 0.34 + 0.5 * step(0.55, v3), fh - 0.3, wy) * pier;
+    band = 1.0 - fbox(y, 0.24, fh + 1.0, wy); avg = 0.5 + 0.08 * (1.0 - step(0.55, v3)); bavg = 0.08;
+  } else if (pp < 2.5) {     // 커튼월: 멀리언(1.2~1.8m), 바닥 쪽 스팬드럴, 일부는 세로 핀
+    bay = 1.2 + 0.6 * v1; float u = mod(m.x, bay); float sp = 0.6 + 0.6 * v2;
     float mull = fbox(u, 0.05, bay - 0.05, wx);
-    g = mull * fbox(y, 0.95, fh - 0.1, wy); spd = mull * fbox(y, 0.1, 0.95, wy);
-    band = 1.0 - fbox(y, 0.1, fh + 1.0, wy); avg = 0.66; bavg = 0.04;
-  } else if (pat < 3.5) {     // 상가 쇼윈도 + 간판 띠
-    bay = 3.0; float u = mod(m.x, bay);
+    g = mull * fbox(y, sp, fh - 0.1, wy); spd = mull * fbox(y, 0.1, sp, wy);
+    band = 1.0 - fbox(y, 0.1, fh + 1.0, wy);
+    if (v3 > 0.62) band = max(band, 1.0 - fbox(mod(m.x, bay * 2.0), 0.0, bay * 2.0 - 0.14, wx));
+    avg = 0.62; bavg = 0.06;
+  } else if (pp < 3.5) {     // 상가 쇼윈도 + 간판 띠
+    bay = 3.0 + 1.6 * v3; float u = mod(m.x, bay);
     g = fbox(u, 0.08, bay - 0.08, wx) * fbox(y, 0.15, fh - 1.05, wy);
     band = 1.0 - fbox(y, 0.0, fh - 0.95, wy); avg = 0.6; bavg = 0.2;
-  } else if (pat < 4.5) {     // 창 (오피스텔·상업)
-    bay = 2.4; float u = mod(m.x, bay);
-    g = fbox(u, 0.38, 2.02, wx) * fbox(y, 0.9, fh - 0.42, wy);
-    band = 1.0 - fbox(y, 0.22, fh + 1.0, wy); avg = 0.33; bavg = 0.07;
-  } else if (pat < 5.5) {     // 루버 (기계실·피난층)
+  } else if (pp < 4.5) {     // 창 (오피스텔·상업): 낱창 또는 띠창
+    if (v3 < 0.3) { bay = 1.5; float u = mod(m.x, bay); g = fbox(u, 0.05, bay - 0.05, wx) * fbox(y, 0.85, fh - 0.5, wy); avg = 0.48; }
+    else { bay = 2.0 + 1.2 * v1; float u = mod(m.x, bay), ww = (0.45 + 0.35 * v2) * bay; g = fbox(u, (bay - ww) * 0.5, (bay + ww) * 0.5, wx) * fbox(y, 0.8 + 0.3 * v2, fh - 0.42, wy); avg = 0.28 + 0.12 * v2; }
+    band = 1.0 - fbox(y, 0.22, fh + 1.0, wy); bavg = 0.07;
+  } else if (pp < 5.5) {     // 루버 (기계실·피난층)
     bay = 1.0; band = fbox(fract(m.y / 0.42), 0.0, 0.45, wy / 0.42); avg = 0.0; bavg = 0.45;
-  } else if (pat < 6.5) {     // 저층 주택
-    bay = 3.6; float u = mod(m.x, bay);
-    g = fbox(u, 1.0, 2.5, wx) * fbox(y, 1.0, fh - 0.55, wy); band = 0.0; avg = 0.17; bavg = 0.0;
+  } else if (pp < 6.5) {     // 저층 주택
+    bay = 3.2 + 1.2 * v1; float u = mod(m.x + v2 * 2.0, bay), w0 = 0.7 + 0.5 * v3;
+    g = fbox(u, w0, w0 + 1.2 + 0.5 * v2, wx) * fbox(y, 0.95, fh - 0.55, wy); band = 0.0; avg = 0.17; bavg = 0.0;
   } else {                    // 공장·창고: 높은 띠창
     bay = 6.0; float u = mod(m.x, bay);
     g = fbox(u, 0.3, bay - 0.3, wx) * fbox(y, fh - 1.8, fh - 0.7, wy); avg = 0.15; bavg = 0.0;

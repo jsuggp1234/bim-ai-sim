@@ -11,6 +11,7 @@ const ss = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t
 const CARGO = {
   rebar: { n: '철근', c: 0x8a4b2a }, steel: { n: '철골 부재', c: 0x6f7f92 }, form: { n: '거푸집 자재', c: 0xb79a6a }, cw: { n: '커튼월 유닛', c: 0x7fa6c2 },
   pc: { n: 'PC 부재', c: 0xb5b2aa }, mep: { n: '덕트·배관', c: 0xc9ced4 }, pallet: { n: '마감 자재', c: 0xd9cfbf }, module: { n: '모듈 유닛', c: 0xd9d4c8 },
+  hbeam: { n: 'H형강 (흙막이·버팀보)', c: 0x5d6670 }, temp: { n: '가설 자재 (펜스·비계)', c: 0x9aa3ab }, wp: { n: '방수 자재', c: 0x3b3f46 }, cement: { n: '시멘트·그라우트', c: 0xcfcac0 },
 };
 export const CARGO_KINDS = Object.keys(CARGO);
 
@@ -90,11 +91,11 @@ export function buildFleet(X) {
   function loadCargo(t, kind) {
     const U = t.userData; if (U.kind === kind) return; U.kind = kind;
     U.cg.clear(); U.items = [];
-    const c = (CARGO[kind] || CARGO.pallet).c, m = M(c, { metalness: kind === 'steel' || kind === 'rebar' ? 0.5 : 0.1, roughness: 0.6 }), z0 = -U.L / 2 + 0.6, z1 = U.L / 2 - 5;
+    const c = (CARGO[kind] || CARGO.pallet).c, m = M(c, { metalness: kind === 'steel' || kind === 'hbeam' || kind === 'rebar' ? 0.5 : 0.1, roughness: 0.6 }), z0 = -U.L / 2 + 0.6, z1 = U.L / 2 - 5;
     const grp = () => { const q = new THREE.Group(); U.cg.add(q); U.items.push(q); return q; };
     if (kind === 'rebar' || kind === 'mep') {
       for (let k = 0; k < 4; k++) { const q = grp(); for (let j = 0; j < 3; j++) b(q, m, -1.0 + j * 0.7, -0.5 + j * 0.7, 1.55 + k * 0.32, 1.83 + k * 0.32, z0, z1); }
-    } else if (kind === 'steel') {
+    } else if (kind === 'steel' || kind === 'hbeam') {
       for (let k = 0; k < 3; k++) { const q = grp(); for (let j = 0; j < 3; j++) { const x = -0.85 + j * 0.85; b(q, m, x - 0.25, x + 0.25, 1.55 + k * 0.55, 1.6 + k * 0.55, z0, z1); b(q, m, x - 0.03, x + 0.03, 1.6 + k * 0.55, 2.0 + k * 0.55, z0, z1); b(q, m, x - 0.25, x + 0.25, 2.0 + k * 0.55, 2.05 + k * 0.55, z0, z1); } }
     } else if (kind === 'cw' || kind === 'pc') {
       for (let k = 0; k < 4; k++) { const q = grp(), zc = z0 + 1.6 + k * ((z1 - z0 - 3.2) / 3); if (kind === 'cw') { b(q, M(0x8a8f99, { metalness: 0.6 }), -0.9, 0.9, 1.55, 1.7, zc - 1.2, zc + 1.2); [-0.35, 0.35].forEach(x => b(q, m, x - 0.04, x + 0.04, 1.7, 4.1, zc - 1.5, zc + 1.5)); } else b(q, m, -1.2, 1.2, 1.55, 1.95, zc - 1.6, zc + 1.6); }

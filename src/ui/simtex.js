@@ -2,6 +2,7 @@
 // 캔버스에 한 번 그려 모든 장면이 같이 쓴다. 상자 크기가 제각각이라 UV 대신 월드 좌표로 세 방향에서 투영(triplanar)해 붙인다.
 // 질감은 밝기 지도(흰색 근처)라 재질 색과 곱해진다.
 import * as THREE from 'three';
+import { NOISE_GLSL } from '../sim/scene/noise.js';
 
 const TX = new Map();
 let ANISO = 8;
@@ -113,16 +114,21 @@ export function simTex(kind) {
   const t = new THREE.CanvasTexture(K[2](K[0]));
   t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = ANISO;
   t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter;
-  t.userData.size = K[1];
+  t.userData.size = K[1]; t.userData.kind = kind;
   TX.set(kind, t);
   return t;
 }
 
+// 반복을 깨는 방법 (질감 종류마다): [섞기, 큰 얼룩 세기, 색 얼룩 세기]
+// 섞기 2 = 노이즈로 고른 두 가상 타일(어긋난 위치)을 부드럽게 섞어 같은 무늬가 줄지어 보이지 않게 (흙·쇄석·아스팔트처럼 무늬가 불규칙한 것만)
+// 섞기 1 = 그대로 (거푸집 줄눈·보도블록처럼 규칙이 있어야 하는 것). 큰 얼룩은 모두: 20m·6m 크기의 밝기 얼룩 + 흙은 젖은·마른 색 얼룩
+const NT = { soil: [2, 0.2, 0.06], gravel: [2, 0.18, 0.05], asph: [2, 0.12, 0.015], paver: [1, 0.07, 0.02], conc: [1, 0.08, 0.02], steel: [1, 0.06, 0.02], ply: [1, 0.05, 0.02], panel: [1, 0.04, 0] };
 // 월드 좌표 세 방향 투영. 상자를 어떻게 늘려도 질감 크기가 같다 (InstancedMesh도)
 export function triplanar(m, size) {
   const s = 1 / (size || (m.map && m.map.userData.size) || 4);
+  const [nt, mac, hue] = NT[(m.map && m.map.userData.kind) || ''] || [1, 0, 0];
   m.onBeforeCompile = (sh) => {
-    sh.uniforms.uTpS = { value: s };
+    sh.uniforms.uTpS = { value: s }; sh.uniforms.uTpM = { value: mac }; sh.uniforms.uTpH = { value: hue };
     sh.vertexShader = 'varying vec3 vTpP;\nvarying vec3 vTpN;\n' + sh.vertexShader.replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
       {
         vec4 tpP = vec4(transformed, 1.0);
@@ -134,14 +140,44 @@ export function triplanar(m, size) {
         vTpP = (modelMatrix * tpP).xyz;
         vTpN = normalize(mat3(modelMatrix) * tpN);
       }`);
-    sh.fragmentShader = 'uniform float uTpS;\nvarying vec3 vTpP;\nvarying vec3 vTpN;\n' + sh.fragmentShader.replace('#include <map_fragment>', `#ifdef USE_MAP
-        vec3 tpB = pow(abs(vTpN), vec3(4.0)); tpB /= (tpB.x + tpB.y + tpB.z + 1e-5);
+    sh.fragmentShader = `uniform float uTpS;\nuniform float uTpM;\nuniform float uTpH;\nvarying vec3 vTpP;\nvarying vec3 vTpN;\n#define TPNT ${nt}\n` + NOISE_GLSL + sh.fragmentShader.replace('#include <map_pars_fragment>', `#include <map_pars_fragment>
+      #ifdef USE_MAP
+      vec4 tpS(vec2 uv, vec2 dx, vec2 dy) {
+      #if __VERSION__ >= 300
+        #if TPNT == 2
+          float k = nzV(uv * 0.43 + 3.7) * 7.0, i = floor(k), f = fract(k);
+          vec2 oa = sin(vec2(3.0, 7.0) * i), ob = sin(vec2(3.0, 7.0) * (i + 1.0));
+          vec4 a = textureGrad(map, uv + oa, dx, dy), b = textureGrad(map, uv + ob, dx, dy);
+          return mix(a, b, smoothstep(0.2, 0.8, f - 0.1 * dot(a.rgb - b.rgb, vec3(1.0))));
+        #else
+          return textureGrad(map, uv, dx, dy);
+        #endif
+      #else
+        return texture2D(map, uv);
+      #endif
+      }
+      #endif`).replace('#include <map_fragment>', `#ifdef USE_MAP
+        vec3 tpB = pow(abs(vTpN), vec3(4.0)); tpB *= step(vec3(0.02), tpB); tpB /= (tpB.x + tpB.y + tpB.z + 1e-5);
         vec3 tpQ = vTpP * uTpS;
-        vec4 tpC = texture2D(map, tpQ.zy) * tpB.x + texture2D(map, tpQ.xz) * tpB.y + texture2D(map, tpQ.xy) * tpB.z;
+        #if __VERSION__ >= 300
+          vec3 tpDx = dFdx(tpQ), tpDy = dFdy(tpQ);
+        #else
+          vec3 tpDx = vec3(0.0), tpDy = vec3(0.0);
+        #endif
+        vec4 tpC = vec4(0.0);
+        if (tpB.x > 0.0) tpC += tpS(tpQ.zy, tpDx.zy, tpDy.zy) * tpB.x;
+        if (tpB.y > 0.0) tpC += tpS(tpQ.xz, tpDx.xz, tpDy.xz) * tpB.y;
+        if (tpB.z > 0.0) tpC += tpS(tpQ.xy, tpDx.xy, tpDy.xy) * tpB.z;
         diffuseColor *= tpC;
+        if (uTpM > 0.0) {
+          vec2 mp = vTpP.xz + vec2(vTpP.y * 0.73, -vTpP.y * 0.41);
+          float mk = nzV(mp / 23.0) * 0.62 + nzV(mp / 6.3 + 11.0) * 0.38;
+          diffuseColor.rgb *= 1.0 + uTpM * (mk - 0.5) * 2.0;
+          diffuseColor.rgb *= mix(vec3(1.0 + uTpH, 1.0, 1.0 - uTpH * 1.4), vec3(1.0 - uTpH * 0.6, 1.0 - uTpH * 0.2, 1.0 + uTpH * 0.5), nzV(mp / 37.0 + 5.0));
+        }
       #endif`);
   };
-  m.customProgramCacheKey = () => 'tp' + s.toFixed(4);
+  m.customProgramCacheKey = () => 'tp' + s.toFixed(4) + '|' + nt + '|' + mac + '|' + hue;
   m.userData.tp = s;
   return m;
 }

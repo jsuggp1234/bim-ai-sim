@@ -16,7 +16,8 @@ const HIP = 0.93, THIGH = 0.44, SHIN = 0.45, UARM = 0.3, FARM = 0.27, SH_X = 0.2
 const VESTS = [0xff7a1a, 0xc9f22e, 0xff7a1a, 0xffa31a, 0xc9f22e];
 const SHIRTS = [0x2c3a55, 0x55606e, 0x3d4f6b, 0x6b6f75, 0x24324a];
 const PANTS = [0x2a3346, 0x5d5848, 0x3a3f47, 0x2a3346, 0x4a4f58];
-const HATS = { work: 0xffd23a, boss: 0xf4f4f0, elec: 0x2f7fd0, sig: 0xe5484d };
+export const HATS = { work: 0xffd23a, boss: 0xf4f4f0, elec: 0x2f7fd0, sig: 0xe5484d, safe: 0x3fae6a };
+export { VESTS, SHIRTS, PANTS, SKIN };
 const SKIN = [0xc89a78, 0xb98a68, 0xd3a888, 0xa87a5a];
 const CLOTH = [0x3f5f8f, 0x8a8f99, 0xa33a3a, 0x2b2d33, 0xd9d4c8, 0x6b7a5a, 0x7a5a8f];
 const HAIR = [0x1d1b1a, 0x2b2522, 0x3a2f28, 0x15151a];
@@ -71,6 +72,26 @@ const ACT = {
   inspect(o, t) { o.tp = 0.08; o.hp = 0.3 + 0.25 * Math.sin(t * 0.45); o.ty = 0.3 * Math.sin(t * 0.3); o.L = [1.0, 0.05, 1.45]; o.R = [0.95, -0.05, 1.6]; o.tool = 'board'; },
   hose(o, t) { const k = Math.sin(t * 0.6); o.tp = 0.28; o.hp = -0.35; o.L = [0.85 + 0.1 * k, 0.05, 0.55]; o.R = [0.7 + 0.1 * k, 0.05, 0.65]; o.lL = [0.25, 0.2]; o.rL = [-0.15, 0.1]; o.tool = 'hose'; o.sw = k; },
   spray(o, t) { const k = Math.sin(t * 1.5); o.tp = 0.1; o.L = [1.05, 0.1, 0.6]; o.R = [1.1, 0.02, 0.45]; o.ty = 0.35 * k; o.tool = 'nozzle'; },
+  // 사람끼리: 말하기(손짓) · 듣기(고개 끄덕임) · 팔짱 · 가리키기 · 통화 · 걸으며 통화
+  talk(o, t) { const a = Math.sin(t * 2.1), b = Math.sin(t * 3.3 + 1); o.ty = 0.12 * Math.sin(t * 0.8); o.hp = 0.04 * Math.sin(t * 2.7); o.R = [0.55 + 0.25 * a, 0.18, 1.25 + 0.35 * b]; o.L = [0.25 + 0.12 * Math.max(0, -a), 0.12, 0.5 + 0.3 * Math.max(0, b)]; },
+  listen(o, t) { o.hp = 0.1 + 0.07 * Math.max(0, Math.sin(t * 1.3)); o.ty = 0.05 * Math.sin(t * 0.4); o.L = [0.32, 0.02, 0.95]; o.R = [0.32, 0.02, 0.95]; },
+  arms(o, t) { o.tp = -0.03; o.hp = 0.04 * Math.sin(t * 0.6); o.L = [0.62, -0.05, 1.75]; o.R = [0.55, -0.05, 1.8]; o.lL = [0.06, 0.04]; o.rL = [-0.06, 0.04]; },
+  point(o, t) { const k = Math.sin(t * 0.9); o.ty = 0.25 + 0.1 * k; o.R = [1.45 + 0.1 * k, 0.25, 0.08]; o.L = [0.85, 0.05, 1.3]; o.tool = 'board'; },
+  phone(o, t) { o.hp = 0.12 + 0.05 * Math.sin(t * 0.7); o.ty = 0.15 * Math.sin(t * 0.35); o.R = [0.42, 0.42, 2.45]; o.L = [0.2, 0.08, 0.5 + 0.2 * Math.sin(t * 1.7)]; o.tool = 'phone'; },
+  phone_w(o, t, ph) { gait(o, ph, 0.6); o.R = [0.42, 0.42, 2.45]; o.hp = 0.1; o.tool = 'phone'; },
+  // TBM: 체조(팔 올리기 → 옆으로 벌리기 → 허리 돌리기 → 무릎 굽히기, 2초씩) · 안전 구호(주먹 들기)
+  stretch(o, t) {
+    const st = Math.floor(t / 2) % 4, k = 0.5 - 0.5 * Math.cos((t % 2) / 2 * Math.PI * 2);
+    if (st === 0) { o.L = [0.2 + 2.7 * k, 0.15, 0.1]; o.R = [0.2 + 2.7 * k, 0.15, 0.1]; o.hp = -0.25 * k; }
+    else if (st === 1) { o.L = [0.15, 0.2 + 1.35 * k, 0.05]; o.R = [0.15, 0.2 + 1.35 * k, 0.05]; }
+    else if (st === 2) { o.L = [0.2, 1.4, 0.1]; o.R = [0.2, 1.4, 0.1]; o.ty = 0.7 * Math.sin((t % 2) / 2 * Math.PI * 2); }
+    else { crouch(o, HIP - 0.3 * k); o.L = [0.2 + 1.3 * k, 0.05, 0.1]; o.R = [0.2 + 1.3 * k, 0.05, 0.1]; o.tp = 0.15 * k; }
+  },
+  cheer(o, t) { const k = Math.max(0, Math.sin(t * 5.2)); o.hp = -0.15; o.R = [2.55 + 0.35 * k, 0.12, 0.35 + 0.35 * (1 - k)]; o.L = [0.15, 0.08, 0.3]; },
+  // 쉬기: 의자에 앉기 · 앉아서 물 마시기 · 앉아서 쉬기(고개 숙이고 팔을 무릎에)
+  sit(o, t) { o.hip = 0.47; o.lL = [1.5, 1.5]; o.rL = [1.45, 1.42]; o.tp = 0.08; o.hp = 0.05 * Math.sin(t * 0.5); o.L = [0.75, 0.12, 0.85]; o.R = [0.75, 0.12, 0.85]; },
+  drink(o, t) { const k = Math.max(0, Math.sin(t * 0.6)); o.hip = 0.47; o.lL = [1.5, 1.5]; o.rL = [1.45, 1.42]; o.tp = 0.05; o.hp = -0.35 * k; o.L = [0.7, 0.12, 0.9]; o.R = [0.6 + 0.65 * k, 0.15, 1.2 + 0.9 * k]; o.tool = 'cup'; },
+  rest(o, t) { o.hip = 0.47; o.lL = [1.45, 1.55]; o.rL = [1.4, 1.5]; o.tp = 0.45; o.hp = 0.35 + 0.05 * Math.sin(t * 0.3); o.L = [0.9, 0.2, 1.1]; o.R = [0.9, 0.2, 1.1]; },
 };
 export const ACTS = Object.keys(ACT);
 
@@ -180,6 +201,8 @@ export function buildPeople(X, cap = 140) {
       case 'board': obox(elL, 0, -FARM - 0.08, 0.04, 0.24, 0.02, 0.32, 0x8a6a45); break;
       case 'hose': { A.copy(HR).add(HL).multiplyScalar(0.5); seg(V2.copy(A).addScaledVector(F, -0.6).setY(A.y + 0.5), A, 0.13, 0.13, 0x1c1c1e); seg(A, B.copy(A).addScaledVector(F, 0.5 + 0.15 * o.sw).setY(fy + 0.25), 0.12, 0.12, 0x1c1c1e); break; }
       case 'nozzle': { A.copy(HR); seg(A, B.copy(A).addScaledVector(F, 0.5), 0.04, 0.04, 0x9aa3ad); break; }
+      case 'phone': obox(elR, 0, -FARM - 0.06, 0.03, 0.02, 0.15, 0.075, 0x1d1d22); break;
+      case 'cup': obox(elR, 0, -FARM - 0.08, 0.05, 0.075, 0.12, 0.075, lk.cup ?? 0x7fb8e0); break;
       default: break;
     }
   }
@@ -263,7 +286,7 @@ export function crewPlan(kind, n, a, T, seed = 0, o = {}) {
       else if (u < 4 + tw) { const f = (u - 4) / tw; x = A[0] + (B[0] - A[0]) * f; z = A[1] + (B[1] - A[1]) * f; yaw = Math.atan2(B[0] - A[0], B[1] - A[1]); ac = act; ph = (u - 4) * spd * 4.6; }
       else if (u < 7.5 + tw) { x = B[0]; z = B[1]; yaw = Math.atan2(B[0] - A[0], B[1] - A[1]); ac = 'pick'; }
       else { const f = (u - 7.5 - tw) / tw; x = B[0] + (A[0] - B[0]) * f; z = B[1] + (A[1] - B[1]) * f; yaw = Math.atan2(A[0] - B[0], A[1] - B[1]); ac = 'walk'; ph = (u - 7.5 - tw) * spd * 4.6; }
-      out.push({ x, y: a.y, z, yaw, act: ac, t: T + off, ph, lk });
+      out.push({ x, y: a.y, z, yaw, act: ac, t: T + off, ph, lk, kind, sd });
       continue;
     }
     // 제자리 작업: 자리 셋을 돌며 일하고, 다음 자리로 걸어간다 (신호·측량·유도는 한자리)
@@ -274,18 +297,18 @@ export function crewPlan(kind, n, a, T, seed = 0, o = {}) {
     let acc = 0, done = false;
     for (let k = 0; k < spots.length && !done; k++) {
       const p = spots[k], q = spots[(k + 1) % spots.length];
-      if (u < acc + dw) { const f = o.face, yaw = f ? Math.atan2(f[0] - p[0], f[1] - p[1]) : hsh(sd, 41 + k) * 6.283; out.push({ x: p[0], y: a.y, z: p[1], yaw, act, t: T + off, ph: 0, lk }); done = true; break; }
+      if (u < acc + dw) { const f = o.face, yaw = f ? Math.atan2(f[0] - p[0], f[1] - p[1]) : hsh(sd, 41 + k) * 6.283; out.push({ x: p[0], y: a.y, z: p[1], yaw, act, t: T + off, ph: 0, lk, kind, sd }); done = true; break; }
       acc += dw;
-      if (spots.length > 1 && u < acc + legs[k]) { const f = (u - acc) / legs[k]; out.push({ x: p[0] + (q[0] - p[0]) * f, y: a.y, z: p[1] + (q[1] - p[1]) * f, yaw: Math.atan2(q[0] - p[0], q[1] - p[1]), act: 'walk', t: T + off, ph: (u - acc) * spd * 4.6, lk }); done = true; break; }
+      if (spots.length > 1 && u < acc + legs[k]) { const f = (u - acc) / legs[k]; out.push({ x: p[0] + (q[0] - p[0]) * f, y: a.y, z: p[1] + (q[1] - p[1]) * f, yaw: Math.atan2(q[0] - p[0], q[1] - p[1]), act: 'walk', t: T + off, ph: (u - acc) * spd * 4.6, lk, kind, sd }); done = true; break; }
       acc += spots.length > 1 ? legs[k] : 0;
     }
-    if (!done) out.push({ x: spots[0][0], y: a.y, z: spots[0][1], yaw: 0, act, t: T + off, ph: 0, lk });
+    if (!done) out.push({ x: spots[0][0], y: a.y, z: spots[0][1], yaw: 0, act, t: T + off, ph: 0, lk, kind, sd });
   }
   return out;
 }
 // 한 사람을 지정한 자리에 (신호수·호스 잡이·유도원 등): face 쪽을 본다
 export function crewAt(act, x, y, z, face, T, seed = 0, lk = {}) {
   const sd = seed * 13 + 5;
-  return { x, y, z, yaw: face ? Math.atan2(face[0] - x, face[1] - z) : 0, act, t: T + hsh(sd, 3) * 50, ph: 0, lk: { vest: act === 'signal' ? 0xff5a1f : VESTS[sd % VESTS.length], shirt: SHIRTS[sd % SHIRTS.length], pants: PANTS[(sd >> 1) % PANTS.length], skin: SKIN[sd % SKIN.length], hat: act === 'signal' ? HATS.sig : act === 'inspect' ? HATS.boss : HATS.work, ...lk } };
+  return { x, y, z, sd, yaw: face ? Math.atan2(face[0] - x, face[1] - z) : 0, act, t: T + hsh(sd, 3) * 50, ph: 0, lk: { vest: act === 'signal' ? 0xff5a1f : VESTS[sd % VESTS.length], shirt: SHIRTS[sd % SHIRTS.length], pants: PANTS[(sd >> 1) % PANTS.length], skin: SKIN[sd % SKIN.length], hat: act === 'signal' ? HATS.sig : act === 'inspect' ? HATS.boss : HATS.work, ...lk } };
 }
 export const PED_LOOK = (i) => ({ ped: true, cloth: CLOTH[i % CLOTH.length], pants: [0x2b2d33, 0x3f4a5f, 0x5d5848, 0x1f2024][i % 4], skin: SKIN[i % SKIN.length], hat: HAIR[i % HAIR.length] });
