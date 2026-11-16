@@ -2,6 +2,7 @@
 // 차량마다 순서(접근 → 후진 진입 → 상차/하역 → 진출 → 떠남)를 시간 T의 함수로 정해, 한 상차 자리에는 한 대씩만 선다.
 // 좌표는 build3d와 같다 (x 단면 가로, z 대로 방향, 대지 0..pw, 대로는 x > pw). 차량 모형의 앞은 로컬 +z.
 import * as THREE from 'three';
+import { shape } from './kit3d.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const ss = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -23,14 +24,15 @@ export function buildFleet(X) {
   const CHROME = M(0xd9dde2, { metalness: 0.85, roughness: 0.2 }), LAMP = M(0xfff6d8, { emissive: 0xfff6d8, emissiveIntensity: 0.6 }), TAIL = M(0xff3b30, { emissive: 0xff3b30, emissiveIntensity: 0.5 });
   const SOIL = M(0x8a7255, { roughness: 1, metalness: 0 }), CONC = M(0x9d9b95, { roughness: 0.9, metalness: 0 });
   const b = (g, m, x0, x1, y0, y1, z0, z1) => { const o = new THREE.Mesh(BOX, m); o.position.set((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); o.scale.set(Math.abs(x1 - x0), Math.abs(y1 - y0), Math.abs(z1 - z0)); g.add(o); return o; };
+  const rb = (g, m, x0, x1, y0, y1, z0, z1, r = 0.2) => { const o = new THREE.Mesh(G(shape().rbox(x0, x1, y0, y1, z0, z1, r, 2).done()), m); g.add(o); return o; };
   const wheel = (g, x, z, r = 0.52, w = 0.4, twin = false) => { [x].forEach(xx => { const t = new THREE.Mesh(WH, TIRE); t.position.set(xx, r, z); t.scale.set(twin ? w * 1.7 : w, 2 * r, 2 * r); g.add(t); const h = new THREE.Mesh(HUB, RIM); h.position.set(xx + Math.sign(xx) * (twin ? w * 0.86 : w * 0.52), r, z); h.scale.set(0.04, r * 1.15, r * 1.15); g.add(h); }); };
   // 운전실 (앞이 +z): 앞유리 · 옆창 · 범퍼 · 전조등 · 경광등 · 사이드미러
   function cab(g, z1, col, W = 2.45, H = 3.1, L = 2.1) {
     const cm = M(col, { metalness: 0.35, roughness: 0.4 });
-    b(g, cm, -W / 2, W / 2, 1.05, H, z1 - L, z1);
+    rb(g, cm, -W / 2, W / 2, 1.05, H, z1 - L, z1, 0.28);
     b(g, GLASS, -W / 2 + 0.12, W / 2 - 0.12, H - 1.05, H - 0.18, z1 - 0.02, z1 + 0.02);
     [-1, 1].forEach(s => { b(g, GLASS, s * W / 2 - 0.02, s * W / 2 + 0.02, H - 1.0, H - 0.2, z1 - L + 0.35, z1 - 0.25); b(g, DARK, s * (W / 2 + 0.05), s * (W / 2 + 0.28), H - 1.1, H - 0.55, z1 - 0.15, z1 - 0.1); b(g, LAMP, s * W / 2 - 0.45 * s - 0.2, s * W / 2 - 0.45 * s + 0.2, 1.25, 1.45, z1, z1 + 0.04); });
-    b(g, DARK, -W / 2, W / 2, 0.75, 1.15, z1 - 0.1, z1 + 0.18); b(g, CHROME, -W / 2 + 0.3, W / 2 - 0.3, 1.5, 2.0, z1, z1 + 0.03); b(g, cm, -W / 2, W / 2, H, H + 0.25, z1 - L, z1 - L + 0.9);
+    b(g, DARK, -W / 2, W / 2, 0.75, 1.15, z1 - 0.1, z1 + 0.18); b(g, CHROME, -W / 2 + 0.3, W / 2 - 0.3, 1.5, 2.0, z1, z1 + 0.03); rb(g, cm, -W / 2 + 0.05, W / 2 - 0.05, H - 0.1, H + 0.3, z1 - L, z1 - L + 1.0, 0.12);
     const bc = b(g, M(0xffa31a, { emissive: 0xffa31a, emissiveIntensity: 0.2, roughness: 0.3 }), -0.18, 0.18, H + 0.25, H + 0.45, z1 - L + 0.3, z1 - L + 0.6); return bc;
   }
   function chassis(g, z0, z1) { b(g, DARK, -0.55, 0.55, 0.6, 1.05, z0, z1); [-1, 1].forEach(s => b(g, M(0x2f3236), s * 0.55, s * 1.2, 0.75, 1.05, z0 + 1.2, z0 + 2.2)); }

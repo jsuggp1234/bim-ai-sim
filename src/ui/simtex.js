@@ -93,6 +93,13 @@ const KINDS = {
       return [v, v * 0.97, v * 0.92];
     }).c;
   }],
+  // 골판 강판 (ACS 보호 스크린·가설 패널): 세로 골 + 타공 + 1m 패널 이음
+  panel: [256, 2, (N) => {
+    const f = fbm(97, 4);
+    const { c, x } = paint(N, (px, py) => { const r = (px % 32) / 32, rib = r < 0.18 ? 0.78 : r < 0.3 ? 1.06 : r > 0.88 ? 0.86 : 1; let v = (0.92 + (f(px, py, N) - 0.5) * 0.08) * rib; if (py % 128 < 2) v *= 0.7; return [v, v, v * 1.01]; });
+    x.fillStyle = 'rgba(20,24,30,.55)'; for (let i = 0; i < 16; i++) for (let j = 0; j < 32; j++) { x.beginPath(); x.arc(16 + i * 16 - (j % 2) * 8, 4 + j * 8, 1.4, 0, Math.PI * 2); x.fill(); }
+    return c;
+  }],
   // 쇄석·현장 바닥: 촘촘한 여러 색 알갱이
   gravel: [256, 2, (N) => {
     const f = fbm(91, 4);

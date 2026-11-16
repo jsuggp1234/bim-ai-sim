@@ -18,6 +18,7 @@ import { simTex, simTexAniso, triplanar, keepTriplanar } from './simtex.js';
 import { buildSimContext } from './simctx.js';
 import { crewPlan, crewAt, CREW_KINDS } from './crew3d.js';
 import { buildFleet } from './fleet3d.js';
+import { buildYard } from './yard3d.js';
 import { ARCH } from './workstep.js';
 import { fallbackFor, osmFor, osmReady } from '../sim/ctxload.js';
 import { OSM_ATTRIB } from '../sim/osm.js';
@@ -269,7 +270,9 @@ export function createSim3D(host, opts = {}) {
     const crane2 = ['crawler', 'ringer', 'mobile'].includes(ids.lift);
     // 안전 난간 · 추락 방지망 · 낙하물 방지망 · 자재 적치 (지금 짓는 층)
     const railI = inst(BOX, mat(0xffd23a, { em: 0.15 }), 220, null);
-    const netM = mat(0x3fae6a, { op: 0.22 }), nets = [0, 1, 2, 3].map(() => mesh(BOX, netM, null));
+    const netM = mat(0x3fae6a, { op: 0.16 }), nets = [0, 1, 2, 3].map(() => mesh(BOX, netM, null));
+    // 시스템 비계 (재래식·알루미늄 거푸집, 철골): 강관 수직재·수평재·가새 + 주황 작업 발판
+    const scafI = inst(BOX, mat(0xb4bac2, { metal: 0.6, rough: 0.4 }), 1600, null), plankI = inst(BOX, mat(0xd9893a, { rough: 0.75 }), 200, null);
     const fanI = inst(BOX, mat(0x8fa1b5, { op: 0.55 }), 16, null);
     const stockI = inst(BOX, mat(0xffffff), 8, null);
     [0xd9822b, 0xd9822b, 0x9fb3c8, 0x9fb3c8, 0xc58a4a, 0xc58a4a, 0x8fa1b5, 0x8fa1b5].forEach((c, i) => stockI.setColorAt(i, new THREE.Color(c)));
@@ -328,11 +331,12 @@ export function createSim3D(host, opts = {}) {
     const colPer = D.fp.map(f => (f.x1 - f.x0 > (G.bx1 - G.bx0) + 1 ? Math.max(3, Math.round((f.x1 - f.x0) / 8.4)) + 1 : D.colX.length) * D.colZ.length);
     const colOff = [0]; colPer.forEach((n, i) => colOff.push(colOff[i] + n));
     const colI = inst(BOX, clipM(steelF ? COL.steel : COL.conc, { metal: steelF ? 0.5 : 0.05, tex: steelF ? 'steel' : 'conc' }), colOff[NF], 'frame');
+    const colPos = [];
     sc.floors.forEach((f, i) => {
       const fp = D.fp[i], nx = Math.max(3, Math.round((fp.x1 - fp.x0) / 8.4)), xs = fp.x1 - fp.x0 > (G.bx1 - G.bx0) + 1 ? Array.from({ length: nx + 1 }, (_, j) => fp.x0 + (fp.x1 - fp.x0) * j / nx) : D.colX;
       const zs = D.colZ.map(z => clamp(z, fp.z0, fp.z1));
       let k = colOff[i]; const w = steelF ? 0.5 : 0.8;
-      xs.forEach(x => zs.forEach(z => ibox(colI, k++, x - w / 2, x + w / 2, f.e0 + 0.18, f.e1 - 0.32, z - w / 2, z + w / 2)));
+      const cp = []; colPos.push(cp); xs.forEach(x => zs.forEach(z => { cp.push([x, z]); ibox(colI, k++, x - w / 2, x + w / 2, f.e0 + 0.18, f.e1 - 0.32, z - w / 2, z + w / 2); }));
       ibox(slabI, i, fp.x0, fp.x1, f.e1 - 0.32, f.e1 + 0.18, fp.z0, fp.z1);
     });
     // 코어 (속이 빈 네 벽)
@@ -343,10 +347,12 @@ export function createSim3D(host, opts = {}) {
     setBox(ghost, G.bx0, G.bx1, 0, G.H, -bd / 2, bd / 2); root.add(ghost);
     // 거푸집·철근·타설 (지금 층)
     const formM = clipM(COL.form, { op: 0.55, tex: 'ply' }), formBox = mesh(BOX, formM, 'form');
-    const acs = mesh(BOX, clipM(COL.orange, { op: 0.7 }), 'form');
+    const acs = mesh(BOX, clipM(0x6d859e, { op: 0.9, tex: 'panel', metal: 0.4, rough: 0.5 }), 'form');
     const shoreI = inst(BOX, clipM(0xffb547), 120, 'form');
-    const rebarTex = gridTex('#d9822b', 8); rebarTex.wrapS = rebarTex.wrapT = THREE.RepeatWrapping; rebarTex.repeat.set((G.bx1 - G.bx0) / 1.2, bd / 1.2);
-    const rebarM = new THREE.MeshBasicMaterial({ map: rebarTex, transparent: true, depthWrite: false, side: THREE.DoubleSide, clippingPlanes: [] }); clipList.push(rebarM);
+    const rebarTex = rebarMatTex(); rebarTex.wrapS = rebarTex.wrapT = THREE.RepeatWrapping; rebarTex.repeat.set((G.bx1 - G.bx0) / 1.2, bd / 1.2);
+    const rebarM = new THREE.MeshStandardMaterial({ map: rebarTex, alphaTest: 0.35, side: THREE.DoubleSide, roughness: 0.65, metalness: 0.35, clippingPlanes: [] }); clipList.push(rebarM);
+    // 기둥 철근 (다음 층으로 이어질 주근이 슬래브 위로 솟는다)
+    const starterI = inst(BOX, clipM(0x6e4a36, { metal: 0.35, rough: 0.7 }), 900, 'rebar');
     const rebarP = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), rebarM); root.add(rebarP); tag(rebarP, 'rebar');
     const pourM = clipM(0x8f8e8a, { rough: 0.35, tex: 'conc' }), pourBox = mesh(BOX, pourM, 'pour');
     const cageI = inst(BOX, clipM(COL.rebar), 6, 'rebar');
@@ -421,6 +427,8 @@ export function createSim3D(host, opts = {}) {
     const treeI = inst(CONE, mat(COL.tree), 60, 'land'), trunkI = inst(CYL, mat(COL.trunk), 60, 'land');
     const paveI = inst(BOX, mat(COL.pave), 4, 'land');
 
+    // 야적장 (자재 더미·가설물): 건물 둘레 빈 땅
+    const yard = safe('야적장 만들기', () => buildYard({ root, sc, D }), null);
     // 공법별 장면 (장비·부재·순서): 공통 부재를 숨기거나 덮어쓴다
     const meth = buildMethods({ root, mat, clipM, inst, mesh, box, setBox, ibox, BOX, CYL, CONE, sc, D, clipList, R: { strata, bores, boreI, rigI, impI, walls, strutI, ancI, tdSlab, exc, trucks, pileI, matSlab, rig, bwpI, slabI, colI, core, formBox, acs, shoreI, rebarP, rebarTex, pourBox, cageI, sparkI, pump, boom, mixers, crane, mast, mastS, slew, jib, cjib, cwt, cab, apex, hookL, hookLoad, hMast, hCar, hCar2, skinX, skinZ, roofL, lv, strutZ, skinGlassy: glassy } });
 
@@ -532,6 +540,8 @@ export function createSim3D(host, opts = {}) {
       if (pourBox.visible) { const pf = stage === 2 ? clamp((fr - 0.6) / 0.18, 0.02, 1) : 1; setBox(pourBox, fp.x0, fp.x0 + (fp.x1 - fp.x0) * pf, f.e1 - 0.32, f.e1 + 0.2, fp.z0, fp.z1); }
       let ncg = 0; if (active && K('rebar') && ids.rebar === 'cage' && (wpId === 'rebar')) { const hx = fp.x0 + (fp.x1 - fp.x0) * 0.3, he = f.e1 + 2 + 2 * (0.5 + 0.5 * Math.sin(T * 0.8)); ibox(cageI, ncg++, hx - 0.4, hx + 0.4, he, he + 3.4, -0.4, 0.4); }
       cageI.count = ncg; cageI.instanceMatrix.needsUpdate = true;
+      let nst2 = 0; if (active && stage >= 1 && stage < 3 && ids.form !== 'pcf' && !steelF && colPos[nF] && !['rcwall', 'modular', 'pc'].includes(ids.frame)) for (const [x, z] of colPos[nF]) { for (let q = 0; q < 8 && nst2 < 900; q++) { const a = q * Math.PI / 4 + Math.PI / 8, bx = x + Math.cos(a) * 0.3, bz = z + Math.sin(a) * 0.3; ibox(starterI, nst2++, bx - 0.016, bx + 0.016, f.e1 - 0.3, f.e1 + 1.05 + (q % 2) * 0.12, bz - 0.016, bz + 0.016); } }
+      starterI.count = nst2; starterI.instanceMatrix.needsUpdate = true;
       // 철골 불꽃
       let nsp = 0;
       if (active && K('steel') && steelF && ids.steel !== 'none' && (ids.steel === 'weld' || ids.steel === 'robot')) D.colX.forEach((x, j) => { if ((T * 4 + j) % 1 > 0.6) return; for (let q = 0; q < 4 && nsp < 40; q++) { const an = q * 1.6 + T * 9; ibox(sparkI, nsp++, x + Math.cos(an) * 0.4 - 0.05, x + Math.cos(an) * 0.4 + 0.05, f.e0 + 1.2 + Math.sin(an) * 0.4 - 0.05, f.e0 + 1.2 + Math.sin(an) * 0.4 + 0.05, -bd / 2 - 0.1, -bd / 2 + 0.1); } });
@@ -650,6 +660,8 @@ export function createSim3D(host, opts = {}) {
       const Hf = ({ std: 3, sound: 10, modular: 3, mini: 2 })[ids.prep] || 3, hfx = Hf * clamp(P('prep') * 1.4, 0, 1);
       fence.forEach((o, i) => { o.visible = prepOn && !(underV && (i === 2 || i === 3)); if (!o.visible) return; const za = -pd / 2 - 3, zb = pd / 2 + 3; if (i === 0) setBox(o, pl - 0.15, pl + 0.15, 0, hfx, za, zb); if (i === 1) setBox(o, pl, pw + 5, 0, hfx, za - 0.15, za + 0.15); if (i === 2) setBox(o, pl, pw + 5, 0, Math.min(hfx, 3), zb - 0.15, zb + 0.15); if (i === 3) setBox(o, pw + 4.85, pw + 5.15, 0, Math.min(hfx, 3), za, zb - 10); });
       city.offices(prepOn && P('prep') > 0.3, ids.prep === 'modular' ? 3 : ids.prep === 'mini' ? 1 : 2);
+      if (yard) safe('야적장', () => yard.frame({ on: prepOn && structP > 0 && !underV && !(K('land') && P('land') > 0.05) && (depth <= 0.5 || baseP >= 0.999 || (topdown && tdSlab.visible)), // 굴착한 터가 아직 열려 있으면 (지하 골조 전) 땅이 없으니 놓지 않는다
+ phase: structP < 1 ? structP : 1 + 0.6 * Math.max(skinP, P('fin')) }));
       // 조경
       let ntr = 0, npv2 = 0;
       if (K('land') && P('land') > 0) {
@@ -685,7 +697,7 @@ export function createSim3D(host, opts = {}) {
       if (wpId === 'roof' && done) { const k = aNow || 'waterproof'; team(k, crewN(k, 1.1), rfp.x0 + 1, rfp.x1 - 1, rtop + 0.4, rfp.z0 + 1, rfp.z1 - 1, 21); }
       if (wpId === 'land') { const strips = [[0.6, G.bx0 - 0.6], [G.bx1 + 0.6, pw - 0.6]].sort((a, b) => (b[1] - b[0]) - (a[1] - a[0])); team('landscape', 7, strips[0][0], strips[0][1], 0.3, -pd / 2 + 2, pd / 2 - 2, 25); }
       if (wpId === 'prep' || wpId === 'plan' || wpId === 'qa') { const k = aNow || 'inspect'; team(k, 3, pw + 0.5, pw + 4.2, 0.05, -pd / 2 + 2, pd / 2 - 14, 29); }
-      let nrl = 0, nfn = 0, nst = 0;
+      let nrl = 0, nfn = 0, nst = 0, nsf = 0, npk = 0;
       if (active) {
         const y = f.e1 + 0.2, a = fp.x0 - 0.15, b = fp.x1 + 0.15, c = fp.z0 - 0.15, d = cutNow ? 0 : fp.z1 + 0.15;
         [[1.1, 0.07], [0.55, 0.05]].forEach(([hh, t]) => { ibox(railI, nrl++, a, b, y + hh, y + hh + t, c, c + 0.05); if (!cutNow) ibox(railI, nrl++, a, b, y + hh, y + hh + t, d - 0.05, d); ibox(railI, nrl++, a, a + 0.05, y + hh, y + hh + t, c, d); ibox(railI, nrl++, b - 0.05, b, y + hh, y + hh + t, c, d); });
@@ -696,12 +708,27 @@ export function createSim3D(host, opts = {}) {
         // 층고가 큰 물류·공장은 바닥에서 꼭대기까지 망이 덮어 골조가 안 보이므로 작업 층 아래 8m까지만
         const y0 = Math.max(sc.floors[Math.max(0, nF - 2)].e0, y - 8), y1 = y + 1.5, o = 0.9;
         nets.forEach((n, i) => { n.visible = !(cutNow && i === 1); if (i === 0) setBox(n, a - o, b + o, y0, y1, c - o - 0.03, c - o); if (i === 1) setBox(n, a - o, b + o, y0, y1, d + o, d + o + 0.03); if (i === 2) setBox(n, a - o - 0.03, a - o, y0, y1, c - o, d + o); if (i === 3) setBox(n, b + o, b + o + 0.03, y0, y1, c - o, d + o); });
+        if (['conv', 'alform', 'deck'].includes(ids.form) || (steelF && !['gang', 'acs', 'slip'].includes(ids.form))) {
+          const sides = [[0, c, -1], [0, d, 1], [1, a, -1], [1, b, 1]].filter((q, i) => !(cutNow && i === 1)), IN = 0.25, OUT = 0.82, w2 = 0.024;
+          const bx = (im, ax, v, sg, u0, u1, f0, f1, ya, yb) => { const p0 = v + sg * f0, p1 = v + sg * f1; return ax ? ibox(im, im === plankI ? npk++ : nsf++, Math.min(p0, p1), Math.max(p0, p1), ya, yb, u0, u1) : ibox(im, im === plankI ? npk++ : nsf++, u0, u1, ya, yb, Math.min(p0, p1), Math.max(p0, p1)); };
+          for (const [ax, v, sg] of sides) {
+            const u0 = (ax ? c : a) - OUT, u1 = (ax ? d : b) + OUT, L = u1 - u0, nb = Math.max(1, Math.round(L / Math.max(1.8, L / 55))), st = L / nb;
+            for (let k = 0; k <= nb && nsf < 1560; k++) { const u = u0 + k * st; [IN, OUT].forEach(f => bx(scafI, ax, v, sg, u - w2, u + w2, f - w2, f + w2, y0, y1)); }
+            let lv = 0;
+            for (let yy = y0 + 2; yy <= y1 + 0.01 && nsf < 1560; yy += 2, lv++) {
+              if (npk < 196) { bx(plankI, ax, v, sg, u0, u1, IN, OUT, yy - 0.05, yy); bx(plankI, ax, v, sg, u0, u1, OUT - 0.03, OUT, yy, yy + 0.15); }
+              bx(scafI, ax, v, sg, u0, u1, IN - w2, IN + w2, yy - 0.06, yy - 0.02); [0, 0.5, 1.0].forEach(h => bx(scafI, ax, v, sg, u0, u1, OUT - w2, OUT + w2, yy + h - 0.02 + (h ? 0 : -0.04), yy + h + 0.02));
+              const th = Math.atan2(2, st), Ld = Math.hypot(2, st);
+              for (let k = lv % 3; k < nb && nsf < 1560; k += 3) { const um = u0 + (k + 0.5) * st, ym = yy - 1, pz = v + sg * OUT, dir = (lv % 2 ? 1 : -1); if (ax) ibox(scafI, nsf++, pz - w2, pz + w2, ym - w2, ym + w2, um - Ld / 2, um + Ld / 2, -th * dir, 0); else ibox(scafI, nsf++, um - Ld / 2, um + Ld / 2, ym - w2, ym + w2, pz - w2, pz + w2, 0, th * dir); }
+            }
+          }
+        }
         // 낙하물 방지망: 10개 층마다 (짓는 층 3개 층 아래부터)
         for (let i = nF - 3; i > 0 && nfn < 16; i -= 10) { const yy = sc.floors[i].e1, p3 = D.fp[i]; ibox(fanI, nfn++, p3.x0 - 0.5, p3.x1 + 0.5, yy - 0.03, yy + 0.03, p3.z0 - 2.7, p3.z0 - 0.2, 0.35, 0); if (!cutNow) ibox(fanI, nfn++, p3.x0 - 0.5, p3.x1 + 0.5, yy - 0.03, yy + 0.03, p3.z1 + 0.2, p3.z1 + 2.7, -0.35, 0); ibox(fanI, nfn++, p3.x0 - 2.7, p3.x0 - 0.2, yy - 0.03, yy + 0.03, p3.z0 - 0.5, cutNow ? 0 : p3.z1 + 0.5, 0, -0.35); ibox(fanI, nfn++, p3.x1 + 0.2, p3.x1 + 2.7, yy - 0.03, yy + 0.03, p3.z0 - 0.5, cutNow ? 0 : p3.z1 + 0.5, 0, 0.35); }
         // 자재 적치 (거푸집·철근 단계)
         if (stage < 2) { const bx = fp.x0 + 1.5, bz = fp.z0 + 1.5; [[0, 6, 0, 0.45, 0, 0.9], [0, 6, 0, 0.35, 1.2, 2.0], [7, 9.4, 0, 0.9, 0, 1.2], [7, 9.4, 0.9, 1.6, 0, 1.2], [10.5, 14, 0, 0.5, 0, 1.0], [10.5, 14, 0.5, 0.9, 0, 1.0]].forEach((q2, i) => { if (bx + q2[1] < fp.x1 - 1) ibox(stockI, nst++, bx + q2[0], bx + q2[1], y + q2[2], y + q2[3], bz + q2[4], bz + q2[5]); }); }
       } else nets.forEach(n => { n.visible = false; });
-      railI.count = nrl; fanI.count = nfn; stockI.count = nst; [railI, fanI, stockI].forEach(o => { o.instanceMatrix.needsUpdate = true; });
+      railI.count = nrl; fanI.count = nfn; stockI.count = nst; scafI.count = nsf; plankI.count = npk; [railI, fanI, stockI, scafI, plankI].forEach(o => { o.instanceMatrix.needsUpdate = true; });
       const occ = new Set(), busy = new Set();
       if (pump.visible) { occ.add(0); if (pourNow && lanes.length > 1) occ.add(1); }
       if (crane.visible && crane2) { occ.add(0); if (lanes.length > 1) occ.add(1); }
@@ -767,7 +794,7 @@ export function createSim3D(host, opts = {}) {
     city.labels.forEach(l => labels.push({ under: false, ...l }));
     return {
       sc, D, root, frameAt, labels, city,
-      dispose() { city.dispose(); meth.dispose(); fleet.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
+      dispose() { city.dispose(); meth.dispose(); fleet.dispose(); if (yard) yard.dispose(); const mine = new Set([rebarM]); root.traverse(o => { if (o.isMesh && o.material && (o.material.map === texX || o.material.map === texZ)) mine.add(o.material); }); for (let i = clipList.length - 1; i >= 0; i--) if (mine.has(clipList[i])) clipList.splice(i, 1); owned.forEach(o => o.dispose()); ghost.geometry.dispose(); ghost.material.dispose(); crGhost.geometry.dispose(); crGhost.material.dispose(); rebarP.geometry.dispose(); rebarTex.dispose(); rebarM.dispose(); texX.dispose(); texZ.dispose(); root.traverse(o => { if (o.isMesh && o.material && o.material.map && (o.material.map === texX || o.material.map === texZ)) o.material.dispose(); }); },
     };
   }
 
@@ -789,7 +816,7 @@ export function createSim3D(host, opts = {}) {
     if (disposed) return;
     resize();
     const { sc, wpId, p, T, marks = [], at } = st;
-    if (!built || built.sc !== sc) { if (badSc === sc) return; const nb = safe('장면 만들기', () => build(sc), null); if (!nb) { badSc = sc; built = null; return; } built = nb; lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); if (window.__S3DEBUG) window.__s3dim = { pw: sc.G.pw, pd: built.D.pd, H: sc.G.H, depth: sc.G.depth, lanes: sc.city && sc.city.lanes, yard: sc.city && sc.city.yard }; }
+    if (!built || built.sc !== sc) { if (badSc === sc) return; const nb = safe('장면 만들기', () => build(sc), null); if (!nb) { badSc = sc; built = null; return; } built = nb; lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); if (window.__S3DEBUG) window.__s3dim = { pw: sc.G.pw, pd: built.D.pd, bd: built.D.bd, bx0: sc.G.bx0, bx1: sc.G.bx1, crX: sc.crX, H: sc.G.H, depth: sc.G.depth, lanes: sc.city && sc.city.lanes, yard: sc.city && sc.city.yard }; }
     const win = winFor(sc, wpId), tau = win.s + clamp(p, 0, 1) * (win.e - win.s);
     const fres = safe(`장면 진행 (${wpId})`, () => built.frameAt({ wpId, tau, T, step: st.step }), null);
     // 시점: 전체 보기는 현장·건물 전체를 한 화면에 고정, 작업 부위는 2D 카메라가 보는 범위를 따라간다
@@ -902,6 +929,16 @@ function wholeView(sc, D, wpId, cam, hv = sc.G.H) {
   return { tgt: c, pos: c.clone().addScaledVector(dir, dist) };
 }
 // 격자 무늬 (철근 배근 · 커튼월 멀리언)
+// 철근 배근 (1.2m 한 칸에 0.3m 간격 네 가닥 × 두 방향): 녹슨 철근 + 결속선, 바탕은 투명
+function rebarMatTex() {
+  const n = 128, st = n / 4, c = document.createElement('canvas'); c.width = c.height = n;
+  const x = c.getContext('2d'); x.clearRect(0, 0, n, n);
+  const bar = (v, horiz, w) => { x.fillStyle = '#4e3224'; horiz ? x.fillRect(0, v - w / 2, n, w) : x.fillRect(v - w / 2, 0, w, n); x.fillStyle = '#9c6a4c'; horiz ? x.fillRect(0, v - w / 2 + 1, n, 1.5) : x.fillRect(v - w / 2 + 1, 0, 1.5, n); };
+  for (let i = 0; i < 4; i++) bar(st * i + st / 2, true, 5);
+  for (let i = 0; i < 4; i++) bar(st * i + st / 2, false, 5);
+  x.fillStyle = '#26282b'; for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) x.fillRect(st * i + st / 2 - 2.5, st * j + st / 2 - 2.5, 5, 5);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t;
+}
 function gridTex(color, lw = 6, alpha = 1) {
   const c = document.createElement('canvas'); c.width = c.height = 64;
   const x = c.getContext('2d'); x.clearRect(0, 0, 64, 64); x.globalAlpha = alpha; x.strokeStyle = color; x.lineWidth = lw;
