@@ -96,20 +96,20 @@ export function buildYard(X) {
   const kinds = {};
   const K = (name, parts, cap, win) => { const ims = parts.map(([s, m]) => { const g = s.done(); geos.push(g); const im = new THREE.InstancedMesh(g, m, cap); im.count = 0; im.frustumCulled = false; yard.add(im); return im; }); kinds[name] = { ims, cap, n: 0, win, size: null }; return kinds[name]; };
   const r = R0;
-  K('timber', [[P.timber(r), WOOD], [P.dunnage(shape(), 4, 1.2, 3), WOODD]], 6, [0, 0.95]);
+  K('timber', [[P.timber(r), WOOD], [P.dunnage(shape(), 4, 1.2, 3), WOODD]], 10, [0, 0.95]);
   K('ply', [[P.ply(), PLY], [P.dunnage(shape(), 2.4, 1.2, 3), WOODD]], 4, [0, 0.9]);
-  K('rebar', [[P.rebar(), RUST], [P.ties(shape(), 9), DARK]], 5, [0, 0.85]);
+  K('rebar', [[P.rebar(), RUST], [P.ties(shape(), 9), DARK]], 8, [0, 0.85]);
   K('pipes', [[P.pipes(), GALV]], 4, [0.2, 1.4]);
   K('hbeam', [[P.hbeam(), STL]], 4, [0, 0.8]);
-  K('blocks', [[P.blocks(), BLOCK], [P.pallet(shape()), WOOD]], 8, [0.5, 1.6]);
+  K('blocks', [[P.blocks(), BLOCK], [P.pallet(shape()), WOOD]], 12, [0.5, 1.6]);
   K('bricks', [[P.blocks(0.19, 0.057, 0.09, 12), BRICK], [P.pallet(shape()), WOOD]], 6, [0.6, 1.6]);
   K('bags', [[P.bags(), BAG], [P.pallet(shape()), WOOD]], 6, [0.3, 1.6]);
-  K('panels', [[P.panels(), YEL], [P.panelFace(), FACE]], 6, [0, 0.9]);
+  K('panels', [[P.panels(), YEL], [P.panelFace(), FACE]], 10, [0, 0.9]);
   K('sand', [[P.pile(r), SAND]], 2, [0, 1.6]);
   K('gravel', [[P.pile(r, 2.6, 1.0, 2.2), GRAV]], 2, [0, 1.6]);
   K('drum', [[P.drum(), DRUM], [P.drumCable(), CABLE]], 4, [0.5, 1.6]);
   CONT.forEach((m, i) => K('cont' + i, [[P.container(), m]], 2, [0, 1.6]));
-  K('toilet', [[P.toilet(), BLUE], [P.toiletRoof(), WHITE]], 4, [0, 1.6]);
+  K('toilet', [[P.toilet(), BLUE], [P.toiletRoof(), WHITE]], 6, [0, 1.6]);
   K('light', [[P.lightTower(), YEL], [P.lamps(), LAMP]], 3, [0, 1.6]);
   K('skip', [[P.skip(), SKIPC], [P.debris(r), DEB]], 2, [0.1, 1.6]);
   K('cone', [[P.cone(), ORNG], [P.coneBand(), WHITE]], 40, [0, 1.6]);
@@ -145,7 +145,8 @@ export function buildYard(X) {
     if (side === 'front' && tall.has(kind)) return false;
     const along = ax === 'x', hx = (along ? fl : fw) / 2, hz = (along ? fw : fl) / 2, yaw = along ? 0 : Math.PI / 2;
     // 펜스 쪽부터 두 줄 (앞 띠는 앞 펜스 쪽)
-    const rows = along ? (side === 'front' ? [sz1 - hz - 0.2, sz1 - 3 * hz - 1.4] : [sz0 + hz + 0.2, sz0 + 3 * hz + 1.4]) : [sx0 + hx + 0.2, sx0 + 3 * hx + 1.4];
+    // 앞 띠는 건물 쪽 (바리케이드 뒤), 뒤·왼쪽 띠는 펜스 쪽부터
+    const rows = along ? (side === 'front' ? [sz0 + hz + 2.8, sz0 + 3 * hz + 4.2] : [sz0 + hz + 0.2, sz0 + 3 * hz + 1.4]) : [sx0 + hx + 0.2, sx0 + 3 * hx + 1.4];
     for (const c of rows) {
       const a0 = (along ? sx0 + hx : sz0 + hz) + 0.3, a1 = along ? sx1 - hx : sz1 - hz;
       for (let u = a0; u <= a1; u += 0.7) {
@@ -158,7 +159,8 @@ export function buildYard(X) {
     }
     return false;
   };
-  order.forEach((k, i) => { for (let t = 0; t < strips.length; t++) if (tryPut(k, strips[(i + t) % strips.length])) break; });
+  const area = strips.reduce((t, q) => t + (q[1] - q[0]) * (q[3] - q[2]), 0);
+  (area > 1800 ? order.concat(order) : order).forEach((k, i) => { for (let t = 0; t < strips.length; t++) if (tryPut(k, strips[(i + t) % strips.length])) break; });
   // 물통 바리케이드 (건물 앞 보행 통로 경계) · 라바콘 (크레인 기초 둘레, 바리케이드 끝)
   const lineOf = (x0, z0, x1, z1, step, fn) => { const L = Math.hypot(x1 - x0, z1 - z0), n = Math.floor(L / step); for (let i = 0; i <= n; i++) fn(x0 + (x1 - x0) * i / Math.max(1, n), z0 + (z1 - z0) * i / Math.max(1, n), Math.atan2(-(z1 - z0), x1 - x0), i, n); };
   if (ez1 + 3 < pd / 2 - 1) lineOf(Math.max(2, ex0), ez1 + 1.6, Math.min(pw - 16, ex1), ez1 + 1.6, 1.85, (x, z, a, i, n) => { if (blocked(x - 0.9, x + 0.9, z - 0.25, z + 0.25)) return; items.push({ kind: i % 2 ? 'barrierW' : 'barrier', x, z, yaw: a }); if (i === 0 || i === n) items.push({ kind: 'cone', x: x + (i ? 1.4 : -1.4), z, yaw: 0 }); });

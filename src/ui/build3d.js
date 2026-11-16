@@ -660,8 +660,9 @@ export function createSim3D(host, opts = {}) {
       const Hf = ({ std: 3, sound: 10, modular: 3, mini: 2 })[ids.prep] || 3, hfx = Hf * clamp(P('prep') * 1.4, 0, 1);
       fence.forEach((o, i) => { o.visible = prepOn && !(underV && (i === 2 || i === 3)); if (!o.visible) return; const za = -pd / 2 - 3, zb = pd / 2 + 3; if (i === 0) setBox(o, pl - 0.15, pl + 0.15, 0, hfx, za, zb); if (i === 1) setBox(o, pl, pw + 5, 0, hfx, za - 0.15, za + 0.15); if (i === 2) setBox(o, pl, pw + 5, 0, Math.min(hfx, 3), zb - 0.15, zb + 0.15); if (i === 3) setBox(o, pw + 4.85, pw + 5.15, 0, Math.min(hfx, 3), za, zb - 10); });
       city.offices(prepOn && P('prep') > 0.3, ids.prep === 'modular' ? 3 : ids.prep === 'mini' ? 1 : 2);
-      if (yard) safe('야적장', () => yard.frame({ on: prepOn && structP > 0 && !underV && !(K('land') && P('land') > 0.05) && (depth <= 0.5 || baseP >= 0.999 || (topdown && tdSlab.visible)), // 굴착한 터가 아직 열려 있으면 (지하 골조 전) 땅이 없으니 놓지 않는다
+      if (yard) safe('야적장', () => yard.frame({ on: structP > 0 && !underV && !(K('land') && P('land') > 0.05) && (depth <= 0.5 || baseP >= 0.999 || (topdown && tdSlab.visible)), // 굴착한 터가 아직 열려 있으면 (지하 골조 전) 땅이 없으니 놓지 않는다
  phase: structP < 1 ? structP : 1 + 0.6 * Math.max(skinP, P('fin')) }));
+      if (yard && window.__S3DEBUG) window.__s3yard = { n: yard.count, vis: yard.group.visible, structP, baseP, depth, prep: P('prep'), land: P('land') };
       // 조경
       let ntr = 0, npv2 = 0;
       if (K('land') && P('land') > 0) {
