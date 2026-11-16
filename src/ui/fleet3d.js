@@ -50,6 +50,9 @@ export function buildFleet(X) {
     const heap = new THREE.Mesh(G(new THREE.SphereGeometry(0.5, 14, 7, 0, Math.PI * 2, 0, Math.PI / 2)), SOIL); heap.position.set(0, 1.45, -L / 2 + 3.3); heap.scale.set(2.3, 1, 6.2); g.add(heap);
     wheel(g, -1.05, L / 2 - 1.2); wheel(g, 1.05, L / 2 - 1.2); [-L / 2 + 1.0, -L / 2 + 2.5].forEach(z => { wheel(g, -1.0, z, 0.52, 0.4, true); wheel(g, 1.0, z, 0.52, 0.4, true); });
     [-1, 1].forEach(s => b(g, TAIL, s * 1.0 - 0.15, s * 1.0 + 0.15, 0.95, 1.15, -L / 2 - 0.02, -L / 2));
+    // 흙받이 · 연료통 · 옆 보호대 · 배기관 · 적재함 위 덮개 롤
+    [-1, 1].forEach(s => { b(g, DARK, s * 0.75, s * 1.32, 1.12, 1.18, -L / 2 + 0.3, -L / 2 + 3.2); b(g, DARK, s * 1.28, s * 1.32, 0.5, 1.12, -L / 2 + 0.3, -L / 2 + 0.36); const t = new THREE.Mesh(WH, CHROME); t.position.set(s * 1.0, 0.85, L / 2 - 2.9); t.scale.set(0.9, 0.55, 0.55); t.rotation.y = Math.PI / 2; g.add(t); b(g, DARK, s * 1.1, s * 1.25, 0.55, 0.62, L / 2 - 4.6, L / 2 - 3.4); });
+    b(g, DARK, -1.05, -0.95, 2.6, 3.9, L / 2 - 2.25, L / 2 - 2.15); b(g, M(0x3a3d42), -1.2, 1.2, 2.82, 2.98, L / 2 - 2.55, L / 2 - 2.4);
     g.userData = { L, beacon: bc, set(load) { heap.visible = load > 0.02; heap.scale.y = 0.2 + 2.3 * load; heap.position.y = 1.45; } };
     return g;
   }

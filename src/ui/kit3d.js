@@ -17,6 +17,7 @@ export function shape() {
     rbox(x0, x1, y0, y1, z0, z1, r = 0.08, seg = 2) { const w = sz(x0, x1), h = sz(y0, y1), d = sz(z0, z1), rr = Math.max(1e-3, Math.min(r, w / 2 - 1e-3, h / 2 - 1e-3, d / 2 - 1e-3)); const g = new RoundedBoxGeometry(w, h, d, seg, rr); g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2); return add(g); },
     bar(ax, ay, az, bx, by, bz, w, d = w) { _D.set(bx - ax, by - ay, bz - az); const L = _D.length(); if (L < 1e-4) return api; _Q.setFromUnitVectors(UP, _D.multiplyScalar(1 / L)); _M.compose(_V.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2), _Q, _S); return add(new THREE.BoxGeometry(w, L, d), _M); },
     tube(ax, ay, az, bx, by, bz, r, seg = 8, r2 = r, open = false) { _D.set(bx - ax, by - ay, bz - az); const L = _D.length(); if (L < 1e-4) return api; _Q.setFromUnitVectors(UP, _D.multiplyScalar(1 / L)); _M.compose(_V.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2), _Q, _S); return add(new THREE.CylinderGeometry(r2, r, L, seg, 1, open), _M); },
+    rbar(ax, ay, az, bx, by, bz, w, d = w, r = Math.min(w, d) * 0.3) { _D.set(bx - ax, by - ay, bz - az); const L = _D.length(); if (L < 1e-4) return api; _Q.setFromUnitVectors(UP, _D.multiplyScalar(1 / L)); _M.compose(_V.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2), _Q, _S); return add(new RoundedBoxGeometry(w, L, d, 2, Math.min(r, w / 2 - 1e-3, d / 2 - 1e-3, L / 2 - 1e-3)), _M); },
     cyl(x, y, z, r, h, axis = 'y', seg = 16) { const g = new THREE.CylinderGeometry(r, r, h, seg); if (axis === 'x') g.rotateZ(Math.PI / 2); if (axis === 'z') g.rotateX(Math.PI / 2); g.translate(x, y, z); return add(g); },
     geo(g, m) { return add(g, m); },
     get n() { return parts.length; },
@@ -123,6 +124,77 @@ export function craneBaseGeo(w = 1.8) {
   s.rbox(-a, a, -0.05, 0.35, -a, a, 0.08);
   [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([x, z]) => s.rbox(x * (w / 2) - 0.3, x * (w / 2) + 0.3, 0.35, 0.75, z * (w / 2) - 0.3, z * (w / 2) + 0.3, 0.04));
   return s.done();
+}
+
+// 격자 붐 (크롤러 크레인 붐·천공기 리더): 네 주재 + 면마다 지그재그, 양 끝은 좁아진다 (x 0 → len, 단면 가운데가 원점)
+export function latticeBoomGeo(len, w = 1.3, h = 1.2, taper = true, pitch = 1.3) {
+  const s = shape(), c = Math.max(0.08, Math.min(w, h) * 0.1), l = c * 0.55;
+  const k = (x) => !taper ? 1 : x < len * 0.12 ? 0.55 + 0.45 * x / (len * 0.12) : x > len * 0.85 ? 1 - 0.55 * (x - len * 0.85) / (len * 0.15) : 1;
+  const P = (x, sy, sz) => [x, sy * h / 2 * k(x), sz * w / 2 * k(x)];
+  const C = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  const n = Math.max(2, Math.round(len / pitch)), st = len / n;
+  for (let i = 0; i < n; i++) {
+    const x0 = i * st, x1 = x0 + st;
+    C.forEach(([a, b]) => s.bar(...P(x0, a, b), ...P(x1, a, b), c));
+    for (let f = 0; f < 4; f++) { const [a0, b0] = C[f], [a1, b1] = C[(f + 1) % 4]; s.bar(...P(x0, a0, b0), ...P(x1, a1, b1), l); if (i % 2 === 0) s.bar(...P(x0, a0, b0), ...P(x0, a1, b1), l * 0.9); }
+  }
+  s.box(len - 0.2, len + 0.35, -h * 0.3, h * 0.3, -w * 0.3, w * 0.3); [-1, 1].forEach(z => s.cyl(len + 0.2, 0, z * w * 0.18, h * 0.32, 0.12, 'z', 14)); // 붐 끝 도르래
+  return s.done();
+}
+// 궤도 하부 (한쪽): 둥근 트랙 + 하부 롤러 + 구동 스프로킷 + 아이들러 (길이 L, 폭 tw, 높이 1.0, x 가운데·z 가운데)
+export function trackGeo(L, tw = 0.9, H = 1.0) {
+  const s = shape();
+  s.rbox(-L / 2, L / 2, 0, H, -tw / 2, tw / 2, H * 0.45, 3);
+  for (let x = -L / 2 + 0.35; x < L / 2 - 0.2; x += 0.32) { s.box(x - 0.06, x + 0.06, H - 0.02, H + 0.04, -tw / 2, tw / 2); s.box(x - 0.06, x + 0.06, -0.04, 0.02, -tw / 2, tw / 2); } // 슈 (그라우저)
+  return s.done();
+}
+export function trackWheelsGeo(L, tw = 0.9, H = 1.0) {
+  const s = shape(), zo = tw / 2 + 0.02;
+  [-L / 2 + H * 0.45, L / 2 - H * 0.45].forEach((x, i) => { s.cyl(x, H / 2, zo, H * 0.36, 0.08, 'z', 18); s.cyl(x, H / 2, zo + 0.06, H * 0.14, 0.08, 'z', 10); if (i) for (let t = 0; t < 10; t++) { const a = t * Math.PI / 5; s.box(x + Math.cos(a) * H * 0.36 - 0.05, x + Math.cos(a) * H * 0.36 + 0.05, H / 2 + Math.sin(a) * H * 0.36 - 0.05, H / 2 + Math.sin(a) * H * 0.36 + 0.05, zo - 0.04, zo + 0.04); } });
+  for (let x = -L / 2 + H * 0.95; x < L / 2 - H * 0.8; x += 0.62) s.cyl(x, 0.24, zo, 0.16, 0.06, 'z', 12); // 하부 롤러
+  s.box(-L / 2 + H * 0.5, L / 2 - H * 0.5, H * 0.42, H * 0.62, zo - 0.01, zo + 0.03); // 트랙 프레임
+  return s.done();
+}
+
+// 면 뒤집기 (안쪽 껍질용): 감는 순서와 법선을 반대로
+export function flipGeo(g) {
+  if (g.index) { const a = g.index.array; for (let i = 0; i < a.length; i += 3) { const t = a[i + 1]; a[i + 1] = a[i + 2]; a[i + 2] = t; } }
+  const n = g.attributes.normal; if (n) for (let i = 0; i < n.array.length; i++) n.array[i] = -n.array[i];
+  return g;
+}
+// 굴착기 버킷 (힌지가 원점): 등판이 +x 쪽으로 휘어 내려가 아래에서 날 끝 · 이빨이 −x(굴착 방향)를 본다
+// 바깥 껍질 + 안쪽 껍질(뒤집음) + 옆판(부채꼴) + 날 + 이빨 5개 + 힌지 귀·핀
+export function bucketGeo(w = 1.24, r = 0.6) {
+  const s = shape(), cx = 0.42, cy = -0.52, t0 = Math.PI * 0.07, tl = Math.PI * 0.97;
+  s.geo(new THREE.CylinderGeometry(r, r, w, 18, 1, false, t0, tl).rotateX(Math.PI / 2).translate(cx, cy, 0));
+  s.geo(flipGeo(new THREE.CylinderGeometry(r - 0.05, r - 0.05, w - 0.1, 18, 1, true, t0, tl).rotateX(Math.PI / 2).translate(cx, cy, 0)));
+  const ex = cx + r * Math.sin(t0), ey = cy - r * Math.cos(t0), dx = -Math.cos(t0), dy = -Math.sin(t0);
+  s.bar(ex, ey, -w / 2, ex, ey, w / 2, 0.09, 0.09); // 날
+  for (let k = 0; k < 5; k++) { const z = -w / 2 + 0.12 + k * (w - 0.24) / 4; s.tube(ex, ey, z, ex + dx * 0.26, ey + dy * 0.26 - 0.03, z, 0.065, 5, 0.022); }
+  [-1, 1].forEach(k => { s.box(-0.14, 0.5, -0.14, 0.16, k * 0.3 - 0.04, k * 0.3 + 0.04); s.box(cx + r * 0.55, cx + r * 1.02, cy - 0.1, cy + 0.12, k * w / 2 - 0.03, k * w / 2 + 0.03); }); // 힌지 귀 · 옆 보강
+  s.cyl(0, 0, 0, 0.075, 0.74, 'z', 10); s.cyl(0.42, 0.06, 0, 0.065, 0.74, 'z', 10); // 핀
+  for (let k = 0; k < 2; k++) { const a = t0 + tl * (0.35 + k * 0.3); s.bar(cx + (r + 0.02) * Math.sin(a), cy - (r + 0.02) * Math.cos(a), -w / 2 + 0.1, cx + (r + 0.02) * Math.sin(a), cy - (r + 0.02) * Math.cos(a), w / 2 - 0.1, 0.05, 0.05); } // 마모판
+  return s.done();
+}
+// 클램셸 버킷 반쪽 (힌지 축 = x축, 원점): 아래에서 sgn 쪽 옆으로 휜 1/4 원통 + 부채꼴 옆판 + 이빨 + 위 연결대
+export function clamHalfGeo(sgn = 1, R = 1.25, L = 1.7) {
+  const s = shape(), t0 = sgn > 0 ? -Math.PI / 2 : Math.PI, tl = Math.PI / 2;
+  s.geo(new THREE.CylinderGeometry(R, R, L, 14, 1, false, t0, tl).rotateZ(Math.PI / 2));
+  s.geo(flipGeo(new THREE.CylinderGeometry(R - 0.05, R - 0.05, L - 0.1, 14, 1, true, t0, tl).rotateZ(Math.PI / 2)));
+  for (let k = 0; k < 4; k++) { const x = -L / 2 + 0.22 + k * (L - 0.44) / 3; s.tube(x, -R + 0.02, sgn * 0.02, x, -R - 0.18, -sgn * 0.06, 0.06, 5, 0.02); }
+  [-1, 1].forEach(k => s.bar(k * (L / 2 - 0.12), 0.95, sgn * 0.12, k * (L / 2 - 0.12), 0.02, sgn * R * 0.95, 0.08, 0.08)); // 연결대
+  s.cyl(0, 0, 0, 0.09, L + 0.1, 'x', 10);
+  return s.done();
+}
+// 흙·골재 더미: 납작한 반구를 울퉁불퉁하게 (seed마다 모양이 다름, 바닥 y=0, 반지름 1, 높이 1)
+export function moundGeo(seed = 1, seg = 22) {
+  const g = new THREE.SphereGeometry(1, seg, 9, 0, Math.PI * 2, 0, Math.PI / 2), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(z, x);
+    const n = 1 + 0.13 * Math.sin(3 * a + seed) + 0.07 * Math.sin(7 * a + 2.3 * seed + 3 * y) + 0.035 * Math.sin(13 * a + 3 * seed);
+    p.setXYZ(i, x * n, Math.pow(Math.max(0, y), 1.15) * (1 + 0.16 * Math.sin(5 * a + 1.7 * seed) * (1 - y)), z * n);
+  }
+  g.computeVertexNormals(); return g;
 }
 
 // ---------- 호이스트 ----------

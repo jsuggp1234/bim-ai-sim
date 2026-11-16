@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { keepTriplanar } from './simtex.js';
 import { waterSurface } from '../sim/scene/water.js';
-import { shape, mastSectionGeo, jibSectionGeo, cjibSectionGeo, catHeadGeo, slewGeo, cabGeo, cabGlassGeo, counterweightGeo, cwFrameGeo, hookBlockGeo, craneBaseGeo, hoistMastGeo, hoistCarGeo, hoistMeshGeo, meshTex, MAST_H, JIB_L, CJIB_L, SLEW_H, HMAST_H } from './kit3d.js';
+import { shape, mastSectionGeo, jibSectionGeo, cjibSectionGeo, catHeadGeo, slewGeo, cabGeo, cabGlassGeo, counterweightGeo, cwFrameGeo, hookBlockGeo, craneBaseGeo, hoistMastGeo, hoistCarGeo, hoistMeshGeo, meshTex, latticeBoomGeo, trackGeo, trackWheelsGeo, bucketGeo, clamHalfGeo, moundGeo, MAST_H, JIB_L, CJIB_L, SLEW_H, HMAST_H } from './kit3d.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -113,7 +113,7 @@ export function buildMethods(X) {
   const EQ = mat(EQC, { metal: 0.3, rough: 0.5 }), DARK = mat(0x2b2c30, { rough: 0.9 }), DARK2 = mat(0x4a4c52, { metal: 0.3, rough: 0.6 });
   const GLASS = mat(0x9cc8ee, { metal: 0.4, rough: 0.15 }), WHITE = mat(0xe9eaed, { metal: 0.2 }), ROPE = mat(0x1c1c1e);
   const STEEL = mat(0x7f93a8, { metal: 0.55, rough: 0.45 }), CONC = mat(0xa3a3a8), CONC_L = mat(0xc9c9cd);
-  const HUB = mat(0xb9bec6, { metal: 0.6, rough: 0.35 });
+  const HUB = mat(0xb9bec6, { metal: 0.6, rough: 0.35 }), CHROME = mat(0xd9dde2, { metal: 0.7, rough: 0.25 }), BEACON = mat(0xffa31a, { em: 0.6 }), HOSE = mat(0x1f2124, { rough: 0.6 });
   const ORANGE = mat(0xff8a3d, { metal: 0.2 }), REDM = mat(0xe5484d), WOODM = mat(0xc58a4a);
   const TINT = mat(0xfffffe), TINTC = clipM(0xfffffd), TINTS = clipM(0xfffffc, { metal: 0.5, rough: 0.45 });
   const FLASH = mat(0xffb547, { em: 1.4 }), DUST = mat(0xb9b2a5, { op: 0.4 }), RING = mat(0xff6b3d, { op: 0.55, em: 0.5 });
@@ -121,12 +121,17 @@ export function buildMethods(X) {
   const SOILC = { fill: 0x9c8462, sand: 0xc9a86a, clay: 0x8f6e4e, soil: 0xa88a5e, wr: 0x7a7f8a, rock: 0x4c4f57 };
   const soilM = new THREE.MeshStandardMaterial({ color: SOILC[topSoil] ?? 0xa88a5e, roughness: 0.95, side: THREE.DoubleSide }); own.mats.push(soilM);
 
+  const DRUM = geo(new THREE.LatheGeometry([[0.05, -2.4], [0.7, -2.2], [1.15, -1.3], [1.2, 0], [1.05, 1.2], [0.55, 2.2], [0.35, 2.45], [0.05, 2.5]].map(([r, y]) => new THREE.Vector2(r, y)), 24));
   const WEDGE = geo(wedgeGeo()), SPH = geo(new THREE.SphereGeometry(0.5, 10, 7)), TOR = geo(new THREE.TorusGeometry(1, 0.035, 6, 48).rotateX(Math.PI / 2));
 
   // ---------- 공통 장비 ----------
+  // 궤도: 둥근 트랙 + 슈 + 바깥 휠(구동 스프로킷·아이들러·하부 롤러) + 가운데 차체·선회 링 (길이별 형상 공유)
+  const trkC = new Map();
   function tracks(g, L, W) {
-    [-1, 1].forEach(s => { const z = s * (W / 2 - 0.45); rb(g, DARK, null, -L / 2, L / 2, 0, 1.0, z - 0.45, z + 0.45, 0.42); for (let x = -L / 2 + 0.7; x < L / 2 - 0.5; x += 0.55) pbox(g, DARK2, null, x - 0.05, x + 0.05, 0.98, 1.04, z - 0.44, z + 0.44); pcyl(g, DARK2, null, -L / 2 + 0.55, 0.5, z, 0.5, 0.92, 'z'); pcyl(g, DARK2, null, L / 2 - 0.55, 0.5, z, 0.5, 0.92, 'z'); });
-    pbox(g, DARK2, null, -L / 2 + 0.9, L / 2 - 0.9, 0.55, 1.15, -W / 2 + 0.9, W / 2 - 0.9);
+    const k = L.toFixed(2); let c = trkC.get(k); if (!c) { c = [geo(trackGeo(L, 0.9, 1.0)), geo(trackWheelsGeo(L, 0.9, 1.0))]; trkC.set(k, c); }
+    [-1, 1].forEach(s => { const z = s * (W / 2 - 0.45); mesh(c[0], DARK, null, g).position.z = z; const w = mesh(c[1], DARK2, null, g); w.position.z = z; if (s < 0) w.rotation.y = Math.PI; });
+    rb(g, DARK2, null, -L / 2 + 0.9, L / 2 - 0.9, 0.5, 1.12, -W / 2 + 0.85, W / 2 - 0.85, 0.12);
+    pcyl(g, DARK, null, 0, 1.12, 0, Math.min(1.15, W / 2 - 0.45), 0.1);
   }
   function house(g, wp, x0, x1, y0, W, col = EQ) {
     rb(g, col, wp, x0, x1, y0, y0 + 1.5, -W / 2, W / 2, 0.2);
@@ -134,12 +139,20 @@ export function buildMethods(X) {
     rb(g, GLASS, null, x1 - 1.15, x1, y0 + 1.45, y0 + 2.7, W / 2 - 1.15, W / 2, 0.1); // 운전실
     rb(g, col, wp, x1 - 1.22, x1 + 0.05, y0 + 2.62, y0 + 2.82, W / 2 - 1.22, W / 2 + 0.05, 0.08);
     pbox(g, DARK, null, x1 - 1.2, x1 - 1.1, y0 + 1.5, y0 + 2.65, W / 2 - 1.2, W / 2 + 0.02); pbox(g, DARK, null, x1 - 0.06, x1 + 0.02, y0 + 1.5, y0 + 2.65, W / 2 - 0.08, W / 2 + 0.02);
+    for (let k = 0; k < 6; k++) { const y = y0 + 0.3 + k * 0.16; pbox(g, DARK, null, x0 + 0.5, x0 + 1.9, y, y + 0.07, -W / 2 - 0.03, -W / 2 + 0.02); } // 엔진 루버
+    [x0 + 0.35, (x0 + x1) / 2 - 0.4, x1 - 1.5].forEach(x => pbox(g, DARK, null, x - 0.03, x + 0.03, y0 + 1.5, y0 + 2.35, -W / 2 + 0.06, -W / 2 + 0.12)); // 난간
+    pbox(g, DARK, null, x0 + 0.35, x1 - 1.5, y0 + 2.3, y0 + 2.36, -W / 2 + 0.06, -W / 2 + 0.12); pbox(g, DARK, null, x0 + 0.35, x1 - 1.5, y0 + 1.9, y0 + 1.94, -W / 2 + 0.06, -W / 2 + 0.12);
+    pcyl(g, DARK2, null, x0 + 1.1, y0 + 1.85, -W / 4, 0.08, 0.75); pcyl(g, DARK, null, x0 + 1.1, y0 + 2.24, -W / 4, 0.1, 0.05); // 배기관
+    pcyl(g, BEACON, null, x1 - 0.6, y0 + 2.92, W / 2 - 0.6, 0.09, 0.17); // 경광등
+    pbox(g, DARK2, null, x1 - 0.5, x1 + 0.15, y0 - 0.05, y0 + 0.05, W / 2 - 0.1, W / 2 + 0.25); // 발판
   }
   // 리더식 천공·항타기: 기계 앞 리더(격자) + 작업 도구가 리더를 따라 오르내림. 도구 끝(tool.y)이 천공 깊이
   function leaderRig(H, kind, wp, col = EQC) {
     const g = grp(); tracks(g, 5, 3.4); house(g, wp, -2.4, 0.9, 1.15, 2.8, mat(col, { metal: 0.3, rough: 0.5 }));
-    const lx = 1.8, ld = mesh(BOX, latM(col, 1, H / 1.4), wp, g); setBox(ld, lx - 0.45, lx + 0.45, 0.6, H, -0.45, 0.45);
-    link(g, mat(col, { metal: 0.3, rough: 0.5 }), wp, -0.8, 2.7, 0, lx - 0.4, H * 0.62, 0, 0.26);
+    const lx = 1.8, cm = mat(col, { metal: 0.3, rough: 0.5 }), ld = mesh(geo(latticeBoomGeo(H - 0.6, 0.9, 0.9, false, 1.0)), cm, wp, g); ld.rotation.z = Math.PI / 2; ld.position.set(lx, 0.6, 0);
+    [-0.32, 0.32].forEach(z => link(g, cm, wp, -0.8, 2.7, z, lx - 0.4, H * 0.62, z * 0.5, 0.2)); // 백스테이 (2줄)
+    link(g, cm, wp, 0.6, 1.4, 0, lx - 0.4, 2.6, 0, 0.22); pbox(g, DARK2, null, lx - 0.55, lx + 0.55, 0.45, 0.75, -0.6, 0.6); // 하부 받침
+    link(g, ROPE, null, lx + 0.5, H + 0.5, 0.2, -0.9, 2.9, 0.2, 0.05); // 권상 와이어
     pbox(g, DARK2, null, lx - 0.6, lx + 1.4, H, H + 0.7, -0.5, 0.5); // 정상 활차
     const tool = new THREE.Group(); tool.position.set(lx + 0.9, 0, 0); g.add(tool);
     const La = Math.max(4, H - 2.5);
@@ -156,71 +169,137 @@ export function buildMethods(X) {
   // 크롤러 크레인: 격자 붐 + 펜던트 + 권상줄 끝에 부속 장치(att)
   function crawlerCrane(len, wp, ang = 1.2) {
     const g = grp(); tracks(g, 6.6, 4.8); const turn = new THREE.Group(); g.add(turn);
-    house(turn, wp, -3.2, 1.6, 1.15, 3.6); pbox(turn, DARK2, null, -4.4, -3.0, 1.15, 3.6, -1.7, 1.7);
+    house(turn, wp, -3.2, 1.6, 1.15, 3.6);
+    for (let k = 0; k < 4; k++) rb(turn, DARK2, null, -4.5, -3.05, 1.2 + k * 0.62, 1.76 + k * 0.62, -1.75, 1.75, 0.1); // 카운터웨이트 판
     const bp = new THREE.Group(); bp.position.set(1.6, 2.2, 0); bp.rotation.z = ang; turn.add(bp);
-    const bm = mesh(BOX, latM(EQC, len / 1.6, 1), wp, bp); setBox(bm, 0, len, -0.6, 0.6, -0.7, 0.7);
-    link(turn, EQ, wp, -2.4, 2.6, 0, -1.8, 6.8, 0, 0.32);
+    mesh(geo(latticeBoomGeo(len, 1.4, 1.2)), EQ, wp, bp);
+    pcyl(bp, DARK2, null, 0, 0, 0, 0.22, 1.6, 'z'); // 붐 풋 핀
+    const ax = -1.8, ay = 6.8; // A 프레임 꼭지
+    [-1, 1].forEach(z => { link(turn, EQ, wp, -2.7, 2.6, z * 1.2, ax, ay, z * 0.5, 0.24); link(turn, EQ, wp, -0.2, 2.6, z * 1.0, ax, ay, z * 0.5, 0.2); });
+    pcyl(turn, DARK2, null, ax, ay, 0, 0.32, 1.3, 'z');
     const tip = new THREE.Vector3(1.6 + Math.cos(ang) * len, 2.2 + Math.sin(ang) * len, 0);
-    link(turn, ROPE, null, -1.8, 6.8, 0, tip.x, tip.y, 0, 0.07);
+    [-0.45, 0.45].forEach(z => link(turn, ROPE, null, ax, ay, z, tip.x - Math.cos(ang) * 0.3, tip.y - Math.sin(ang) * 0.3, z * 0.6, 0.06)); // 펜던트
+    link(turn, ROPE, null, -1.0, 2.9, 0, ax + 0.3, ay - 0.4, 0, 0.05); // 붐 기복 와이어
     const line = mesh(BOX, ROPE, null, turn), att = new THREE.Group(); turn.add(att);
     return { g, turn, att, tip, hang(y) { att.position.set(tip.x, y, 0); segO(line, tip.x, tip.y, 0, tip.x, y + 0.2, 0, 0.06); } };
   }
   // 굴착기: 차체 위 상부(선회) + 붐 → 암 → 버킷(또는 브레이커·할암기) 관절
+  // 굴착기 형상 (크기 s마다 한 번): 상부 차체 · 운전실 · 바나나 붐 · 암 · 실린더 · 버킷
+  const exC = new Map();
+  function exGeo(s) {
+    const k = s.toFixed(2); if (exC.has(k)) return exC.get(k);
+    const body = shape().rbox(-1.9 * s, 1.4 * s, 1.15 * s, 2.55 * s, -1.4 * s, 1.4 * s, 0.22 * s)
+      .rbox(0.36 * s, 1.44 * s, 2.5 * s, 3.74 * s, 0.34 * s, 1.42 * s, 0.1 * s) // 운전실 몸체
+      .rbox(0.32 * s, 1.48 * s, 3.68 * s, 3.84 * s, 0.3 * s, 1.46 * s, 0.06 * s) // 지붕
+      .rbox(-1.75 * s, -0.2 * s, 2.5 * s, 2.72 * s, -1.3 * s, -0.25 * s, 0.08 * s) // 엔진 덮개
+      .done();
+    const dark = shape().rbox(-2.45 * s, -1.5 * s, 1.15 * s, 2.45 * s, -1.4 * s, 1.4 * s, 0.4 * s); // 카운터웨이트
+    for (let i = 0; i < 7; i++) { const x = (-1.65 + i * 0.2) * s; dark.box(x, x + 0.1 * s, 1.45 * s, 2.35 * s, -1.43 * s, -1.38 * s); } // 루버
+    [[-1.6, -1.25], [-0.6, -1.25], [0.25, -1.25]].forEach(([x, z]) => dark.box(x * s - 0.03, x * s + 0.03, 2.72 * s, 3.3 * s, z * s - 0.03, z * s + 0.03)); // 난간 기둥
+    dark.box(-1.6 * s, 0.25 * s, 3.27 * s, 3.33 * s, -1.28 * s, -1.22 * s).box(-1.6 * s, 0.25 * s, 3.0 * s, 3.04 * s, -1.28 * s, -1.22 * s);
+    dark.box(1.42 * s, 1.47 * s, 1.6 * s, 2.5 * s, 1.0 * s, 1.36 * s); // 발판
+    dark.tube(1.42 * s, 3.3 * s, 1.46 * s, 1.75 * s, 3.45 * s, 1.75 * s, 0.025 * s).box(1.7 * s, 1.8 * s, 3.3 * s, 3.62 * s, 1.68 * s, 1.82 * s); // 사이드 미러
+    dark.tube(-0.9 * s, 2.6 * s, -0.9 * s, -0.9 * s, 3.35 * s, -0.9 * s, 0.07 * s); // 배기관
+    for (let i = 0; i < 4; i++) dark.box((0.36 + i * 0.36) * s, (0.4 + i * 0.36) * s, 3.84 * s, 3.92 * s, 0.32 * s, 1.44 * s); // 낙하물 보호대
+    const glass = shape().box(1.43 * s, 1.46 * s, 2.72 * s, 3.6 * s, 0.44 * s, 1.32 * s).box(0.48 * s, 1.34 * s, 2.72 * s, 3.6 * s, 1.41 * s, 1.44 * s).box(0.48 * s, 1.34 * s, 2.98 * s, 3.6 * s, 0.32 * s, 0.35 * s).box(0.34 * s, 0.37 * s, 3.0 * s, 3.6 * s, 0.46 * s, 1.3 * s).done();
+    // 바나나 붐 (꺾인 두 토막 + 무릎) + 붐 실린더 2 + 암 실린더 + 유압 호스
+    const boom = shape().rbar(0, 0, 0, 2.6 * s, 0.62 * s, 0, 0.74 * s, 0.56 * s).rbar(2.6 * s, 0.62 * s, 0, 5.4 * s, 0, 0, 0.6 * s, 0.5 * s).rbox(2.25 * s, 2.95 * s, 0.22 * s, 1.0 * s, -0.29 * s, 0.29 * s, 0.12 * s)
+      .cyl(0, 0, 0, 0.2 * s, 0.7 * s, 'z', 12).cyl(5.4 * s, 0, 0, 0.17 * s, 0.62 * s, 'z', 12).done();
+    const cylB = shape(), rod = shape(), hose = shape();
+    [-0.36, 0.36].forEach(z => { cylB.tube(0.25 * s, -0.75 * s, z * s, 1.75 * s, -0.25 * s, z * s, 0.12 * s, 10); rod.tube(1.75 * s, -0.25 * s, z * s, 2.55 * s, 0.1 * s, z * s, 0.065 * s, 8); });
+    cylB.tube(2.05 * s, 1.18 * s, 0, 3.9 * s, 0.98 * s, 0, 0.12 * s, 10); rod.tube(3.9 * s, 0.98 * s, 0, 5.15 * s, 0.6 * s, 0, 0.065 * s, 8);
+    [-0.12, 0.12].forEach(z => { hose.tube(0.4 * s, 0.42 * s, z * s, 2.6 * s, 1.0 * s, z * s, 0.03 * s, 5).tube(2.6 * s, 1.0 * s, z * s, 5.1 * s, 0.42 * s, z * s, 0.03 * s, 5); });
+    // 암 (뒤 꼬리 포함) + 버킷 실린더 + 링크
+    const stick = shape().rbar(-0.75 * s, 0.28 * s, 0, 3.3 * s, 0, 0, 0.5 * s, 0.42 * s).cyl(3.3 * s, 0, 0, 0.13 * s, 0.5 * s, 'z', 10).done();
+    const cylS = shape().tube(-0.6 * s, 0.74 * s, 0, 1.9 * s, 0.56 * s, 0, 0.11 * s, 10), rodS = shape().tube(1.9 * s, 0.56 * s, 0, 2.85 * s, 0.46 * s, 0, 0.06 * s, 8);
+    [-0.2, 0.2].forEach(z => { cylS.bar(2.85 * s, 0.46 * s, z * s, 3.42 * s, 0.12 * s, z * s, 0.08 * s, 0.05 * s).bar(2.85 * s, 0.46 * s, z * s, 2.98 * s, 0.05 * s, z * s, 0.08 * s, 0.05 * s); }); // 버킷 링크
+    const out = { body, dark: dark.done(), glass, boom, cylB: cylB.done(), rod: rod.done(), hose: hose.done(), stick, cylS: cylS.done(), rodS: rodS.done(), bucket: bucketGeo(1.24 * s, 0.6 * s) };
+    Object.values(out).forEach(geo); exC.set(k, out); return out;
+  }
   function excavator(tool = 'bucket', s = 1) {
     const g = grp(); tracks(g, 4.6 * s, 3.2 * s);
-    const turn = new THREE.Group(); g.add(turn);
-    rb(turn, EQ, 'excav', -1.9 * s, 1.4 * s, 1.15 * s, 2.55 * s, -1.4 * s, 1.4 * s, 0.22 * s); pbox(turn, DARK2, null, -1.2 * s, 0.2 * s, 2.55 * s, 2.62 * s, -1.2 * s, -0.2 * s);
-    rb(turn, DARK2, null, -2.45 * s, -1.5 * s, 1.15 * s, 2.45 * s, -1.4 * s, 1.4 * s, 0.4 * s);
-    rb(turn, GLASS, null, 0.4 * s, 1.4 * s, 2.5 * s, 3.75 * s, 0.35 * s, 1.4 * s, 0.12 * s); rb(turn, EQ, 'excav', 0.35 * s, 1.45 * s, 3.68 * s, 3.86 * s, 0.3 * s, 1.45 * s, 0.07 * s); pbox(turn, DARK, null, 0.36 * s, 0.44 * s, 2.55 * s, 3.7 * s, 0.33 * s, 1.42 * s);
-    pcyl(turn, DARK2, null, -0.6 * s, 2.9 * s, -0.9 * s, 0.07 * s, 0.7 * s); // 배기관
+    const turn = new THREE.Group(), X = exGeo(s); g.add(turn);
+    mesh(X.body, EQ, 'excav', turn); mesh(X.dark, DARK2, null, turn); mesh(X.glass, GLASS, null, turn);
+    pcyl(turn, BEACON, null, 1.0 * s, 4.0 * s, 0.9 * s, 0.08 * s, 0.16 * s); // 경광등
     const boom = new THREE.Group(); boom.position.set(1.3 * s, 2.1 * s, -0.45 * s); turn.add(boom);
-    rb(boom, EQ, 'excav', 0, 5.4 * s, -0.32 * s, 0.32 * s, -0.27 * s, 0.27 * s, 0.1 * s); link(boom, mat(0xd9dde2, { metal: 0.7, rough: 0.25 }), null, 0.6 * s, -0.42 * s, 0, 3.6 * s, -0.36 * s, 0, 0.11 * s); // 유압 실린더
+    mesh(X.boom, EQ, 'excav', boom); mesh(X.cylB, DARK2, null, boom); mesh(X.rod, CHROME, null, boom); mesh(X.hose, HOSE, null, boom);
     const stick = new THREE.Group(); stick.position.set(5.4 * s, 0, 0); boom.add(stick);
-    rb(stick, EQ, 'excav', 0, 3.3 * s, -0.22 * s, 0.22 * s, -0.22 * s, 0.22 * s, 0.08 * s); link(stick, mat(0xd9dde2, { metal: 0.7, rough: 0.25 }), null, -0.6 * s, 0.34 * s, 0, 2.4 * s, 0.3 * s, 0, 0.09 * s);
+    mesh(X.stick, EQ, 'excav', stick); mesh(X.cylS, DARK2, null, stick); mesh(X.rodS, CHROME, null, stick);
     const tl = new THREE.Group(); tl.position.set(3.3 * s, 0, 0); stick.add(tl);
-    if (tool === 'breaker') { pbox(tl, DARK2, null, -0.3 * s, 0.3 * s, -1.6 * s, 0, -0.3 * s, 0.3 * s); const c = mesh(CONE, DARK, null, tl); c.position.set(0, -1.9 * s, 0); c.scale.set(0.3 * s, 0.6 * s, 0.3 * s); c.rotation.z = Math.PI; }
-    else if (tool === 'split') { pbox(tl, DARK2, null, -0.25 * s, 0.25 * s, -1.4 * s, 0, -0.45 * s, 0.45 * s); pbox(tl, STEEL, null, -0.08 * s, 0.08 * s, -2.2 * s, -1.4 * s, -0.2 * s, 0.2 * s); }
-    else { pbox(tl, DARK2, null, -0.1 * s, 1.0 * s, -0.95 * s, 0.05 * s, -0.62 * s, 0.62 * s); for (let k = 0; k < 4; k++) pbox(tl, DARK, null, 0.95 * s, 1.15 * s, -1.0 * s, -0.8 * s, (-0.5 + k * 0.33) * s, (-0.38 + k * 0.33) * s); }
+    if (tool === 'breaker') { rb(tl, DARK2, null, -0.3 * s, 0.3 * s, -1.6 * s, 0, -0.3 * s, 0.3 * s, 0.06 * s); pcyl(tl, CHROME, null, 0, -1.85 * s, 0, 0.09 * s, 0.6 * s); const c = mesh(CONE, DARK, null, tl); c.position.set(0, -2.2 * s, 0); c.scale.set(0.18 * s, 0.3 * s, 0.18 * s); c.rotation.z = Math.PI; }
+    else if (tool === 'split') { rb(tl, DARK2, null, -0.25 * s, 0.25 * s, -1.4 * s, 0, -0.45 * s, 0.45 * s, 0.06 * s); pbox(tl, STEEL, null, -0.08 * s, 0.08 * s, -2.2 * s, -1.4 * s, -0.2 * s, 0.2 * s); }
+    else mesh(X.bucket, DARK2, null, tl);
     // 동작: 파기 → 들어 올림 → 선회 → 비움
     g.userData.pose = (ph, swing = 1.5) => {
       const dig = ph < 0.35 ? ph / 0.35 : 1, up = sstep(0.35, 0.5, ph) * (1 - sstep(0.85, 1, ph)), dump = sstep(0.62, 0.72, ph) * (1 - sstep(0.8, 0.88, ph));
       turn.rotation.y = swing * sstep(0.45, 0.62, ph) * (1 - sstep(0.85, 1, ph));
-      boom.rotation.z = lerp(-0.18, 0.55, up) + 0.08 * dig; stick.rotation.z = lerp(-0.85, -1.95, dig * (1 - up * 0.4)); tl.rotation.z = lerp(-0.2, -1.7, dig) + 1.6 * dump;
+      boom.rotation.z = lerp(0.3, 0.75, up) - 0.12 * dig; // 버킷이 바닥을 긁을 만큼만 내려간다 stick.rotation.z = lerp(-0.85, -1.95, dig * (1 - up * 0.4)); tl.rotation.z = lerp(0.15, -1.2, dig) + 1.45 * dump;
     };
-    g.userData.hammer = (T) => { turn.rotation.y = 0; boom.rotation.z = -0.05; stick.rotation.z = -1.55 + 0.04 * Math.sin(T * 30); tl.rotation.z = -0.02; };
+    g.userData.hammer = (T) => { turn.rotation.y = 0; boom.rotation.z = 0.2; stick.rotation.z = -1.2 + 0.03 * Math.sin(T * 30); tl.rotation.z = -0.02; };
     return g;
   }
-  function truckBody(g, len, col = WHITE, cabC = 0xd9822b) { // 트럭 차대 (로컬 z가 앞)
+  function truckBody(g, len, col = WHITE, cabC = 0xd9822b, nr = 0) { // 트럭 차대 (로컬 z가 앞), nr: 뒤 차축 수 (0이면 길이로)
     pbox(g, DARK2, null, -1.1, 1.1, 0.55, 1.05, -len / 2, len / 2 - 0.2);
     rb(g, mat(cabC), null, -1.25, 1.25, 0.9, 3.0, len / 2 - 2.0, len / 2, 0.22); rb(g, GLASS, null, -1.12, 1.12, 1.95, 2.8, len / 2 - 0.12, len / 2 + 0.04, 0.06); pbox(g, DARK, null, -1.2, 1.2, 1.0, 1.35, len / 2 - 0.05, len / 2 + 0.08); [-1, 1].forEach(k => pbox(g, DARK, null, k * 1.27 - 0.03, k * 1.27 + 0.03, 1.95, 2.7, len / 2 - 1.7, len / 2 - 0.5));
     const wheel = (x, z) => { pcyl(g, DARK, null, x, 0.55, z, 0.55, 0.45, 'x'); pcyl(g, HUB, null, x + Math.sign(x) * 0.2, 0.55, z, 0.28, 0.08, 'x'); };
-    for (let z = -len / 2 + 1.2; z < len / 2 - 2.5; z += 1.5) [-1.15, 1.15].forEach(x => wheel(x, z));
+    if (nr) for (let k = 0; k < nr; k++) [-1.15, 1.15].forEach(x => wheel(x, -len / 2 + 1.5 + k * 1.4));
+    else for (let z = -len / 2 + 1.2; z < len / 2 - 2.5; z += 1.5) [-1.15, 1.15].forEach(x => wheel(x, z));
     wheel(-1.15, len / 2 - 1.1); wheel(1.15, len / 2 - 1.1);
     void col;
   }
   function pumpTruck() { // 붐 펌프카: 아웃리거 4개 + 선회대 (붐은 월드 좌표로 따로)
     const g = grp(); truckBody(g, 11); pbox(g, WHITE, 'pour', -1.2, 1.2, 1.05, 2.4, -5.4, 3.4);
     [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sz]) => { link(g, EQ, 'pour', sx * 1.1, 1.7, sz * 3.2, sx * 4.2, 0.35, sz * 4.4, 0.32); pbox(g, DARK2, null, sx * 4.2 - 0.5, sx * 4.2 + 0.5, 0, 0.18, sz * 4.4 - 0.5, sz * 4.4 + 0.5); });
-    pcyl(g, EQ, 'pour', 0, 2.8, -2.6, 0.8, 0.9);
-    const segs = [0.75, 0.62, 0.5, 0.4].map(() => mesh(BOX, EQ, 'pour')), hose = mesh(BOX, ROPE, null);
-    const bg = grp(); segs.forEach(s => bg.add(s)); bg.add(hose);
-    return { g, bg, segs, hose, W: [0.75, 0.62, 0.5, 0.4] };
+    pcyl(g, EQ, 'pour', 0, 2.8, -2.6, 0.8, 0.9); pcyl(g, DARK2, null, 0, 2.3, -2.6, 1.0, 0.25); // 선회대
+    rb(g, WHITE, 'pour', -1.15, 1.15, 1.05, 2.0, -5.5, -4.0, 0.12); pcyl(g, DARK2, null, 0, 1.85, -5.2, 0.55, 0.9); // 호퍼 · 압송 실린더
+    [-1, 1].forEach(k => { pcyl(g, CHROME, null, k * 0.9, 1.2, -0.8, 0.25, 1.2, 'z'); pbox(g, DARK, null, k * 1.25 - 0.02, k * 1.3, 1.1, 2.3, -3.6, 1.8); }); // 탱크 · 측면 공구함
+    const segs = [0.75, 0.62, 0.5, 0.4].map(() => mesh(BSEG, EQ, 'pour')), hose = mesh(BOX, ROPE, null);
+    const pins = [0, 1, 2].map(() => mesh(CYL, DARK2, null)), rams = [0, 1, 2].map(() => mesh(CYL, CHROME, null)), barrels = [0, 1, 2].map(() => mesh(CYL, DARK2, null));
+    const bg = grp(); [...segs, hose, ...pins, ...rams, ...barrels].forEach(s => bg.add(s));
+    return { g, bg, segs, hose, pins, rams, barrels, W: [0.75, 0.62, 0.5, 0.4] };
   }
+  // 붐 한 토막 (길이 축 y, −0.5..0.5): 둥근 사각 단면 + 옆 콘크리트 배관 (길이로만 늘려 쓴다)
+  const BSEG = (() => {
+    const sh = new THREE.Shape(), a = 0.5, r = 0.16; sh.moveTo(-a + r, -a); sh.lineTo(a - r, -a); sh.quadraticCurveTo(a, -a, a, -a + r); sh.lineTo(a, a - r); sh.quadraticCurveTo(a, a, a - r, a); sh.lineTo(-a + r, a); sh.quadraticCurveTo(-a, a, -a, a - r); sh.lineTo(-a, -a + r); sh.quadraticCurveTo(-a, -a, -a + r, -a);
+    return geo(shape().geo(new THREE.ExtrudeGeometry(sh, { depth: 1, bevelEnabled: false, curveSegments: 3 }).rotateX(-Math.PI / 2).translate(0, -0.5, 0)).geo(new THREE.CylinderGeometry(0.11, 0.11, 1, 8).translate(0, 0, 0.68)).done());
+  })();
   const _a = new THREE.Vector3(), _b = new THREE.Vector3();
   function aimBoom(pt, base, tgt, reach = 58) { // 4단 붐을 목표점 위로 접어 뻗는다
     _a.copy(tgt).sub(base); const far = _a.length() > reach; if (far) _a.setLength(reach); const t = _b.copy(base).add(_a);
     const H = Math.max(t.y + 7, base.y + 9), p1 = [base.x + _a.x * 0.28, H + 3, base.z + _a.z * 0.28], p2 = [base.x + _a.x * 0.66, H + 1.5, base.z + _a.z * 0.66], p3 = [t.x, t.y + 3.6, t.z];
     const P0 = [base.x, base.y, base.z], pts = [P0, p1, p2, p3]; pt.segs.forEach((s, i) => segO(s, ...pts[i], ...(pts[i + 1] || [t.x, t.y + 0.6, t.z]), pt.W[i]));
     segO(pt.segs[3], ...p3, t.x, t.y + 1.2, t.z, 0.4); segO(pt.hose, t.x, t.y + 1.2, t.z, t.x, t.y + 0.15, t.z, 0.18);
+    // 관절 핀 + 접이 실린더 (실린더 몸통 + 크롬 로드)
+    const hl = Math.hypot(_a.x, _a.z) || 1, nx = -_a.z / hl, nz = _a.x / hl, ends = [P0, p1, p2, p3, [t.x, t.y + 1.2, t.z]];
+    for (let j = 0; j < 3; j++) {
+      const p = ends[j + 1], w = pt.W[j] * 0.75; segO(pt.pins[j], p[0] - nx * w, p[1], p[2] - nz * w, p[0] + nx * w, p[1], p[2] + nz * w, pt.W[j] * 0.9);
+      const A = ends[j].map((v, k) => lerp(v, p[k], 0.6) + (k === 1 ? pt.W[j] * 0.85 : 0)), B = p.map((v, k) => lerp(v, ends[j + 2][k], 0.2) + (k === 1 ? pt.W[j + 1] * 0.8 : 0)), M = A.map((v, k) => lerp(v, B[k], 0.55));
+      segO(pt.barrels[j], ...A, ...M, pt.W[j] * 0.36); segO(pt.rams[j], ...M, ...B, pt.W[j] * 0.18);
+    }
     pt.bg.visible = true; return far;
   }
   function mixerTruck() {
     const g = grp(); truckBody(g, 8.6);
-    const dg = new THREE.Group(); dg.position.set(0, 2.55, -0.9); dg.rotation.x = Math.PI / 2 - 0.22; g.add(dg);
-    const dm = texM(tex(stripeTex()), { metal: 0.3, rough: 0.5 }); dm.map.repeat.set(3, 2);
-    const drum = mesh(CYL, dm, null, dg); drum.scale.set(2.3, 5.2, 2.3);
-    const cone = mesh(CONE, WHITE, null, dg); cone.position.set(0, 3.0, 0); cone.scale.set(2.3, 1.0, 2.3);
+    const dg = new THREE.Group(); dg.position.set(0, 2.6, -0.8); dg.rotation.x = -(Math.PI / 2 - 0.2); g.add(dg);
+    const dm = texM(tex(stripeTex()), { metal: 0.3, rough: 0.45 }); dm.map.repeat.set(2, 1);
+    const drum = mesh(DRUM, dm, null, dg); // 달걀꼴 드럼 (나선 띠, 돈다) — 좁은 입구가 뒤 위
+    pbox(g, mat(0x8a8f99, { metal: 0.4 }), null, -1.1, 1.1, 1.05, 1.6, -3.4, 1.5); [-1, 1].forEach(k => pbox(g, DARK2, null, k * 0.95 - 0.08, k * 0.95 + 0.08, 1.5, 2.3, -3.2, -2.9)); // 받침 · 뒤 롤러대
+    rb(g, mat(0xd9822b), null, -0.4, 0.4, 2.7, 3.5, -4.25, -3.6, 0.06); pbox(g, mat(0x8a8f99, { metal: 0.4 }), null, -0.25, 0.25, 1.75, 1.9, -5.6, -4.1); // 호퍼 · 슈트
+    pcyl(g, mat(0x2f7fd0, { metal: 0.3 }), null, 0, 1.75, 1.75, 0.5, 1.0, 'x'); // 물탱크
+    for (let y = 1.2; y < 3.6; y += 0.3) pbox(g, DARK2, null, 0.95, 1.2, y, y + 0.04, -3.9, -3.85); [0.95, 1.2].forEach(x => pbox(g, DARK2, null, x - 0.02, x + 0.02, 1.1, 3.7, -3.9, -3.85)); // 사다리
     g.userData.drum = drum; return g;
+  }
+  // 터 안 덤프트럭 (경사로로 내려와 굴착기 옆에서 상차): 적재함 + 늑골 + 흙더미 (load 0..1)
+  function dumpTruck() {
+    const g = grp(); truckBody(g, 9.2, WHITE, 0xd9822b, 2); const BM = mat(0xd9822b, { metal: 0.35, rough: 0.5 });
+    rb(g, BM, null, -1.25, 1.25, 1.2, 1.42, -4.5, 2.3, 0.05);
+    [-1, 1].forEach(k => { rb(g, BM, null, k * 1.2 - 0.07, k * 1.2 + 0.07, 1.3, 2.75, -4.5, 2.3, 0.04); for (let z = -4.1; z < 2.2; z += 1.05) pbox(g, DARK2, null, k * 1.27 - 0.04, k * 1.27 + 0.04, 1.42, 2.7, z - 0.06, z + 0.06); pbox(g, DARK2, null, k * 1.27 - 0.05, k * 1.27 + 0.05, 2.62, 2.76, -4.5, 2.3); });
+    rb(g, BM, null, -1.27, 1.27, 1.3, 3.15, 2.2, 2.42, 0.04); rb(g, BM, null, -1.27, 1.27, 3.05, 3.15, 2.3, 3.3, 0.03); pbox(g, BM, null, -1.27, 1.27, 1.3, 2.72, -4.62, -4.48); // 앞판 · 보호판 · 뒷문
+    [-1, 1].forEach(k => { pbox(g, DARK, null, k * 1.0 - 0.02, k * 1.3, 1.12, 1.2, -3.9, -0.9); pcyl(g, CHROME, null, k * 0.85, 1.0, 1.7, 0.28, 0.9, 'z'); }); // 흙받이 · 연료통
+    pcyl(g, DARK, null, -1.05, 3.1, 2.55, 0.07, 1.4); // 배기관
+    const heap = mesh(geo(moundGeo(5)), mat(SOILC[stAt(depth * 0.5)] ?? 0xa88a5e, { tex: 'soil', rough: 1 }), null, g); heap.position.set(0, 1.42, -1.1);
+    g.userData.load = (f) => { heap.visible = f > 0.04; heap.scale.set(1.1, 0.25 + 1.35 * f, 3.1); };
+    return g;
   }
   const latMs = [];
   function swapLattice(o, color, rx, ry) { if (!o) return null; const m = latM(color, rx, ry); o.material = m; o.userData.base = m; latMs.push([o, m]); return m; }
@@ -342,13 +421,54 @@ export function buildMethods(X) {
   const EX = ids.excav;
   const ex1 = depth > 0.5 ? excavator('bucket') : null, ex2 = depth > 0.5 && (SP === 'topdown' || pw > 44) ? excavator('bucket', 0.9) : null;
   const ex3 = depth > 0.5 && (EX === 'splitter' || EX === 'normal') ? excavator(EX === 'splitter' ? 'split' : 'breaker', 0.95) : null;
-  let clam = null; if (depth > 7 || (SP === 'topdown' && depth > 2)) { clam = crawlerCrane(22, 'excav', 1.22); [-1, 1].forEach(s => { const h = mesh(BOX, DARK2, null, clam.att); h.position.set(0, -0.9, s * 0.45); h.scale.set(1.6, 1.4, 0.7); h.userData.s = s; }); clam.att.userData.halves = clam.att.children.slice(); }
-  let drill = null; if (EX === 'blast' || EX === 'mix') { drill = grp(); tracks(drill, 4, 2.6); pbox(drill, mat(0xe5484d), 'excav', -1.6, 0.8, 1.1, 2.4, -1.1, 1.1); const m2 = mesh(BOX, latM(0xe5484d, 1, 5), 'excav', drill); segO(m2, 1.2, 1.0, 0, 2.4, 8.5, 0, 0.5); pbox(drill, GLASS, null, -0.2, 0.8, 2.4, 3.3, 0.2, 1.1); }
+  let clam = null; if (depth > 7 || (SP === 'topdown' && depth > 2)) {
+    clam = crawlerCrane(22, 'excav', 1.22);
+    rb(clam.att, DARK2, null, -0.55, 0.55, -0.5, 0.7, -0.38, 0.38, 0.08); pcyl(clam.att, DARK, null, 0, 0.75, 0, 0.3, 0.3, 'z'); // 머리 블록 · 도르래
+    clam.att.userData.halves = [-1, 1].map(sg => { const h = mesh(geo(clamHalfGeo(sg)), DARK2, null, clam.att); h.position.y = -0.5; h.userData.s = sg; return h; });
+  }
+  let drill = null; if (EX === 'blast' || EX === 'mix') {
+    drill = grp(); tracks(drill, 4, 2.6); const RD = mat(0xe5484d, { metal: 0.3, rough: 0.5 });
+    rb(drill, RD, 'excav', -1.7, 0.6, 1.1, 2.3, -1.15, 1.15, 0.18); rb(drill, GLASS, null, -0.35, 0.65, 2.3, 3.3, 0.15, 1.15, 0.08); rb(drill, RD, 'excav', -0.4, 0.7, 3.25, 3.4, 0.1, 1.2, 0.05);
+    rb(drill, DARK2, null, -1.7, -0.9, 2.3, 3.0, -1.1, 0.0, 0.1); pcyl(drill, DARK, null, -1.3, 3.2, -0.6, 0.06, 0.5); // 집진기 · 배기
+    const a = Math.atan2(7.5, 1.2), mg = new THREE.Group(); mg.position.set(1.2, 1.0, 0); mg.rotation.z = a; drill.add(mg);
+    mesh(geo(latticeBoomGeo(7.6, 0.5, 0.42, false, 0.8)), RD, 'excav', mg); pcyl(mg, STEEL, null, 3.8, -0.33, 0, 0.06, 7.4, 'x'); rb(mg, DARK2, null, 5.2, 6.1, -0.45, 0.25, -0.3, 0.3, 0.06); // 마스트 · 로드 · 착암기
+    link(drill, RD, 'excav', 0.2, 2.0, 0, 1.6, 4.2, 0, 0.22); link(drill, HOSE, null, -1.3, 2.6, 0.2, 1.4, 6.5, 0.2, 0.06); // 붐 · 호스
+  }
   const blastP = EX === 'blast' || EX === 'mix' ? pool(CYL, TINT, 30, 'excav', true) : null;
   const matsP = EX === 'blast' || EX === 'mix' ? pool(BOX, mat(0x34353a, { rough: 1 }), 12, 'excav') : null;
   const flashP = pool(SPH, FLASH, 2, 'excav'), dustP = pool(SPH, DUST, 3, 'excav');
   const rockP = EX === 'splitter' || EX === 'normal' ? pool(BOX, mat(0x55585f, { rough: 1 }), 14, 'excav') : null;
   const holeP = pool(CYL, mat(0x1c1c1e), 30, 'excav');
+  // 굴착 바닥 디테일 (뒤쪽 절반): 바퀴·궤도 자국 진흙 · 흙더미 · 물웅덩이 · 집수정 + 수중펌프 + 배수 호스 · 진입 경사로 · 측량 말뚝
+  const pitD = depth > 0.5, PX0 = th, PX1 = pw - th, PZ0 = -pd / 2 + th, PZ1 = 0, PW = PX1 - PX0, PDz = PZ1 - PZ0;
+  const rampOn0 = pitD && !clam && pd > 30 && pw > 24 && (WL === 'open' || !supOn0 || SP === 'anchor');
+  let mudPl = null;
+  if (pitD && PW > 4 && PDz > 4) {
+    const mt = tex(canvasTex(1024, 512, (x, w, h) => {
+      const kx = w / PW, kz = h / PDz, k = (kx + kz) / 2, X = (m) => (m - PX0) * kx, Z = (m) => (m - PZ0) * kz;
+      x.clearRect(0, 0, w, h);
+      for (let i = 0; i < 34; i++) { const cx = w * hsh(i, 21), cz = h * hsh(i, 22), r = (1.5 + 5 * hsh(i, 23)) * k; const gr = x.createRadialGradient(cx, cz, 0, cx, cz, r); gr.addColorStop(0, `rgba(36,29,21,${0.25 + 0.25 * hsh(i, 25)})`); gr.addColorStop(1, 'rgba(36,29,21,0)'); x.fillStyle = gr; x.fillRect(cx - r, cz - r, 2 * r, 2 * r); } // 젖은 얼룩
+      const path = (p, off) => { x.beginPath(); const [a, b, c] = p, nx = -(c[1] - a[1]), nz = c[0] - a[0], L = Math.hypot(nx, nz) || 1, ox = nx / L * off, oz = nz / L * off; x.moveTo(X(a[0] + ox), Z(a[1] + oz)); x.quadraticCurveTo(X(b[0] + ox), Z(b[1] + oz), X(c[0] + ox), Z(c[1] + oz)); };
+      const band = (p, gauge, tw, dash, a1, a2) => [-1, 1].forEach(sg => { path(p, sg * gauge / 2); x.setLineDash([]); x.lineWidth = tw * k; x.strokeStyle = `rgba(42,34,25,${a1})`; x.stroke(); x.setLineDash([dash[0] * k, dash[1] * k]); x.lineWidth = tw * k * 0.9; x.strokeStyle = `rgba(24,19,14,${a2})`; x.stroke(); });
+      const rp = (i, j) => [PX0 + 3 + (PW - 6) * hsh(i, j), PZ0 + 3 + (PDz - 5) * hsh(i, j + 1)];
+      for (let i = 0; i < 9; i++) band([rp(i, 30), rp(i, 32), rp(i, 34)], 2.6, 0.6, [0.12, 0.16], 0.3, 0.32); // 궤도 자국
+      if (rampOn0) for (let i = 0; i < 4; i++) band([[PX1 - 4, PZ0 + 3 + i * 0.6], rp(i, 40), rp(i, 42)], 2.0, 0.42, [0.08, 0.1], 0.28, 0.24); // 덤프 바퀴 자국
+      x.setLineDash([]); x.lineCap = 'round';
+      for (let i = 0; i < 16; i++) { const [cx, cz] = rp(i, 50), a = hsh(i, 52) * 6.28, L = 1.5 + 3 * hsh(i, 53); for (let t = 0; t < 5; t++) { const o = (t - 2) * 0.24, px = -Math.sin(a) * o, pz = Math.cos(a) * o; x.beginPath(); x.moveTo(X(cx + px), Z(cz + pz)); x.lineTo(X(cx + px + Math.cos(a) * L), Z(cz + pz + Math.sin(a) * L)); x.lineWidth = 0.07 * k; x.strokeStyle = 'rgba(28,22,16,0.4)'; x.stroke(); } } // 버킷 이빨 자국
+    }));
+    const mm = new THREE.MeshStandardMaterial({ map: mt, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4, roughness: 0.7, metalness: 0 }); own.mats.push(mm);
+    mudPl = new THREE.Mesh(geo(new THREE.PlaneGeometry(PW, PDz).rotateX(-Math.PI / 2)), mm); mudPl.position.set((PX0 + PX1) / 2, 0, (PZ0 + PZ1) / 2); mudPl.visible = false; mudPl.renderOrder = 1; root.add(mudPl);
+  }
+  const spoilP = pitD ? pool(geo(moundGeo(3)), mat(0xffffff, { tex: 'soil', rough: 1 }), 8, null, true) : null;
+  const pudP = pitD ? pool(geo(new THREE.CircleGeometry(1, 28).rotateX(-Math.PI / 2)), PITW, 6, null) : null;
+  const PUD = pitD ? [[PX0 + 3.6, PZ0 + 3.4, 1.3], ...[0, 1, 2, 3].map(i => [PX0 + 6 + (PW - 12) * hsh(i, 61), PZ0 + 5 + Math.max(0, PDz - 9) * hsh(i, 62), 0.9 + 1.6 * hsh(i, 63)])] : [];
+  const sumpOn0 = pitD && WL !== 'open' && PW > 10 && PDz > 8;
+  const sumpC = sumpOn0 ? pool(BOX, CONC, 5, null) : null, sumpW = sumpOn0 ? pool(BOX, PITW, 1, null) : null, hoseP = sumpOn0 ? pool(CYL, mat(0x2f7fd0, { rough: 0.5 }), 10, null) : null;
+  let pumpG = null; if (sumpOn0) { pumpG = grp(); pcyl(pumpG, mat(0x2f7fd0, { metal: 0.4, rough: 0.4 }), null, 0, 0.32, 0, 0.2, 0.62); pcyl(pumpG, DARK2, null, 0, 0.68, 0, 0.16, 0.12); link(pumpG, STEEL, null, -0.16, 0.7, 0, 0.16, 0.7, 0, 0.03); [-0.16, 0.16].forEach(x => link(pumpG, STEEL, null, x, 0.62, 0, x, 0.72, 0, 0.03)); link(pumpG, HOSE, null, 0, 0.7, 0, -0.9, 0.9, 0.6, 0.03); }
+  const rampP = rampOn0 ? pool(WEDGE, mat(SOILC[topSoil] ?? 0xa88a5e, { tex: 'soil', rough: 1 }), 1, null) : null;
+  const dumpT = rampOn0 && pd > 34 ? dumpTruck() : null;
+  const railP = pitD ? pool(BOX, mat(0xf2c94c, { rough: 0.5, metal: 0.3 }), 80, null) : null, postP = pitD ? pool(BOX, DARK2, 420, null) : null; // 터 둘레 안전 난간
+  const stakeP = pitD ? pool(BOX, WOODM, 10, null) : null, tapeP = pitD ? pool(BOX, mat(0xff4fa0, { em: 0.15 }), 10, null) : null;
 
   // ================= 기초 =================
   const FD = ids.found, piled = FD !== 'mat';
@@ -525,7 +645,8 @@ export function buildMethods(X) {
     const dug = S.dug, under = S.underV;
     const steelCol = (i) => (i < S.nF - 3 && K('steel') ? (ids.steel === 'bolt' ? 0xe2dfd5 : ids.steel === 'weld' || ids.steel === 'robot' ? 0xc4cad2 : 0x7f93a8) : 0x7f93a8);
     // 투시: 땅속 공법을 보는 공종에서만
-    xray((wpId === 'wall' && wallReal && dug < depth - 0.5) || (wpId === 'improve' && IM) || (wpId === 'found' && piled) ? 1 : wpId === 'water' && ['grout', 'jsp', 'dewater', 'anchor'].includes(WA) && depth > 0.5 ? 2 : 0);
+    const xm = (wpId === 'wall' && wallReal && dug < depth - 0.5) || (wpId === 'improve' && IM) || (wpId === 'found' && piled) ? 1 : wpId === 'water' && ['grout', 'jsp', 'dewater', 'anchor'].includes(WA) && depth > 0.5 ? 2 : 0;
+    xray(xm);
 
     // ---------- 지반조사 ----------
     R.rigI.count = 0;
@@ -709,6 +830,12 @@ export function buildMethods(X) {
       const sl = WL === 'open' ? Math.min(1.2 * dug, pw * 0.3) : 0, xa = th + 3 + sl, xb = pw - th - 3 - sl;
       const e1x = clamp(lerp(xa, xb, 0.42 + 0.16 * Math.sin(T * 0.06)), xa, xb); place(ex1, e1x, -dug, -pd / 4 - 1, Math.PI); ex1.userData.pose(frac(T * 0.16), 1.6); io.hot.push({ k: 'ex', x: e1x, y: -dug, z: -pd / 4 - 1 });
       if (ex2) { place(ex2, clamp(pw * 0.75, xa, xb), -dug, -pd / 3 - 1, 0); ex2.userData.pose(frac(T * 0.16 + 0.5), -1.5); io.hot.push({ k: 'ex', x: clamp(pw * 0.75, xa, xb), y: -dug, z: -pd / 3 - 1 }); }
+      // 상차: 경사로가 있으면 덤프트럭이 터 안으로 내려와 굴착기가 선회해 싣는다 (5번 퍼 담으면 가득), 아니면 흙더미에 쌓는다
+      const dz1 = Math.min(-pd / 4 - 1 + 7.8, -1.6), kd = clamp(dug / 3, 0.35, 1), fc = C3.set(SOILC[stAt(Math.max(0, dug - 0.5))] ?? 0xa88a5e).multiplyScalar(0.78).getHex(); // 막 판 흙은 젖어 조금 어둡다
+      const pileAt = (x, z, k, m = 1) => { if (!spoilP) return; const r = (2.3 + 0.9 * hsh(k, 31)) * kd * m; spoilP.tint(spoilP.put(x, -dug, z, r, (1.3 + 0.7 * hsh(k, 32)) * kd * m, r * (0.75 + 0.2 * hsh(k, 34)), 0, hsh(k, 33) * 6.28, 0), fc); };
+      if (dumpT && S.earthP < 0.98) { place(dumpT, e1x + 1.05, -dug, dz1, Math.PI / 2); dumpT.userData.load(frac(T * 0.032)); if (wpId === 'excav') io.tags.push({ t: '덤프트럭 · 터 안 상차', p: [e1x + 1, -dug + 4.2, dz1], cls: 'eq dim' }); }
+      else pileAt(e1x, dz1, 0);
+      if (ex2) pileAt(clamp(pw * 0.75, xa, xb) + 0.3, Math.min(-pd / 3 - 1 + 7.8, -1.6), 1);
       if (clam && dug > (SP === 'topdown' ? 2 : 7)) {
         const td = SP === 'topdown', R2 = clam.tip.x, y0 = td ? 0.25 : 0.2, cx = td ? pw * 0.12 + R2 : deckOn0 ? DECK.cx : pw - 6.5 + R2, cz = td ? -pd / 4 : deckOn0 ? DECK.cz : -pd / 4;
         place(clam.g, cx, y0, cz, Math.PI);
@@ -718,9 +845,9 @@ export function buildMethods(X) {
         const sw = deckOn0 || td ? sstep(0.42, 0.56, ph) * (1 - sstep(0.8, 0.94, ph)) : 0; clam.turn.rotation.y = sw * Math.PI / 2;
         clam.hang(yy - y0);
         const open = ph < 0.2 ? 1 : ph < 0.3 ? 1 - sstep(0.2, 0.28, ph) : ph > 0.6 && ph < 0.76 ? sstep(0.6, 0.66, ph) : 0;
-        clam.att.userData.halves.forEach(h => { h.rotation.x = h.userData.s * 0.4 * open; });
+        clam.att.userData.halves.forEach(h => { h.rotation.x = -h.userData.s * 0.55 * open; });
         if (deckOn0 || td) io.bays.haul = { x: cx + 1.1, z: cz + R2, hx: 1, hz: 0, inside: true };
-        io.hot.push({ k: 'clam', x: cx - R2 + 3, y: -dug, z: cz + 2 });
+        io.hot.push({ k: 'clam', x: cx - R2 + 3, y: -dug, z: cz + 2 }); pileAt(clamp(cx - R2, PX0 + 3, PX1 - 3), cz, 2, 1.15);
         if (wpId === 'excav' && ph > 0.6 && ph < 0.76) for (let k = 0; k < 3; k++) dustP.put(cx + 0.3 * k, yt - 1 - k * 0.7, cz + R2, 1.2 + k * 0.4, 0.9, 1.2 + k * 0.4);
       }
       if (deckOn0 && !io.bays.haul && dug > 1) io.bays.haul = { x: DECK.cx + 1.1, z: pd / 2 - 3.3, hx: 1, hz: 0, inside: true };
@@ -740,6 +867,35 @@ export function buildMethods(X) {
         lab('excav', bx, -dug + 5, bz);
       } else if (rockNow && EX === 'normal' && ex3) { const bx = pw * 0.55, bz = -pd / 4 - 5; place(ex3, bx - 7, -dug, bz, 0); ex3.userData.hammer(T); for (let i = 0; i < 5; i++) rockP.put(bx - 2 + hsh(i, 1) * 4, -dug + 0.3, bz - 1 + hsh(i, 2) * 3, 0.7, 0.5, 0.6, 0, hsh(i, 3) * 3, 0); lab('excav', bx, -dug + 5, bz, '브레이커 암반 파쇄 · 소음·저속'); }
       else if (wpId === 'excav') lab('excav', e1x, -dug + 7, -pd / 4 - 1, (EX === 'blast' || EX === 'splitter') && !rockNow ? `${SIG.excav[EX]} (GL−${Math.round(cond.rockDepth)}m 암반부터)` : undefined);
+    }
+
+    // ---------- 굴착 바닥 디테일 (터가 열려 있는 동안) ----------
+    const pitOpen = pitD && dug > 0.6 && (S.foundP || 0) < 0.05 && !xm;
+    if (mudPl) { mudPl.visible = pitOpen; mudPl.position.y = -dug + 0.03; }
+    if (pitOpen) {
+      const pk = clamp(dug / 3, 0.35, 1);
+      PUD.forEach(([x, z, r], i) => pudP.put(x, -dug + 0.045, z, r * pk, 1, r * (0.55 + 0.3 * hsh(i, 64)) * pk, 0, hsh(i, 41) * 3, 0));
+      if (sumpOn0 && dug > 1.5) { // 집수정: 콘크리트 테두리 + 고인 물 + 수중펌프 + 벽을 타고 넘는 배수 호스
+        const sx = PX0 + 2.0, sz = PZ0 + 2.0, y = -dug, hx = PX0 + (supOn0 ? 0.6 : 0.18);
+        sumpC.box(sx - 0.9, sx + 0.9, y, y + 0.18, sz - 0.9, sz - 0.7); sumpC.box(sx - 0.9, sx + 0.9, y, y + 0.18, sz + 0.7, sz + 0.9); sumpC.box(sx - 0.9, sx - 0.7, y, y + 0.18, sz - 0.7, sz + 0.7); sumpC.box(sx + 0.7, sx + 0.9, y, y + 0.18, sz - 0.7, sz + 0.7);
+        sumpW.box(sx - 0.7, sx + 0.7, y + 0.01, y + 0.1, sz - 0.7, sz + 0.7);
+        place(pumpG, sx, y - 0.25, sz, 0.4);
+        const hp = [[sx - 0.35, y + 0.55, sz + 0.25], [sx - 1.0, y + 0.22, sz + 0.75], [hx, y + 0.22, sz + 1.1], [hx, y + 1.2, sz + 1.2], [hx, -0.4, sz + 1.2], [hx, 0.55, sz + 1.2], [-0.6, 0.6, sz + 1.2], [-1.3, 0.1, sz + 1.4]];
+        for (let i = 0; i + 1 < hp.length; i++) hoseP.seg(...hp[i], ...hp[i + 1], 0.11);
+        if (wpId === 'excav' || wpId === 'water') io.tags.push({ t: '집수정 · 수중펌프 배수', p: [sx, y + 2.2, sz], cls: 'eq dim' });
+      }
+      if (rampP && S.earthP < 0.98) { const Lr = clamp(dug * 5, 3, PW * 0.45); rampP.put(PX1, 0, PZ0 + 6, Lr, dug, 6, 0, Math.PI, 0); }
+      if (stakeP && dug > 1) for (let i = 0; i < 6; i++) { const x = PX0 + 4 + (PW - 8) * hsh(i, 71), z = PZ0 + 3 + Math.max(0, PDz - 6) * hsh(i, 72); stakeP.box(x - 0.03, x + 0.03, -dug, -dug + 0.75, z - 0.03, z + 0.03); tapeP.box(x - 0.035, x + 0.035, -dug + 0.6, -dug + 0.72, z - 0.035, z + 0.035); }
+    }
+
+    // 터 둘레 안전 난간 (기둥 2.5m · 상부·중간 난간 · 발끝막이): 작업구대와 경사로 입구는 비운다
+    if (railP && dug > 0.6 && (S.baseP || 0) < 0.95 && !S.topdown) {
+      const ins = WL === 'open' ? 0.4 : th * 0.5, a0 = ins, a1 = pw - ins, b0 = -pd / 2 + ins, b1 = pd / 2 - ins, sk = [];
+      if (deckOn0) sk.push([DECK.x0, DECK.x1, DECK.z0, DECK.z1]); if (rampP && S.earthP < 0.98) sk.push([pw - 2, pw + 2, PZ0 - 0.5, PZ0 + 6.5]);
+      const inSk = (x, z) => sk.some(q => x > q[0] - 0.4 && x < q[1] + 0.4 && z > q[2] - 0.4 && z < q[3] + 0.4);
+      const piece = (p, q) => { if (!p || (p[0] === q[0] && p[1] === q[1])) return; const xa = Math.min(p[0], q[0]) - 0.03, xb = Math.max(p[0], q[0]) + 0.03, za = Math.min(p[1], q[1]) - 0.03, zb = Math.max(p[1], q[1]) + 0.03; railP.box(xa, xb, 1.08, 1.14, za, zb); railP.box(xa, xb, 0.56, 0.61, za, zb); railP.box(xa, xb, 0, 0.15, za + (zb - za > 1 ? 0.01 : 0), zb); };
+      const run = (ax, az, bx, bz) => { const n = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / 2.5)); let st = null, last = null; for (let i = 0; i <= n; i++) { const x = lerp(ax, bx, i / n), z = lerp(az, bz, i / n); if (inSk(x, z)) { piece(st, last); st = last = null; continue; } postP.box(x - 0.04, x + 0.04, 0, 1.2, z - 0.04, z + 0.04); if (!st) st = [x, z]; last = [x, z]; } piece(st, last); };
+      run(a0, b0, a1, b0); run(a0, b0, a0, b1); run(a1, b0, a1, b1); run(a0, b1, a1, b1);
     }
 
     // 작업구대 (복공판 + 주형보 + 받침보 + 기둥 + 난간)
@@ -1094,6 +1250,7 @@ export function buildMethods(X) {
 
     pools.forEach(Pp => { Pp.im.count = Math.min(Pp.n, Pp.im.instanceMatrix.count); Pp.im.instanceMatrix.needsUpdate = true; if (Pp.im.instanceColor) Pp.im.instanceColor.needsUpdate = true; });
     tagsNow.forEach((p, g) => { if (g.visible) io.tags.push({ t: g.userData.eq, p, cls: 'eq' }); });
+    if (typeof window !== 'undefined' && window.__S3DEBUG) window.__s3eq = [...tagsNow].filter(([g]) => g.visible).map(([g, p]) => ({ n: g.userData.eq, p: p.map(v => +v.toFixed(1)) }));
     return dyn;
   }
 
