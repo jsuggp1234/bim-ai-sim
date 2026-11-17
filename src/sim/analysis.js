@@ -1,6 +1,7 @@
 // 일조·조망 분석 (순수 함수, 웹 워커에서 실행)
 // 일조: 동지 진태양시 08~16시 10분 간격. 기준 = 09~15시 연속 2시간 이상 또는 08~16시 합계 4시간 이상
 // 조망: plan.views.water(수변 표본점)·plan.views.peak(산·랜드마크 한 점). 택지마다 다르다.
+import { floorParts, formKey } from './gesture.js';
 
 export const LAT = 37.53;
 const STEP_MIN = 10;
@@ -171,13 +172,12 @@ export function buildingBoxes(b) {
   const fl = b.floors.filter(f => !f.roof);
   let i = 0;
   while (i < fl.length) {
-    let j = i; while (j + 1 < fl.length && (fl[j + 1].s || 1) === (fl[i].s || 1)) j++;
-    const s = fl[i].s || 1;
-    b.parts.forEach(q => out.push({ cu: q.cu, cv: q.cv, w: q.w * s, d: q.d * s, a: q.a, y0: fl[i].y0, y1: fl[j].y1 }));
+    let j = i; const key = formKey(fl[i]); while (j + 1 < fl.length && formKey(fl[j + 1]) === key) j++;
+    floorParts(b, fl[i]).forEach(q => out.push({ cu: q.cu, cv: q.cv, w: q.w, d: q.d, a: q.a, y0: fl[i].y0, y1: fl[j].y1 }));
     i = j + 1;
   }
   const ph = b.floors.find(f => f.roof);
-  if (ph && ph.area > 0) { const e = Math.sqrt(ph.area); out.push({ cu: b.core.u, cv: b.core.v, w: e, d: e, a: 0, y0: ph.y0, y1: ph.y1 }); }
+  if (ph && ph.area > 0) { const e = Math.sqrt(ph.area), g = ph.g, R = b.rect; out.push({ cu: b.core.u + (g && R ? g.ox * (R.u1 - R.u0) : 0), cv: b.core.v + (g && R ? g.oz * (R.v1 - R.v0) : 0), w: e, d: e, a: g ? g.rot : 0, y0: ph.y0, y1: ph.y1 }); }
   return out;
 }
 export function projectBoxes(gen) {

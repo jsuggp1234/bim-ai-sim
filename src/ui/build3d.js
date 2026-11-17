@@ -25,6 +25,7 @@ import { OSM_ATTRIB } from '../sim/osm.js';
 import { tickWater } from '../sim/scene/water.js';
 import { buildSiteLife, COMPANY } from './sitelife3d.js';
 import { talkFor, roleOfWorker, roleOfEquipment } from './talk.js';
+import { createSupport } from './support3d.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const MEPS = ['hvac', 'plumb', 'fire', 'elec', 'ict'], ROOMS = ['part', 'floor', 'ceil', 'paint'];
@@ -58,7 +59,7 @@ export function webglOK() {
 export function plan3d(sc) {
   const { G, nb } = sc;
   const r = G.main && G.main.rect ? G.main.rect : null;
-  const du = r ? r.u1 - r.u0 : G.bw, dv = r ? r.v1 - r.v0 : G.bw;
+  const du = G.env ? G.env.long : r ? r.u1 - r.u0 : G.bw, dv = G.env ? G.env.long : r ? r.v1 - r.v0 : G.bw;
   const bw = G.bx1 - G.bx0, bd = clamp(Math.max(du, dv, bw), 12, 110);
   const pd = clamp(Math.max(bd + 10, Math.min(G.pw, bd * 1.5)), 30, 160);
   const Z = pd / 2 + 26;
@@ -68,10 +69,18 @@ export function plan3d(sc) {
   const colZ = Array.from({ length: baysZ + 1 }, (_, i) => -bd / 2 + bd * i / baysZ);
   const cz = Math.max(3, bd * 0.16);
   const pod = G.podium ? G.podium.h : 0;
-  const fp = sc.floors.map(f => (pod > 0 && f.e1 <= pod + 0.1 ? { x0: 1, x1: G.pw - 1, z0: -pd / 2 + 1, z1: pd / 2 - 1 } : { x0: G.bx0, x1: G.bx1, z0: -bd / 2, z1: bd / 2 }));
+  // 층 판: 포디움 층은 대지 가득, 제스처가 있으면 층마다 외곽 안의 비율 사각형
+  const fp = sc.floors.map(f => (pod > 0 && f.e1 <= pod + 0.1 ? { x0: 1, x1: G.pw - 1, z0: -pd / 2 + 1, z1: pd / 2 - 1 }
+    : f.fr ? { x0: G.bx0 + bw * f.fr.x0, x1: G.bx0 + bw * f.fr.x1, z0: -bd / 2 + bd * f.fr.z0, z1: -bd / 2 + bd * f.fr.z1 } : { x0: G.bx0, x1: G.bx1, z0: -bd / 2, z1: bd / 2 }));
   const fh = sc.floors.map(f => f.e1 - f.e0);
+  // 층별 기둥 줄: 판이 기준(외곽)과 다르면 그 판에 맞춰 다시 나눈다
+  const lin = (a, b, n) => Array.from({ length: n + 1 }, (_, j) => a + (b - a) * j / n);
+  const grid = (a, b, base) => (Math.abs(a - base[0]) < 0.5 && Math.abs(b - base[base.length - 1]) < 0.5 ? base : lin(a, b, Math.max(2, Math.round((b - a) / 8.4))));
+  const isPod = sc.floors.map(f => pod > 0 && f.e1 <= pod + 0.1);
+  const colsX = fp.map((q, i) => (isPod[i] ? lin(q.x0, q.x1, Math.max(3, Math.round((q.x1 - q.x0) / 8.4))) : grid(q.x0, q.x1, colX)));
+  const colsZ = fp.map((q, i) => (isPod[i] ? colZ : grid(q.z0, q.z1, colZ)));
   const ok = [bw, bd, pd, Z, xl, xr].every(Number.isFinite) && sc.floors.every(f => Number.isFinite(f.e0) && Number.isFinite(f.e1));
-  return { bw, bd, pd, Z, xl, xr, colX, colZ, cz, pod, fp, fh, ok };
+  return { bw, bd, pd, Z, xl, xr, colX, colZ, colsX, colsZ, cz, pod, fp, fh, ok };
 }
 
 // ---------- 색 ----------
@@ -111,7 +120,27 @@ export function createSim3D(host, opts = {}) {
   host.appendChild(wrap);
   const $ = (s) => wrap.querySelector(s);
   const scene = new THREE.Scene();
-  if (window.__S3DEBUG) window.__s3scene = scene; // 점검용 (평소에는 꺼져 있음)
+  if (window.__S3DEBUG) {
+    window.__s3scene = scene; // 점검용 (평소에는 꺼져 있음)
+    // 발밑 점검: 사람마다 발 아래로 광선을 쏴 디딘 면과의 틈(gap)을 잰다. 떠 있으면 gap > 0, 묻히면 < 0
+    window.__s3probe = (x, y, z) => { // 한 점 아래로 모든 면 (걸러내기 없이)
+      scene.updateMatrixWorld(true); const rc = new THREE.Raycaster(new THREE.Vector3(x, y + 1.4, z), new THREE.Vector3(0, -1, 0), 0, 40); const all = []; scene.traverse(q => { if (q.isMesh || q.isInstancedMesh) { all.push(q); if (q.isInstancedMesh) q.boundingSphere = null; } });
+      return rc.intersectObjects(all, false).slice(0, 12).map(h => { let v = true; for (let q = h.object; q; q = q.parent) if (!q.visible) v = false; const m = h.object.material || {}; return { y: +h.point.y.toFixed(2), wp: h.object.userData.wp || h.object.name || h.object.type, id: h.instanceId, vis: v, tr: !!m.transparent, op: m.opacity, cw: m.colorWrite, side: m.side, nm: !!h.object.userData.noMirror }; });
+    };
+    window.__s3float = () => {
+      scene.updateMatrixWorld(true); const rc = new THREE.Raycaster(), dn = new THREE.Vector3(0, -1, 0), o = new THREE.Vector3();
+      const vis = (x) => { for (let q = x; q; q = q.parent) if (!q.visible) return false; return true; };
+      const meshes = []; scene.traverse(x => { if (x.isInstancedMesh) x.boundingSphere = null; if (!(x.isMesh || x.isInstancedMesh) || x.userData.noMirror || !vis(x)) return; const m = x.material; const src = x.userData.src, base = x.userData.base || (src && src.userData.base) || m; if (!m || m.colorWrite === false || (!x.userData.support && base.transparent && base.opacity < 0.7) || x.isSky || x.userData.sky) return; if (x.isInstancedMesh && x.count === 0) return; meshes.push(x); });
+      return (window.__s3work || []).map(w => {
+        o.set(w.x, w.y + 1.4, w.z); rc.set(o, dn); rc.far = 6;
+        let hs = rc.intersectObjects(meshes, false);
+        // 앞쪽 절반(z>0)의 흙은 거울 복제라 광선이 안 맞는다: 뒤쪽 원본을 -z에서 잰다
+        if (w.z > 0) { o.set(w.x, w.y + 1.4, -w.z); rc.set(o, dn); hs = hs.concat(rc.intersectObjects(meshes.filter(q => q.userData.twin), false)).sort((a, b) => b.point.y - a.point.y); }
+        const h = hs.find(q => q.point.y <= w.y + 0.25);
+        return { act: w.act, kind: w.kind || w.role || null, x: +w.x.toFixed(1), y: +w.y.toFixed(2), z: +w.z.toFixed(1), gap: h ? +(w.y - h.point.y).toFixed(2) : null, obj: h ? (h.object.userData.wp || h.object.name || (h.object.parent && h.object.parent.name) || h.object.type) + (h.object.isInstancedMesh ? "#" + h.instanceId : "") : null, lift: !!(w.lk && w.lk.lift) };
+      });
+    };
+  }
   // 실사 장면: 하늘 돔 · 하늘을 구운 환경광(유리·금속 반사) · 대기 원근 · ACES 톤 매핑 · (GPU면) 앰비언트 오클루전
   // 공법 시뮬레이터는 화면 테마와 상관없이 늘 맑은 낮
   const look = createLook(renderer, scene, { lite: LITE });
@@ -250,20 +279,20 @@ export function createSim3D(host, opts = {}) {
       if (!o || o.userData.twin) return o;
       const t = o.isInstancedMesh ? new THREE.InstancedMesh(o.geometry, o.material, 1) : new THREE.Mesh(o.geometry, o.material);
       if (o.isInstancedMesh) { t.instanceMatrix = o.instanceMatrix; t.instanceColor = o.instanceColor; t.frustumCulled = false; t.count = 0; }
-      t.userData.src = o; t.userData.front = front; o.userData.twin = t; mirror.add(t); twins.push(t); return t;
+      t.userData.src = o; t.userData.front = front; t.userData.support = !!o.userData.support || !(o.material && o.material.transparent && (o.material.opacity ?? 1) < 0.7); // 지하 공종에서 반투명으로 보여도 디딤 면 o.userData.twin = t; mirror.add(t); twins.push(t); return t;
     };
     const ground = new THREE.Group(); root.add(ground);
     const SURF = 0.5; // 지표 (쇄석·포장) 두께
     const strata = sc.strata.filter(([a, b]) => a < sc.dv && Math.min(b, sc.dv) > SURF + 0.05).map(([a, b, k]) => ({ a: Math.max(a, SURF), b: Math.min(b, sc.dv), m: mat(COL[k] ?? COL.soil, { rough: 0.95, tex: 'soil' }), pieces: [] }));
-    strata.forEach(L => { for (let i = 0; i < 4; i++) { const o = mesh(BOX, L.m, null, ground); L.pieces.push(o); twin(o, 0.2); } });
+    strata.forEach(L => { for (let i = 0; i < 4; i++) { const o = mesh(BOX, L.m, null, ground); o.userData.support = true; L.pieces.push(o); twin(o, 0.2); } });
     // 지층 경계선: 흙 덩어리 바깥 네 면에 (지하 공종에서 지층 두께가 읽히게)
     const bndM = mat(0xf2ede2, { em: 0.35 }), bnd = inst(BOX, bndM, Math.max(1, strata.length) * 4, null);
     { let n = 0; strata.slice(1).forEach(L => { const y = -L.a; ibox(bnd, n++, D.xl, D.xr, y - 0.07, y + 0.07, -Z - 0.03, -Z + 0.05); ibox(bnd, n++, D.xl, D.xr, y - 0.07, y + 0.07, Z - 0.05, Z + 0.03); ibox(bnd, n++, D.xl - 0.03, D.xl + 0.05, y - 0.07, y + 0.07, -Z, Z); ibox(bnd, n++, D.xr - 0.05, D.xr + 0.03, y - 0.07, y + 0.07, -Z, Z); }); bnd.count = n; }
     // 지표 (쇄석 포장): 대지 둘레 띠 + 굴착 전 대지 덮개
     const surfM = mat(0xa39883, { rough: 1, tex: 'gravel' });
     const front = [box(surfM, null, D.xl, 0, -SURF, 0, -Z, 0, ground), box(surfM, null, pw, D.xr, -SURF, 0, -Z, 0, ground), box(surfM, null, 0, pw, -SURF, 0, -Z, -pd / 2, ground)];
-    front.forEach(o => twin(o, 0.22));
-    const pitLid = box(surfM, null, 0, pw, -SURF, 0, -pd / 2, 0, ground); twin(pitLid, 0.22);
+    front.forEach(o => { o.userData.support = true; twin(o, 0.22); });
+    const pitLid = box(surfM, null, 0, pw, -SURF, 0, -pd / 2, 0, ground); pitLid.userData.support = true; twin(pitLid, 0.22);
     // 지하수위: 흙 속에 얇은 물 막 + 바깥 네 면에 파란 선 (지하 공종에서만)
     const gwM = mat(COL.water, { op: 0.28, em: 0.25 }), gwEdge = mat(COL.water, { em: 0.6 });
     const gwY = -cond.gw;
@@ -337,17 +366,34 @@ export function createSim3D(host, opts = {}) {
     const clipM = (c, o = {}) => mat(c, { ...o, clip: true });
     const slabI = inst(BOX, clipM(COL.slab, { tex: 'conc' }), NF, 'frame');
     const steelF = ['steel', 'hybrid', 'stick', 'truss', 'module'].includes(ids.frame);
-    const colPer = D.fp.map(f => (f.x1 - f.x0 > (G.bx1 - G.bx0) + 1 ? Math.max(3, Math.round((f.x1 - f.x0) / 8.4)) + 1 : D.colX.length) * D.colZ.length);
+    const colPer = D.fp.map((f, i) => D.colsX[i].length * D.colsZ[i].length);
     const colOff = [0]; colPer.forEach((n, i) => colOff.push(colOff[i] + n));
     const colI = inst(BOX, clipM(steelF ? COL.steel : COL.conc, { metal: steelF ? 0.5 : 0.05, tex: steelF ? 'steel' : 'conc' }), colOff[NF], 'frame');
     const colPos = [];
     sc.floors.forEach((f, i) => {
-      const fp = D.fp[i], nx = Math.max(3, Math.round((fp.x1 - fp.x0) / 8.4)), xs = fp.x1 - fp.x0 > (G.bx1 - G.bx0) + 1 ? Array.from({ length: nx + 1 }, (_, j) => fp.x0 + (fp.x1 - fp.x0) * j / nx) : D.colX;
-      const zs = D.colZ.map(z => clamp(z, fp.z0, fp.z1));
+      const fp = D.fp[i], xs = D.colsX[i], zs = D.colsZ[i];
       let k = colOff[i]; const w = steelF ? 0.5 : 0.8;
       const cp = []; colPos.push(cp); xs.forEach(x => zs.forEach(z => { cp.push([x, z]); ibox(colI, k++, x - w / 2, x + w / 2, f.e0 + 0.18, f.e1 - 0.32, z - w / 2, z + w / 2); }));
       ibox(slabI, i, fp.x0, fp.x1, f.e1 - 0.32, f.e1 + 0.18, fp.z0, fp.z1);
     });
+    // 콘크리트 색: 같은 회색 상자가 쌓인 '레고' 느낌을 덜려고 층(타설 묶음)마다 조금씩 다르고, 갓 친 층은 젖어서 어둡다가 마르며 밝아진다
+    const pourTint = (() => {
+      const hs = (i, k) => { const v = Math.sin(i * 127.1 + k * 311.7 + NF * 0.37) * 43758.5453; return v - Math.floor(v); };
+      const batch = sc.floors.map((_, i) => ({ l: 0.94 + 0.08 * hs(i, 1), w: (hs(i, 2) - 0.5) * 0.035 }));
+      [slabI, colI].forEach(o => { o.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(o.instanceMatrix.count * 3).fill(1), 3); });
+      const c = new THREE.Color(); let last = '';
+      return (fl, nF) => {
+        const k = `${nF}|${Math.round(fl * 8)}`; if (k === last) return; last = k;
+        for (let i = 0; i < nF; i++) {
+          const age = Math.max(0, fl - (i + 1)), wet = Math.exp(-age / 1.4); // 1 → 갓 친 층, 0 → 다 마른 층
+          const L = batch[i].l * (1 - 0.2 * wet), w = batch[i].w;
+          c.setRGB(L * (1 + w) * (1 - 0.03 * wet), L, L * (1 - w) * (1 + 0.025 * wet));
+          slabI.setColorAt(i, c);
+          if (!steelF) { const L2 = L * (0.97 + 0.03 * hs(i, 3)); c.setRGB(L2 * (1 + w), L2, L2 * (1 - w)); for (let k2 = colOff[i]; k2 < colOff[i + 1]; k2++) colI.setColorAt(k2, c); }
+        }
+        slabI.instanceColor.needsUpdate = true; colI.instanceColor.needsUpdate = true;
+      };
+    })();
     // 코어 (속이 빈 네 벽)
     const coreM = clipM(0xaeaca5, { tex: 'conc' });
     const core = [0, 1, 2, 3].map(() => mesh(BOX, coreM, 'frame'));
@@ -410,15 +456,16 @@ export function createSim3D(host, opts = {}) {
     // --- 설비 (층마다, 코어 주변) ---
     const z0 = -bd / 2, rz = (f) => z0 + bd * f;
     const sys = {
-      hvac: { c: COL.green, w: 1.4, h: 0.6, y: 0.55, z: 0.3 }, plumb: { c: COL.water, w: 0.35, h: 0.35, y: 0.8, z: 0.4 },
-      fire: { c: COL.red, w: 0.2, h: 0.2, y: 0.42, z: 0.46 }, elec: { c: COL.orange, w: 0.8, h: 0.15, y: 0.66, z: 0.22 }, ict: { c: COL.purple, w: 0.5, h: 0.12, y: 0.74, z: 0.14 },
+      // 실제 자재 색: 아연도 덕트 · 배관(회청) · 소방 배관(적색 도장) · 전선 트레이(아연도, 살짝 따뜻하게) · 통신 트레이(회보라)
+      hvac: { c: 0xb4bcc4, w: 1.4, h: 0.6, y: 0.55, z: 0.3, mt: 0.55 }, plumb: { c: 0x6f8ea6, w: 0.35, h: 0.35, y: 0.8, z: 0.4, mt: 0.3 },
+      fire: { c: 0xb5352f, w: 0.2, h: 0.2, y: 0.42, z: 0.46, mt: 0.2 }, elec: { c: 0xb9ad94, w: 0.8, h: 0.15, y: 0.66, z: 0.22, mt: 0.5 }, ict: { c: 0x8e88a6, w: 0.5, h: 0.12, y: 0.74, z: 0.14, mt: 0.35 },
     };
     const sysI = {}, riser = {};
     Object.entries(sys).forEach(([k, s]) => {
-      sysI[k] = inst(BOX, clipM(s.c, { em: 0.15 }), NF * (k === 'hvac' ? 3 + D.colX.length * 2 : 3), k);
-      riser[k] = mesh(BOX, clipM(s.c, { em: 0.2 }), k);
+      sysI[k] = inst(BOX, clipM(s.c, { em: 0.04, metal: s.mt, rough: 0.5 }), NF * (k === 'hvac' ? 3 + D.colX.length * 2 : 3), k);
+      riser[k] = mesh(BOX, clipM(s.c, { em: 0.05, metal: s.mt, rough: 0.5 }), k);
     });
-    const sprI = inst(BOX, clipM(COL.red, { em: 0.3 }), NF * 24, 'fire');
+    const sprI = inst(BOX, clipM(0xb5352f, { em: 0.08 }), NF * 24, 'fire');
     const plantI = inst(BOX, mat(0xd9d9de, { metal: 0.25 }), 8, 'mep');
     const geoI = inst(CYL, mat(COL.water, { em: 0.3 }), 8, 'hvac');
     // 마감: 바닥 · 천장 · 칸막이 · 시운전 점등
@@ -440,6 +487,7 @@ export function createSim3D(host, opts = {}) {
     const yard = safe('야적장 만들기', () => buildYard({ root, sc, D }), null);
     // 현장 사람들: 현장 앞 가설 사무소 단지 (2층 현장사무소 · 근로자 휴게실 · TBM 마당 · 국기 · 공사 안내판)와 그곳 사람들의 하루
     const lifeB = safe('현장 사람들 만들기', () => buildSiteLife({ root, mat, BOX, sc, D, city }), null);
+    const sup = safe('발 디딤 면', () => createSupport(scene), null);
     // 공법별 장면 (장비·부재·순서): 공통 부재를 숨기거나 덮어쓴다
     const meth = buildMethods({ root, mat, clipM, inst, mesh, box, setBox, ibox, BOX, CYL, CONE, sc, D, clipList, R: { strata, bores, boreI, rigI, impI, walls, strutI, ancI, tdSlab, exc, trucks, pileI, matSlab, rig, bwpI, slabI, colI, core, formBox, acs, shoreI, rebarP, rebarTex, pourBox, cageI, sparkI, pump, boom, mixers, crane, mast, mastS, slew, jib, cjib, cwt, cab, apex, hookL, hookLoad, hMast, hCar, hCar2, skinX, skinZ, roofL, lv, strutZ, skinGlassy: glassy } });
 
@@ -529,6 +577,7 @@ export function createSim3D(host, opts = {}) {
       // 지상 골조
       const fl = structP * NF, nF = K('frame') ? Math.min(NF, Math.floor(fl)) : 0;
       slabI.count = nF; colI.count = colOff[nF];
+      pourTint(fl, nF);
       // 완성 볼륨 윤곽: 골조 전에는 건물 전체, 골조가 오르는 동안에는 아직 안 올라간 위쪽만 (전체 보기 위쪽 빈 하늘이 '올라갈 자리'로 읽히게)
       ghost.visible = !UNDER_WPS.has(wpId) && (!K('frame') || nF < NF);
       if (ghost.visible) { if (!K('frame') || nF === 0) setBox(ghost, G.bx0, G.bx1, 0, G.H, -bd / 2, bd / 2); else { const q = D.fp[NF - 1] || { x0: G.bx0, x1: G.bx1, z0: -bd / 2, z1: bd / 2 }; setBox(ghost, q.x0, q.x1, sc.floors[nF - 1].e1, G.H, q.z0, q.z1); } }
@@ -760,14 +809,19 @@ export function createSim3D(host, opts = {}) {
       fl3.busy.forEach(l => busy.add(l));
       // 장비 둘레 사람: 굴착기·크람쉘 옆 신호수, 펌프카 호스 끝 호스 잡이·진동 다짐, 천공기 옆 신호수·유도원
       io.hot.forEach((h, i) => {
-        if (h.k === 'ex' || h.k === 'clam') work.push(crewAt('signal', h.x + 5, h.y + 0.02, h.z + 5, [h.x, h.z], T, 40 + i));
+        // 굴착 바닥(땅속)에 선 장비는 신호수를 터파기 안쪽으로 세운다 (바깥쪽이면 흙벽 속에 묻힌다). 지표 장비는 그대로
+        const pit = h.y < -0.5, ix = pit && h.x > pw / 2 ? -1 : 1, iz = pit && h.z > 0 ? -1 : 1;
+        const inX = (x) => (pit ? clamp(x, 1.8, pw - 1.8) : x), inZ = (z) => (pit ? clamp(z, -pd / 2 + 1.8, pd / 2 - 1.8) : z);
+        if (h.k === 'ex' || h.k === 'clam') work.push(crewAt('signal', inX(h.x + 5 * ix), h.y + 0.02, inZ(h.z + 5 * iz), [h.x, h.z], T, 40 + i));
         else if (h.k === 'hose') { [-0.7, 0.7].forEach((o2, j) => work.push(crewAt('hose', h.x + o2, h.y + 0.02, h.z + 1.3, [h.x, h.z - 2], T, 50 + i * 2 + j))); work.push(crewAt('vibrate', h.x - 2.4, h.y + 0.02, h.z + 2.2, [h.x, h.z], T, 60 + i)); }
-        else if (h.k === 'rig') { work.push(crewAt('signal', h.x + 5, h.y + 0.02, h.z + 5, [h.x, h.z], T, 70 + i)); work.push(crewAt('guide', h.x - 2.6, h.y + 0.02, h.z + 3.2, [h.x, h.z], T, 80 + i)); }
+        else if (h.k === 'rig') { work.push(crewAt('signal', inX(h.x + 5 * ix), h.y + 0.02, inZ(h.z + 5 * iz), [h.x, h.z], T, 70 + i)); work.push(crewAt('guide', inX(h.x - 2.6 * ix), h.y + 0.02, inZ(h.z + 3.2 * iz), [h.x, h.z], T, 80 + i)); }
       });
       // 현장 사람들: 아침 TBM · 사무소 앞 소장·감리 · 2층 복도 통화 · 휴게실 · 자재 반입 의논
       const lifeOn = !!lifeB && (lifeV || (prepOn && P('prep') > 0.3 && !underV));
       const lifeF = lifeB ? safe('현장 사람들', () => lifeB.frame({ T, on: lifeOn, crewN: clamp(work.length, 8, 16), wpId, dlv: !!dlvKind }), null) : null;
       if (lifeF) { lifeF.people.forEach(q => work.push(q)); lifeF.labels.forEach(l => dyn.push(l)); }
+      // 발 디딤: 그 순간 그려진 면(거푸집 데크·철근·타설 면·굴착 바닥·지붕·포장) 위에 발을 맞춘다
+      if (sup) safe('발 디딤', () => { sup.frame(`${wpId}|${nF}|${active ? stage : -1}|${Math.round(fl * 6)}|${Math.round(dug * 2)}|${Math.round((tau || 0) * 300)}`); const drops = window.__S3DEBUG ? (window.__s3drops = []) : null; work.forEach(w => { if (w.noSnap || w.act === 'sit' || w.act === 'drink' || w.act === 'rest') return; const y2 = sup.at(w.x, w.z, w.y); if (y2 != null && Number.isFinite(y2)) { if (drops && Math.abs(w.y - y2) > 1.5) drops.push({ act: w.act, kind: w.kind || w.role || null, x: +w.x.toFixed(1), z: +w.z.toFixed(1), y0: +w.y.toFixed(2), y: +y2.toFixed(2) }); w.y = y2; } }); }, null);
       const cf = safe('주변 가로·사람', () => city.frame({ T, occ, busy, work, gateBusy: trOn || pourNow || !!dlvKind }), null); if (window.__S3DEBUG) window.__s3work = work;
       // 누르면 대화할 수 있는 사람: 작업자 · 현장 사람들 · 보행자·신호수 (p: 몸 가운데, g: 발 높이)
       const picks = [];

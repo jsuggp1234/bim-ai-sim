@@ -44,10 +44,20 @@ function gait(o, ph, amp = 1) {
 function crouch(o, h) { const a = Math.acos(clamp((h - 0.06) / (THIGH + SHIN), 0, 1)); o.lL = [a, 2 * a]; o.rL = [a * 0.9, 1.9 * a]; o.hip = h; }
 function kneel(o) { o.lL = [1.45, 1.5]; o.rL = [0.12, 1.6]; o.hip = 0.52; }
 const sq = (t, f) => 0.5 + 0.5 * Math.sin(t * f);
+const ease = (k) => (k <= 0 ? 0 : k >= 1 ? 1 : k * k * (3 - 2 * k));
+// o ← o2(앞 동작)와 o(지금 동작) 사이, k: 0 = 앞 동작, 1 = 지금 동작
+function blendPose(o, o2, k) {
+  const e = ease(k), L = (a, b) => b + (a - b) * e;
+  ['hip', 'tp', 'ty', 'hp', 'sw'].forEach(n => { o[n] = L(o[n], o2[n]); });
+  ['L', 'R', 'lL', 'rL'].forEach(n => { o[n] = o[n].map((v, i) => L(v, o2[n][i])); });
+  if (e < 0.5) o.tool = o2.tool;
+}
 
 const ACT = {
-  stand(o, t) { o.ty = 0.12 * Math.sin(t * 0.3); },
-  walk(o, t, ph) { gait(o, ph); },
+  stand(o, t) { const w = Math.sin(t * 0.23); o.ty = 0.12 * Math.sin(t * 0.3); o.tp = 0.02 + 0.012 * Math.sin(t * 1.3); o.lL = [0.04 * w, 0.05 + 0.04 * Math.max(0, -w)]; o.rL = [-0.04 * w, 0.05 + 0.04 * Math.max(0, w)]; o.L = [0.06, 0.08, 0.2]; o.R = [0.06, 0.08, 0.2]; },
+  walk(o, t, ph) { gait(o, ph); o.ty = 0.07 * Math.sin(ph); o.tp = 0.05; o.hp = -0.04 + 0.02 * Math.cos(2 * ph); },
+  // 숨 돌리기: 허리를 펴고 손을 허리에 얹은 채 둘러본다 (일하다 잠깐씩)
+  breathe(o, t) { o.tp = -0.07; o.hp = -0.12 + 0.06 * Math.sin(t * 0.7); o.ty = 0.32 * Math.sin(t * 0.45); o.L = [0.28, 0.62, 1.75]; o.R = [0.28, 0.62, 1.75]; o.lL = [0.05, 0.06]; o.rL = [-0.04, 0.05]; },
   carry_sh(o, t, ph) { gait(o, ph, 0.85); o.R = [1.05, 0.12, 2.35]; o.L[0] *= 0.6; o.tool = 'bar'; },
   carry_fr(o, t, ph) { gait(o, ph, 0.7); o.L = [0.95, 0.05, 0.75]; o.R = [0.95, 0.05, 0.75]; o.tp = 0.06; o.tool = 'box'; },
   carry_pn(o, t, ph) { gait(o, ph, 0.7); o.L = [0.5, 0.25, 0.9]; o.R = [0.5, 0.25, 0.9]; o.tool = 'panel'; },
@@ -110,12 +120,12 @@ export function buildPeople(X, cap = 140) {
   const sparkG = G(new THREE.OctahedronGeometry(0.5, 0));
   const vt = vestTex(); own.tex.push(vt);
   const mk = (g, m, n) => { const o = new THREE.InstancedMesh(g, m, n); o.count = 0; o.frustumCulled = false; o.castShadow = true; o.receiveShadow = true; o.userData.noMirror = true; root.add(o); return o; };
-  const W = { pants: mk(limb, M({ color: 0xffffff }), cap * 4), hips: mk(blk, M({ color: 0xffffff }), cap), boot: mk(blk, M({ color: 0x2e2620, roughness: 0.7 }), cap * 2), torso: mk(torsoG, M({ color: 0xffffff, map: vt }), cap), arm: mk(limb, M({ color: 0xffffff }), cap * 4), hand: mk(blk, M({ color: 0xffffff }), cap * 2), head: mk(headG, M({ color: 0xffffff, roughness: 0.7 }), cap), hat: mk(hatG, M({ color: 0xffffff, roughness: 0.35, metalness: 0.05 }), cap), tool: mk(blk, M({ color: 0xffffff, roughness: 0.6, metalness: 0.2 }), cap * 4) };
+  const W = { pants: mk(limb, M({ color: 0xffffff }), cap * 4), hips: mk(torsoG, M({ color: 0xffffff }), cap), cap2: mk(headG, M({ color: 0xffffff, map: vt }), cap * 2), belt: mk(torsoG, M({ color: 0x3a2e24, roughness: 0.6 }), cap), boot: mk(blk, M({ color: 0x2e2620, roughness: 0.7 }), cap * 2), torso: mk(torsoG, M({ color: 0xffffff, map: vt }), cap), arm: mk(limb, M({ color: 0xffffff }), cap * 4), hand: mk(blk, M({ color: 0xffffff }), cap * 2), head: mk(headG, M({ color: 0xffffff, roughness: 0.7 }), cap), hat: mk(hatG, M({ color: 0xffffff, roughness: 0.35, metalness: 0.05 }), cap), tool: mk(blk, M({ color: 0xffffff, roughness: 0.6, metalness: 0.2 }), cap * 4) };
   const spark = mk(sparkG, M({ color: 0xffd38a, emissive: 0xffb547, emissiveIntensity: 2.2 }), 90); spark.castShadow = false;
   const all = [...Object.values(W), spark];
   const C = new THREE.Color();
   // 색 버퍼를 미리 (첫 렌더 전에 instanceColor가 있어야 셰이더가 맞다)
-  Object.values(W).forEach(im => { if (im === W.boot) return; for (let i = 0; i < im.instanceMatrix.count; i++) im.setColorAt(i, C.set(0xffffff)); });
+  Object.values(W).forEach(im => { if (im === W.boot || im === W.belt) return; for (let i = 0; i < im.instanceMatrix.count; i++) im.setColorAt(i, C.set(0xffffff)); });
   const n = {}; const reset = () => { Object.keys(W).forEach(k => { n[k] = 0; }); n.spark = 0; };
   reset();
   // 행렬 도구
@@ -151,13 +161,15 @@ export function buildPeople(X, cap = 140) {
     // 리프트를 탄 사람: 옮길 때는 낮춰 몰고, 자리에서는 올려 천장 작업
     if (lk.lift > 0.3 && (act === 'drill_up' || act === 'walk')) { const L = act === 'walk' ? 0.62 : lk.lift; scissor(x, y, z, yaw, L); y += L; if (act === 'walk') act = 'stand'; }
     const o = base(); (ACT[act] || ACT.stand)(o, t, ph || 0);
+    // 동작 바꿈: 앞 동작에서 지금 동작으로 관절을 부드럽게 옮긴다 (lk.prev, lk.bl 0→1)
+    if (lk.prev && lk.prev !== act && lk.bl != null && lk.bl < 1) { const o2 = base(); (ACT[lk.prev] || ACT.stand)(o2, t, lk.pph || 0); blendPose(o, o2, lk.bl); }
     rootM.makeRotationY(yaw).setPosition(x, y, z);
     F.set(Math.sin(yaw), 0, Math.cos(yaw));
     const ped = !!lk.ped;
     const pants = lk.pants ?? (ped ? 0x2b2d33 : 0x2a3346), shirt = lk.shirt ?? (ped ? lk.cloth : 0x2c3a55), vest = ped ? lk.cloth : (lk.vest ?? 0xff7a1a);
     // 엉덩이 · 다리
     joint(hl, rootM, 0, o.hip, 0);
-    put(W.hips, 'hips', hl, 0.32, 0.17, 0.21, pants);
+    joint(mA, hl, 0, -0.1, 0); put(W.hips, 'hips', mA, 0.34, 0.17, 0.23, pants);
     [[o.lL, HIP_X], [o.rL, -HIP_X]].forEach(([lg, sx]) => {
       joint(mA, hl, sx, 0, 0, -lg[0]); put(W.pants, 'pants', mA, 0.17, THIGH, 0.19, pants);
       joint(kn, mA, 0, -THIGH, 0, lg[1]); put(W.pants, 'pants', kn, 0.135, SHIN, 0.15, pants);
@@ -166,6 +178,9 @@ export function buildPeople(X, cap = 140) {
     // 상체 · 머리
     joint(torsoM, hl, 0, 0.04, 0, o.tp, o.ty, 0, 'YXZ');
     put(W.torso, 'torso', torsoM, 0.4, 0.56, 0.25, vest);
+    if (!ped) { joint(mA, torsoM, 0, 0.0, 0); put(W.belt, 'belt', mA, 0.41, 0.07, 0.26); } // 공구 벨트
+    joint(mA, torsoM, SH_X - 0.02, SH_Y - 0.01, 0); put(W.cap2, 'cap2', mA, 0.15, 0.13, 0.17, ped ? shirt : vest); // 둥근 어깨
+    joint(mA, torsoM, -SH_X + 0.02, SH_Y - 0.01, 0); put(W.cap2, 'cap2', mA, 0.15, 0.13, 0.17, ped ? shirt : vest);
     joint(hdM, torsoM, 0, 0.6, 0.01, o.hp); joint(mA, hdM, 0, 0.12, 0);
     put(W.head, 'head', mA, 0.2, 0.235, 0.215, lk.skin ?? 0xc89a78);
     if (lk.hat !== false) { joint(mB, hdM, 0, 0.165, 0.005); put(W.hat, 'hat', mB, ped ? 0.215 : 0.27, ped ? 0.14 : 0.21, ped ? 0.215 : 0.29, lk.hat ?? HATS.work); }
@@ -262,6 +277,20 @@ const MIX = {
 export const CREW_KINDS = Object.keys(MIX);
 const STATIC_ACTS = new Set(['signal', 'survey', 'guide']);
 
+// 걷기 한 구간: 0.5초 동안 속도를 올리고 마지막 0.5초에 줄인다 (발이 미끄러지지 않게 걸음 위상은 실제 간 거리로)
+const ACC_T = 0.5;
+const legTime = (L, v) => (L <= 0 ? 0 : L / v + ACC_T);
+function legDist(t, T, L) {
+  if (T <= 0 || L <= 0) return L;
+  const v = L / (T - ACC_T), a = ACC_T;
+  if (t <= 0) return 0; if (t >= T) return L;
+  if (t < a) return v * t * t / (2 * a);
+  if (t > T - a) { const r = T - t; return L - v * r * r / (2 * a); }
+  return v * a / 2 + v * (t - a);
+}
+// 몸 돌리기: from → to 를 k(0→1)에 따라 짧은 쪽으로
+function turnTo(from, to, k) { let d = to - from; d = Math.atan2(Math.sin(d), Math.cos(d)); return from + d * ease(clamp(k, 0, 1)); }
+
 // 작업조 하나: kind, n명, 영역 a {x0,x1,z0,z1,y}, 시간 T, seed, o { stock: [x,z] 자재 자리, face: [x,z] 바라볼 곳, lk 색 덮어쓰기 }
 // 돌려주는 것: [{ x, y, z, yaw, act, t, ph, lk }]
 export function crewPlan(kind, n, a, T, seed = 0, o = {}) {
@@ -276,33 +305,44 @@ export function crewPlan(kind, n, a, T, seed = 0, o = {}) {
     if (act === 'signal') lk.vest = 0xff5a1f;
     if (itemK) Object.assign(lk, IT[itemK] || {});
     if (act === 'drill_up' && o.lift > 0.3) lk.lift = o.lift; // 천장 작업: 시저 리프트 위에서
-    const off = hsh(sd, 9) * 200, spd = 0.85 + 0.25 * hsh(sd, 4);
+    const off = hsh(sd, 9) * 200, spd = 0.85 + 0.25 * hsh(sd, 4), tk = 0.88 + 0.24 * hsh(sd, 8); // tk: 사람마다 손놀림 빠르기
     if (itemK) {
-      // 나르는 사람: 자재 자리 ↔ 작업 자리
+      // 나르는 사람: 자재 자리 ↔ 작업 자리. 출발·도착에서 천천히, 돌아설 때는 몸을 돌리며, 집기·내려놓기와 걷기는 자세를 이어 바꾼다
       const B = [X(0.15 + 0.7 * hsh(sd, 1)), Zf(0.15 + 0.7 * hsh(sd, 2))], A = [clamp(stock[0] + (hsh(sd, 5) - 0.5) * 2.5, a.x0 + m, a.x1 - m), clamp(stock[1] + (hsh(sd, 6) - 0.5) * 2.5, a.z0 + m, a.z1 - m)];
-      const L = Math.hypot(B[0] - A[0], B[1] - A[1]), tw = L / spd, P = 4 + tw + 3.5 + tw, u = (T + off) % P;
-      let x, z, yaw, ac, ph = 0;
-      if (u < 4) { x = A[0]; z = A[1]; yaw = Math.atan2(B[0] - A[0], B[1] - A[1]) + Math.PI * 0.5; ac = 'pick'; }
-      else if (u < 4 + tw) { const f = (u - 4) / tw; x = A[0] + (B[0] - A[0]) * f; z = A[1] + (B[1] - A[1]) * f; yaw = Math.atan2(B[0] - A[0], B[1] - A[1]); ac = act; ph = (u - 4) * spd * 4.6; }
-      else if (u < 7.5 + tw) { x = B[0]; z = B[1]; yaw = Math.atan2(B[0] - A[0], B[1] - A[1]); ac = 'pick'; }
-      else { const f = (u - 7.5 - tw) / tw; x = B[0] + (A[0] - B[0]) * f; z = B[1] + (A[1] - B[1]) * f; yaw = Math.atan2(A[0] - B[0], A[1] - B[1]); ac = 'walk'; ph = (u - 7.5 - tw) * spd * 4.6; }
-      out.push({ x, y: a.y, z, yaw, act: ac, t: T + off, ph, lk, kind, sd });
+      const L = Math.hypot(B[0] - A[0], B[1] - A[1]), tw = legTime(L, spd), P = 4 + tw + 3.5 + tw, u = (T + off) % P;
+      const yAB = Math.atan2(B[0] - A[0], B[1] - A[1]), yBA = Math.atan2(A[0] - B[0], A[1] - B[1]), yPick = yAB + Math.PI * 0.5;
+      let x, z, yaw, ac, ph = 0, prev = null, bl = 1, pph = 0;
+      if (u < 4) { x = A[0]; z = A[1]; yaw = turnTo(yBA, yPick, u / 0.7); ac = 'pick'; prev = 'walk'; bl = u / 0.45; pph = L * 4.6; }
+      else if (u < 4 + tw) { const d = legDist(u - 4, tw, L), f = L > 0 ? d / L : 1; x = A[0] + (B[0] - A[0]) * f; z = A[1] + (B[1] - A[1]) * f; yaw = turnTo(yPick, yAB, (u - 4) / 0.6); ac = act; ph = d * 4.6; prev = 'pick'; bl = (u - 4) / 0.45; }
+      else if (u < 7.5 + tw) { x = B[0]; z = B[1]; yaw = yAB; ac = 'pick'; prev = act; bl = (u - 4 - tw) / 0.45; pph = L * 4.6; }
+      else { const d = legDist(u - 7.5 - tw, tw, L), f = L > 0 ? d / L : 1; x = B[0] + (A[0] - B[0]) * f; z = B[1] + (A[1] - B[1]) * f; yaw = turnTo(yAB, yBA, (u - 7.5 - tw) / 0.8); ac = 'walk'; ph = d * 4.6; prev = 'pick'; bl = (u - 7.5 - tw) / 0.45; }
+      out.push({ x, y: a.y, z, yaw, act: ac, t: (T + off) * tk, ph, lk: { ...lk, prev, bl, pph }, kind, sd });
       continue;
     }
     // 제자리 작업: 자리 셋을 돌며 일하고, 다음 자리로 걸어간다 (신호·측량·유도는 한자리)
     const spots = [0, 1, 2].map(k => [X(0.1 + 0.8 * hsh(sd, 11 + k)), Zf(0.1 + 0.8 * hsh(sd, 21 + k))]);
     if (STATIC_ACTS.has(act) || o.still) spots.length = 1;
-    const dw = 14 + 10 * hsh(sd, 31), legs = spots.map((p, k) => { const q = spots[(k + 1) % spots.length]; return Math.hypot(q[0] - p[0], q[1] - p[1]) / spd; });
-    const P = spots.length * dw + legs.reduce((s, v) => s + v, 0), u = (T + off) % P;
+    const dw = 14 + 10 * hsh(sd, 31), dists = spots.map((p, k) => { const q = spots[(k + 1) % spots.length]; return Math.hypot(q[0] - p[0], q[1] - p[1]); }), legs = dists.map(d => legTime(d, spd));
+    const P = spots.length * dw + (spots.length > 1 ? legs.reduce((s, v) => s + v, 0) : 0), u = (T + off) % P;
+    const faceAt = (k) => { const p = spots[k], f = o.face; return f ? Math.atan2(f[0] - p[0], f[1] - p[1]) : hsh(sd, 41 + k) * 6.283; };
+    const legYaw = (k) => { const p = spots[k], q = spots[(k + 1) % spots.length]; return Math.atan2(q[0] - p[0], q[1] - p[1]); };
+    // 일하는 동안 한두 번 허리를 펴고 숨을 돌린다 (사람마다 다른 때)
+    const still = STATIC_ACTS.has(act), br0 = dw * (0.35 + 0.3 * hsh(sd, 51)), brL = 2.2 + 1.6 * hsh(sd, 52);
     let acc = 0, done = false;
     for (let k = 0; k < spots.length && !done; k++) {
-      const p = spots[k], q = spots[(k + 1) % spots.length];
-      if (u < acc + dw) { const f = o.face, yaw = f ? Math.atan2(f[0] - p[0], f[1] - p[1]) : hsh(sd, 41 + k) * 6.283; out.push({ x: p[0], y: a.y, z: p[1], yaw, act, t: T + off, ph: 0, lk, kind, sd }); done = true; break; }
+      const p = spots[k], q = spots[(k + 1) % spots.length], multi = spots.length > 1;
+      if (u < acc + dw) {
+        const v = u - acc, inBr = !still && v >= br0 && v < br0 + brL;
+        let ac = inBr ? 'breathe' : act, prev = null, bl = 1;
+        if (inBr) { prev = act; bl = (v - br0) / 0.5; } else if (!still && v >= br0 + brL && v < br0 + brL + 0.5) { prev = 'breathe'; bl = (v - br0 - brL) / 0.5; } else if (multi && v < 0.5) { prev = 'walk'; bl = v / 0.5; }
+        const yaw = multi ? turnTo(legYaw((k + spots.length - 1) % spots.length), faceAt(k), v / 0.7) : faceAt(k);
+        out.push({ x: p[0], y: a.y, z: p[1], yaw, act: ac, t: (T + off) * tk, ph: 0, lk: prev ? { ...lk, prev, bl, pph: 0 } : lk, kind, sd }); done = true; break;
+      }
       acc += dw;
-      if (spots.length > 1 && u < acc + legs[k]) { const f = (u - acc) / legs[k]; out.push({ x: p[0] + (q[0] - p[0]) * f, y: a.y, z: p[1] + (q[1] - p[1]) * f, yaw: Math.atan2(q[0] - p[0], q[1] - p[1]), act: 'walk', t: T + off, ph: (u - acc) * spd * 4.6, lk, kind, sd }); done = true; break; }
-      acc += spots.length > 1 ? legs[k] : 0;
+      if (multi && u < acc + legs[k]) { const v = u - acc, d = legDist(v, legs[k], dists[k]), f = dists[k] > 0 ? d / dists[k] : 1; out.push({ x: p[0] + (q[0] - p[0]) * f, y: a.y, z: p[1] + (q[1] - p[1]) * f, yaw: turnTo(faceAt(k), legYaw(k), v / 0.7), act: 'walk', t: (T + off) * tk, ph: d * 4.6, lk: { ...lk, prev: act, bl: v / 0.45, pph: 0 }, kind, sd }); done = true; break; }
+      acc += multi ? legs[k] : 0;
     }
-    if (!done) out.push({ x: spots[0][0], y: a.y, z: spots[0][1], yaw: 0, act, t: T + off, ph: 0, lk, kind, sd });
+    if (!done) out.push({ x: spots[0][0], y: a.y, z: spots[0][1], yaw: faceAt(0), act, t: (T + off) * tk, ph: 0, lk, kind, sd });
   }
   return out;
 }

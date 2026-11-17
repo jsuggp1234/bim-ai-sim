@@ -1,9 +1,10 @@
 // 예산 산정용 기초 물량: 외벽·지붕·굴토·흙막이·용도별 면적
+import { perimK } from './gesture.js';
 const FOOTING = 1.5; // 기초·버림 두께(m)
 
 export function quantities(gen) {
   // 층 외벽 둘레: 형식별 외곽 둘레 × 층 축소율. 옥탑은 코어 위 정사각형
-  const perimOf = (b, f) => (f.roof ? 4 * Math.sqrt(Math.max(0, f.area)) : (b.perim || 0) * (f.s || 1));
+  const perimOf = (b, f) => (f.roof ? 4 * Math.sqrt(Math.max(0, f.area)) : (b.perim || 0) * perimK(f));
   const facadeOf = (b, f) => (b.kind === 'basement' ? 0 : perimOf(b, f) * f.h);
   const facadeOfBldg = (b) => b.floors.reduce((s, f) => s + facadeOf(b, f), 0);
   const byUseMap = new Map();

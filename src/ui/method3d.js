@@ -500,9 +500,8 @@ export function buildMethods(X) {
 
   // ================= 지상 골조 =================
   const FT = ids.frame;
-  const xsF = sc.floors.map((f, i) => { const fp = D.fp[i]; if (fp.x1 - fp.x0 > (G.bx1 - G.bx0) + 1) { const nx = Math.max(3, Math.round((fp.x1 - fp.x0) / 8.4)); return Array.from({ length: nx + 1 }, (_, j) => fp.x0 + (fp.x1 - fp.x0) * j / nx); } return D.colX; });
-  const zsF = sc.floors.map((f, i) => D.colZ.map(z => clamp(z, D.fp[i].z0, D.fp[i].z1)));
-  const maxX = Math.max(2, ...xsF.map(a => a.length)), nZ = D.colZ.length, perF = maxX * nZ + maxX + nZ;
+  const xsF = D.colsX, zsF = D.colsZ;
+  const maxX = Math.max(2, ...xsF.map(a => a.length)), nZ = Math.max(2, ...zsF.map(a => a.length)), perF = maxX * nZ + maxX + nZ;
   const steelSk = ['steel', 'hybrid', 'stick', 'src', 'module'].includes(FT);
   const ahead = { steel: 3, stick: 2, hybrid: 2, src: 2, module: 0 }[FT] || 0;
   const stP = pool(BOX, TINTS, steelSk || FT === 'truss' ? Math.min(30000, NF * (perF + 30) + 6 * perF * 3 + 400) : 400, 'frame', true);

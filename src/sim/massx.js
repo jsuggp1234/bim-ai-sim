@@ -4,6 +4,7 @@
 import { makePlan } from './plan.js';
 import { refugeLevels } from './massing.js';
 import { useOf, FLOOR_USES } from './uses.js';
+import { applyGesture } from './gesture.js';
 
 const SB = 8;                 // 획지 안쪽 후퇴
 const PARK_AREA = 33;         // 주차 1대당 지하 면적
@@ -67,7 +68,7 @@ function tiers(use, H, dia, tierH = 6) {
   const n = Math.max(1, Math.round(H / tierH)), h = H / n, a = Math.PI * dia * dia / 4;
   return stack([{ use, h, n }], a);
 }
-let SEQ = 0;
+let SEQ = 0, GSEED = 0;
 function B(blk, kind, rect, floors, o = {}) {
   const prt = o.parts || [part(rect.u0, rect.u1, rect.v0, rect.v1, o.a || 0)];
   const w = rect.u1 - rect.u0, d = rect.v1 - rect.v0;
@@ -117,12 +118,15 @@ function towerLot(blk, L, gfaLot, p, u, warn) {
     else if (hotel && lv <= 3) spec.push({ use: 'banquet', h: 6.5 });
     else spec.push({ use: typUse, h: p.hTyp, units: hotel ? Math.round(p.plate * 0.66 / 36) : 0 });
   }
-  const taper = (lv) => (F >= 45 && lv > F * 0.7 ? 0.9 : 1);
+  const gest = p.gesture && p.gesture !== 'box';
+  const taper = (lv) => (!gest && F >= 45 && lv > F * 0.7 ? 0.9 : 1);
   const us = n === 1 ? [(L.u0 + L.u1) / 2] : Array.from({ length: n }, (_, i) => L.u0 + tw / 2 + 6 + (W - tw - 12) * i / (n - 1));
   us.forEach((uc, i) => {
     const r = { u0: uc - tw / 2, u1: uc + tw / 2, v0: L.v0 + 6, v1: L.v0 + 6 + td };
     const fl = stack(spec.map((s, k) => ({ ...s, s: taper(k + 1) })), p.plate, { roof: { h: 7, area: p.plate * 0.35 } });
-    out.push(B(blk, hotel ? 'hotel' : 'office', r, fl, { tag: 'T', coreDims: [Math.max(10, tw * 0.38), Math.max(10, td * 0.4)] }));
+    const t = B(blk, hotel ? 'hotel' : 'office', r, fl, { tag: 'T', coreDims: [Math.max(10, tw * 0.38), Math.max(10, td * 0.4)] });
+    if (gest) applyGesture(t, p, { from: Math.max(2, podFl + 1), seed: GSEED++ });
+    out.push(t);
   });
   if (podFl) {
     const towersInPod = out.reduce((s, b) => s + Math.max(0, Math.min(b.rect.v1, podR.v1) - Math.max(b.rect.v0, podR.v0)) * (b.rect.u1 - b.rect.u0), 0);
@@ -193,7 +197,9 @@ function hospitalLot(blk, L, gfaLot, p) {
   us.forEach((uc) => {
     const r = { u0: uc - tw / 2, u1: uc + tw / 2, v0: L.v0 + D * 0.06, v1: L.v0 + D * 0.06 + td };
     const fl = stack([{ use: 'lobby', h: 6 }, { use: 'clinic', h: 4.8, n: podFl - 1 }, { use: 'ward', h: p.hTyp, n: wardFl, units: Math.round(p.plate * 0.6 / 26) }], p.plate, { roof: { h: 6, area: p.plate * 0.3 } });
-    out.push(B(blk, 'ward', r, fl, { tag: 'W', coreDims: [tw * 0.2, td * 0.5] }));
+    const w = B(blk, 'ward', r, fl, { tag: 'W', coreDims: [tw * 0.2, td * 0.5] });
+    if (p.gesture && p.gesture !== 'box') applyGesture(w, p, { from: podFl + 1, seed: GSEED++ });
+    out.push(w);
   });
   out.push(B(blk, 'clinic', pod, stack([{ use: 'lobby', h: 6 }, { use: 'clinic', h: 4.8, n: podFl - 1 }], area(pod)), { tag: 'C', span: 8.4, coreDims: [0, 0] }));
   return out;
@@ -206,7 +212,9 @@ function campusLot(blk, L, gfaLot, p) {
   const F = clamp(Math.round(gfaLot * 0.9 / foot), 2, p.maxFloors);
   const out = tpl.map(([x0, x1, y0, y1], i) => {
     const r = fr(L, x0, x1, y0, y1);
-    return B(blk, 'lab', r, stack([{ use: 'lobby', h: 6 }, { use: 'lab', h: p.hTyp, n: F - 1 }], area(r), { roof: { h: 5, area: area(r) * 0.25 } }), { tag: 'L', span: 9, coreDims: [10, 8] });
+    const b = B(blk, 'lab', r, stack([{ use: 'lobby', h: 6 }, { use: 'lab', h: p.hTyp, n: F - 1 }], area(r), { roof: { h: 5, area: area(r) * 0.25 } }), { tag: 'L', span: 9, coreDims: [10, 8] });
+    if (p.gesture && p.gesture !== 'box') applyGesture(b, p, { from: 2, seed: GSEED++ });
+    return b;
   });
   const c = fr(L, 0.36, 0.64, 0.38, 0.6);
   out.push(B(blk, 'admin', c, stack([{ use: 'lobby', h: 7 }, { use: 'admin', h: 4.2, n: 3 }], area(c)), { tag: 'C', span: 9, coreDims: [8, 8] }));
@@ -400,7 +408,7 @@ export function generateX(pIn) {
   const ZONES = {};
   BLOCKS.forEach(b => { if (!ZONES[b.zone]) ZONES[b.zone] = { key: b.zone, name: (b.zone === 'main' ? u.name + ' ' : '') + ROLE_NAME[b.zone], area: 0, color: '--res' }; ZONES[b.zone].area += b.area; });
   const plan = { ...base, ZONES, BLOCKS, blockById: new Map(BLOCKS.map(b => [b.id, b])), useId: u.id };
-  SEQ = 0;
+  SEQ = 0; GSEED = 0;
   const bldgs = [];
   let firstProc = true;
   BLOCKS.forEach(blk => {

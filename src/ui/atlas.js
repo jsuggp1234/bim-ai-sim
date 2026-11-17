@@ -1,4 +1,5 @@
-// 가벼운 지도: 웹 메르카토르 타일(CARTO 밝은·어두운 바탕) + 벡터 겹(자치구 경계·한강·택지 범위) + 핀.
+// 가벼운 지도: 웹 메르카토르 타일(OpenStreetMap 표준 타일을 테마에 맞게 흑백·반전, 안 되면 Esri 회색 바탕) + 벡터 겹(자치구 경계·한강·택지 범위) + 핀.
+// (CARTO 바탕 지도는 2026년부터 키 없이 쓰면 'API KEY REQUIRED' 워터마크가 찍혀 쓰지 않는다)
 // 타일을 못 받으면 벡터 겹만으로도 지도가 되도록 자치구 면과 강을 채워 그린다.
 // 좌표: 0~256 '월드' 좌표(줌 0의 픽셀). 화면 = (월드 − 중심) × 2^줌 + 화면 중앙.
 
@@ -24,7 +25,7 @@ export function createAtlas(el, { minZoom = 9.6, maxZoom = 16.5, onSelect = null
     <div class="at-pins" role="list"></div>
     <div class="at-ctl"><button type="button" data-z="1" aria-label="확대">+</button><button type="button" data-z="-1" aria-label="축소">−</button><button type="button" data-fit aria-label="후보지 전체 보기">⤢</button></div>
     <div class="at-hint" aria-hidden="true">Ctrl(⌘) + 스크롤로 확대·축소</div>
-    <a class="at-attrib" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap · © CARTO</a>`;
+    <a class="at-attrib" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>`;
   el.tabIndex = 0;
   el.setAttribute('aria-label', '후보지 지도. 드래그로 이동, 더하기·빼기 버튼이나 Ctrl+스크롤로 확대');
   const tilesEl = el.querySelector('.at-tiles'), svg = el.querySelector('.at-vec'), wg = el.querySelector('.at-w');
@@ -35,11 +36,21 @@ export function createAtlas(el, { minZoom = 9.6, maxZoom = 16.5, onSelect = null
   let tileOK = 0, tileBad = 0;
 
   // ---------- 타일 ----------
-  const sub = 'abcd';
-  const url = (zi, x, y) => {
-    const st = isDark() ? 'dark_all' : 'light_all', r = (window.devicePixelRatio || 1) > 1.2 ? '@2x' : '';
-    return `https://${sub[(x + y) % 4]}.basemaps.cartocdn.com/${st}/${zi}/${x}/${y}${r}.png`;
-  };
+  // 1) OpenStreetMap 표준 타일 (키 없음, 한글 지명) → CSS로 흑백·반전해 화면 테마에 맞춘다
+  // 2) 그 타일을 못 받으면 Esri 회색 바탕 (키 없음) 3) 둘 다 안 되면 벡터 겹만으로 그린다
+  const PROV = [
+    { id: 'osm', max: 19, attrib: '© OpenStreetMap contributors', href: 'https://www.openstreetmap.org/copyright', url: (zi, x, y) => `https://tile.openstreetmap.org/${zi}/${x}/${y}.png` },
+    { id: 'esri', max: 16, attrib: '© Esri · OpenStreetMap contributors', href: 'https://www.esri.com/', url: (zi, x, y) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${isDark() ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/${zi}/${y}/${x}` },
+  ];
+  let prov = 0;
+  const url = (zi, x, y) => PROV[prov].url(zi, x, y);
+  const attribEl = el.querySelector('.at-attrib');
+  function nextProvider() {
+    if (prov >= PROV.length - 1) { el.classList.add('notiles'); return; }
+    prov++; tileBad = 0; el.dataset.prov = PROV[prov].id; attribEl.textContent = PROV[prov].attrib; attribEl.href = PROV[prov].href;
+    if (prev) dropPrev(); if (cur) { cur.el.remove(); cur = null; } ask();
+  }
+  el.dataset.prov = PROV[0].id;
   let cur = null, prev = null;
   const mkLayer = (zi) => { const d = document.createElement('div'); d.className = 'at-layer'; tilesEl.appendChild(d); return { zi, el: d, tiles: new Map(), theme: isDark() }; };
   function layerTiles(L) {
@@ -55,7 +66,7 @@ export function createAtlas(el, { minZoom = 9.6, maxZoom = 16.5, onSelect = null
       const img = new Image(); img.alt = ''; img.decoding = 'async'; img.draggable = false;
       img.style.left = tx * TILE + 'px'; img.style.top = ty * TILE + 'px';
       img.onload = () => { img.classList.add('on'); tileOK++; el.classList.remove('notiles'); if (prev && L === cur && [...L.tiles.values()].every(i => i.complete)) dropPrev(); };
-      img.onerror = () => { tileBad++; if (!tileOK && tileBad >= 3) el.classList.add('notiles'); };
+      img.onerror = () => { tileBad++; if (!tileOK && tileBad >= 3) nextProvider(); };
       img.src = url(L.zi, xx, ty);
       L.tiles.set(key, img); L.el.appendChild(img);
     }
@@ -63,7 +74,7 @@ export function createAtlas(el, { minZoom = 9.6, maxZoom = 16.5, onSelect = null
   }
   function dropPrev() { if (prev) { prev.el.remove(); prev = null; } }
   function tiles() {
-    const zi = clamp(Math.round(z), 0, 18);
+    const zi = clamp(Math.round(z), 0, PROV[prov].max);
     if (!cur || cur.zi !== zi || cur.theme !== isDark()) {
       if (prev) dropPrev();
       prev = cur; cur = mkLayer(zi);

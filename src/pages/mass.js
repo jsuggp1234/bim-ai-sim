@@ -1,6 +1,8 @@
 // 2단계: 매스 배치 (택지 선택 → 블록·주동 형식·높이 계획·인동간격 + 일조·조망·주변 영향)
 // 택지는 1단계 후보지 8곳 또는 직접 입력. 주변 맥락은 실제 지도(OpenStreetMap)를 받으면 그것으로, 아니면 자동 생성
 import { DEFAULTS, META, generate, USE_LABEL, TYPOLOGIES, FORMS, RULES } from '../sim/massing.js';
+import { gestureHTML, bindGesture } from '../ui/gesture-ui.js';
+import { mainBuilding } from '../sim/impact.js';
 import { meets, sunAltAz, analyze, unitSamples, contextSamples, projectBoxes } from '../sim/analysis.js';
 import { makePlan } from '../sim/plan.js';
 import { SITE_IDS, CUSTOM_DEFAULT, FABRICS, resolveSite, siteName } from '../sim/sites.js';
@@ -65,6 +67,7 @@ export function mount(root) {
   if (!S.mass) store.set({ mass: params, massFrom: 'default' });
   const ui = { mode: 'real', decl: -23.44, hour: 10, view: 'axon', pick: null, block: null };
   const map = { state: 'fallback', msg: '', ctl: null };
+  let gxDrag = false; // 제스처 슬라이더를 끄는 중에는 패널을 다시 그리지 않는다
   let gen = null, agg = null, viewer = null, worker = null, reqId = 0, alive = true, analysisMs = 0;
   const gp = () => ({ ...params, site });
   const $ = (id) => root.querySelector('#' + id);
@@ -96,6 +99,7 @@ export function mount(root) {
         <div class="src-banner" id="m-src"></div>
         <div class="grp"><div class="sec-h" style="margin-bottom:8px"><span class="label-sm">Scenario</span><button class="chipbtn" id="m-reset" type="button">기본값</button></div><div class="presets" id="m-presets"></div></div>
         <div class="grp"><span class="label-sm">주동 형식</span><div class="typo" id="m-typo" role="group" aria-label="주동 형식"></div><div class="note" id="m-typo-note" style="margin-top:8px"></div></div>
+        <div class="grp gx" id="m-gx"><div class="sec-h" style="margin-bottom:6px"><span class="label-sm">형태 제스처 · Form</span></div><div id="m-gxb"></div></div>
         <div class="grp"><span class="label-sm" style="display:block">용도지역 · 적용 법규</span>
           <div class="seg" id="m-zone" role="group" aria-label="업무지원존 용도지역" style="margin-top:6px"></div>
           <div class="note" id="m-zone-note" style="margin-top:6px"></div>
@@ -165,6 +169,8 @@ export function mount(root) {
       : '준주거지역이면 시행령 제86조 제3항이 법정 기준입니다. 같은 대지 안 동 사이는 2호 가~마목, 대지경계는 1호(높이 ≤ 경계 중심선까지 거리 × 4)를 지켜야 합니다.';
     $('m-side-win').innerHTML = [[0, '측벽 (0.5㎡ 미만 창)'], [1, '채광창 있음']].map(([k, n]) => `<button type="button" data-sidewin="${k}" aria-pressed="${params.sideWin === k}">${n}</button>`).join('');
     $('m-sidewin-note').textContent = params.sideWin ? '측면도 채광창 벽으로 보아 가목(0.5H)을 적용합니다. 동 사이가 넓어져 세대수가 줄어듭니다.' : '측면에는 0.5㎡ 미만 창만 두어 측벽으로 봅니다(마목 4m, 라목 8m).';
+    if (!gxDrag) $('m-gxb').innerHTML = gestureHTML(params);
+    gxDrag = false;
     const ms = params.mix59 + params.mix84 + params.mix114;
     const mn = $('m-mixnote');
     if (mn) mn.textContent = ms === 100 ? '' : `평형 비율 합계가 ${ms}%라서 비례로 환산해 씁니다.`;
@@ -480,6 +486,11 @@ export function mount(root) {
     queue();
   };
   fl.addEventListener('input', onCtl);
+  bindGesture($('m-gx'), {
+    get: () => params,
+    onChange: (patch, slider) => { params = { ...params, ...patch }; gxDrag = !!slider; queue(); },
+    main: () => (gen ? mainBuilding(gen) : null),
+  });
   fl.addEventListener('click', e => {
     const pr = e.target.closest('[data-preset]'), ty = e.target.closest('[data-typo]'), zn = e.target.closest('[data-zone]'), sw = e.target.closest('[data-sidewin]');
     if (pr) { params = { ...params, ...presetsFor(site).find(x => x.key === pr.dataset.preset).p }; queue(); }

@@ -1,4 +1,5 @@
-// 02 입지: 고른 용도로 전국 후보지를 평가한다. 후보지 속성(교통·항만·전력·용수·인력·수요·토지비·지반·재해·이격·규모·정책) × 용도 가중치 → 적합도.
+// 02 입지: 고른 용도로 전국 후보지를 평가한다. 지도 하나에 순위·선택 카드를 두고, 핀에 마우스를 올리면 종합 점수의 항목별 점수가 뜬다.
+// 가중치는 '무엇을 중요하게 볼지' 프리셋 + 비중 막대 하나로 보이고, 항목별 슬라이더는 접어 둔다. 후보지 속성(교통·항만·전력·용수·인력·수요·토지비·지반·재해·이격·규모·정책) × 용도 가중치 → 적합도.
 import { useOf, CRITERIA, CRIT_KEYS, isHousingGen } from '../sim/uses.js';
 import { KR_SITES, REGIONS, REGION_ORDER, GROUND } from '../sim/kr-sites.js';
 import { rankSites, scoreSite, reasonLine, programFor, critValue } from '../sim/siting.js';
@@ -33,18 +34,19 @@ export function mount(root) {
       <ol class="sites kr-list" id="r-list"></ol>
     </aside>
     <div class="atlas-pick" id="pick" aria-live="polite"></div>
-    <div class="atlas-legend" aria-hidden="true"><span><i class="lg-pin"></i>숫자 = 적합도 순위 · 진할수록 높은 점수</span><span><i class="lg-x"></i>회색 = 부지 성격·규모 부적합</span></div>
+    <div class="kr-hov" id="hov" hidden></div>
+    <div class="atlas-legend" aria-hidden="true"><span><i class="lg-pin"></i>숫자 = 적합도 순위 · 핀에 마우스를 올리면 세부 점수</span><span><i class="lg-x"></i>회색 = 부지 성격·규모 부적합</span></div>
   </section>
   <div class="wrap">
-    <section class="sx-sec" id="weights" aria-label="평가 가중치">
-      ${sub('02.1', '평가 가중치', `${u.name} 기본값에서 시작합니다. 0이면 그 항목을 보지 않습니다.`, '<button type="button" class="chipbtn" id="w-reset">기본값</button>')}
-      <div class="kr-w" id="w-list"></div>
+    <section class="sx-sec" id="weights" aria-label="평가 기준">
+      ${sub('02.1', '무엇을 중요하게 볼까', `${u.name} 기본 기준에서 시작합니다. 고르면 지도 순위가 바로 바뀝니다.`, '<button type="button" class="chipbtn" id="w-reset">기본값</button>')}
+      <div class="kr-w2">
+        <div class="kr-pre" id="w-pre" role="group" aria-label="평가 기준 프리셋"></div>
+        <div class="kr-mix" id="w-mix" aria-label="항목별 비중"></div>
+        <details class="kr-adv" id="w-adv"><summary><span>항목별로 직접 조정</span><small>${CRIT_KEYS.length}개 항목 · 0이면 보지 않음</small></summary><div class="kr-w" id="w-list"></div></details>
+      </div>
     </section>
-    <section class="sx-sec" aria-label="상위 후보지 비교">
-      ${sub('02.2', '상위 후보지 비교', '항목 점수(0–100). 색이 진할수록 높고, 굵은 칸은 가중치가 큰 항목입니다. 행을 누르면 그 후보지를 고릅니다.')}
-      <div class="panel"><div class="tw"><table class="kr-mx" id="mx"></table></div></div>
-    </section>
-    <section class="sx-sec" id="dossier" aria-label="선택한 후보지"></section>
+    <section class="sx-sec" id="dossier" aria-label="선택한 후보지" hidden></section>
   </div>`;
 
   // ---------- 계산 ----------
@@ -61,7 +63,7 @@ export function mount(root) {
 
   // ---------- 지도 ----------
   function initMap() {
-    atlas = createAtlas($('map'), { minZoom: 5.6, maxZoom: 14, onSelect: (id) => select(id, true), onHover: (id) => { st.hover = id; } });
+    atlas = createAtlas($('map'), { minZoom: 5.6, maxZoom: 14, onSelect: (id) => select(id, true), onHover: (id) => { st.hover = id; showHover(id); } });
     atlas.setVector(koreaSVG());
     atlas.setLabels(REGION_LABELS.map(([t, lng, lat]) => ({ text: t, lng, lat, cls: 'kr-lab' })));
     atlas.fit(KOREA_BOX, 30, 0);
@@ -103,11 +105,30 @@ export function mount(root) {
       <b class="pk-n">${escH(s.name)}</b><span class="pk-s">${s.region} ${escH(s.city)} · ${fmt(s.area / 1e4, 1)}ha · ${GROUND[s.a.g].short}</span>
       <div class="pk-score"><span class="big">${r.score}</span><span class="note">적합도 / 100<br>${escH(reasonLine(r)) || ''}</span></div>
       <div class="pk-kv"><span>1단계 시뮬레이션</span><b>${fmt(pg.simArea / 1e4, 1)}ha${pg.phase ? ' (일부 구역)' : ''}</b><span>연면적 추정</span><b>${fmt(pg.gfa / 1e4, 1)}만㎡</b>${pg.units ? `<span>세대 추정</span><b>${fmt(pg.units)}세대</b>` : ''}<span>공사비 추정</span><b>${won(pg.cost)}</b></div>
-      <div class="pk-act"><button type="button" class="btn acc" id="go" ${r.eligible ? '' : 'disabled'}>이 택지로 매스 배치 <span class="ar">→</span></button><a class="chipbtn" href="#dossier">상세</a></div>`;
+      <div class="pk-act"><button type="button" class="btn acc" id="go" ${r.eligible ? '' : 'disabled'}>이 택지로 매스 배치 <span class="ar">→</span></button><button type="button" class="chipbtn" id="dos-t" aria-expanded="${!$('dossier').hidden}">${$('dossier').hidden ? '상세 보기' : '상세 닫기'}</button></div>`;
   }
 
-  // ---------- 가중치 ----------
-  function renderWeights() {
+  // ---------- 가중치: 프리셋 · 비중 막대 · (접힌) 항목별 슬라이더 ----------
+  // 프리셋은 용도 기본값에서 몇 항목을 두 배로 키운다 (그 용도에서 보지 않는 항목은 그대로 0)
+  const PRESETS = [
+    { id: 'base', n: '기본', d: `${u.name} 기본 기준` },
+    { id: 'access', n: '접근성', d: '교통·도로·공항·항만', k: ['transit', 'road', 'air', 'port'] },
+    { id: 'cost', n: '비용·규모', d: '토지비·부지 규모·지반', k: ['landc', 'scale', 'ground'] },
+    { id: 'infra', n: '인프라·인력', d: '전력·용수·인재', k: ['power', 'water', 'labor'] },
+    { id: 'safe', n: '안전·민원', d: '재해·주거 이격·지반', k: ['safety', 'buffer', 'ground'] },
+    { id: 'market', n: '수요·정책', d: '배후·방문 수요·인허가', k: ['demand', 'tour', 'policy'] },
+  ].filter(p => !p.k || p.k.some(k => (u.w[k] || 0) > 0));
+  const presetW = (p) => { const w = { ...u.w }; (p.k || []).forEach(k => { if (w[k]) w[k] = Math.min(40, Math.round(w[k] * 2.2)); }); return w; };
+  const sameW = (a, b) => CRIT_KEYS.every(k => (a[k] || 0) === (b[k] || 0));
+  function renderWeights() { renderMix(); renderSliders(); }
+  function renderMix() {
+    const tot = Object.values(st.w).reduce((a, b) => a + b, 0) || 1;
+    $('w-pre').innerHTML = PRESETS.map(p => `<button type="button" data-pre="${p.id}" aria-pressed="${sameW(st.w, presetW(p))}"><b>${p.n}</b><small>${p.d}</small></button>`).join('');
+    const act = CRIT_KEYS.filter(k => st.w[k] > 0).sort((a, b) => st.w[b] - st.w[a]);
+    $('w-mix').innerHTML = `<div class="kr-bar">${act.map((k, i) => { const f = st.w[k] / tot; return `<i style="--f:${f.toFixed(4)};--o:${(1 - i / Math.max(1, act.length) * 0.82).toFixed(2)}" data-k="${k}" title="${CRITERIA[k].name} ${Math.round(f * 100)}%">${f > 0.075 ? `<span>${CRITERIA[k].name}</span><em>${Math.round(f * 100)}%</em>` : ''}</i>`; }).join('')}</div>
+      <div class="kr-bar-l">${act.map(k => `<span>${CRITERIA[k].name} <b>${Math.round(st.w[k] / tot * 100)}%</b></span>`).join('')}</div>`;
+  }
+  function renderSliders() {
     const tot = Object.values(st.w).reduce((a, b) => a + b, 0) || 1;
     $('w-list').innerHTML = CRIT_KEYS.map(k => {
       const v = st.w[k] || 0, d = u.w[k] || 0;
@@ -116,16 +137,23 @@ export function mount(root) {
     }).join('');
   }
 
-  // ---------- 비교 행렬 ----------
-  function renderMatrix() {
-    const top = view().slice(0, 14);
-    if (st.sel && !top.find(r => r.site.id === st.sel)) { const r = all.find(x => x.site.id === st.sel); if (r) top.push(r); }
-    const keys = CRIT_KEYS.filter(k => st.w[k] > 0).sort((a, b) => st.w[b] - st.w[a]);
-    const wmax = Math.max(...keys.map(k => st.w[k]));
-    $('mx').innerHTML = `<thead><tr><th>순위</th><th class="l">후보지</th>${keys.map(k => `<th class="${st.w[k] >= wmax * 0.6 ? 'hw' : ''}" title="${CRITERIA[k].note}">${CRITERIA[k].name}<small>${st.w[k]}</small></th>`).join('')}<th>적합</th><th>종합</th></tr></thead>
-      <tbody>${top.map(r => `<tr data-id="${r.site.id}" class="${r.site.id === st.sel ? 'on' : ''}"><td class="mono">${r.eligible ? String(r.rank).padStart(2, '0') : '—'}</td><td class="l"><b>${escH(r.site.name)}</b><small>${r.site.region}</small></td>
-        ${keys.map(k => { const v = r.parts[k] ? r.parts[k].v : critValue(r.site, use, k); return `<td class="hc" style="--h:${(v / 100).toFixed(2)}">${v}</td>`; }).join('')}
-        <td class="mono">${Math.round(r.compat * 100)}%</td><td class="tot">${r.score}</td></tr>`).join('')}</tbody>`;
+  // ---------- 핀 위 세부 점수 (종합 점수 = 항목 점수 × 비중) ----------
+  function hoverHTML(r) {
+    const s = r.site, tot = Object.values(st.w).reduce((a, b) => a + b, 0) || 1;
+    const rows = CRIT_KEYS.filter(k => st.w[k] > 0).map(k => ({ k, v: r.parts[k] ? r.parts[k].v : critValue(s, use, k), w: st.w[k] / tot })).sort((a, b) => b.w * b.v - a.w * a.v);
+    return `<div class="kh-h"><span class="kh-rk">${r.eligible ? `#${String(r.rank).padStart(2, '0')}` : '—'}</span><span class="kh-n"><b>${escH(s.name)}</b><small>${s.region} ${escH(s.city)} · ${fmt(s.area / 1e4, 1)}ha</small></span><span class="kh-sc">${r.eligible ? r.score : '부적합'}</span></div>
+      <div class="kh-rows">${rows.slice(0, 8).map(x => `<div class="${x.v >= 75 ? 'hi' : x.v < 50 ? 'lo' : ''}"><span class="k">${CRITERIA[x.k].name}</span><span class="b"><i style="width:${x.v}%"></i></span><span class="v">${x.v}</span><span class="w">×${Math.round(x.w * 100)}%</span></div>`).join('')}</div>
+      <div class="kh-f">${rows.length > 8 ? `외 ${rows.length - 8}개 항목 · ` : ''}부지 성격 적합 ${Math.round(r.compat * 100)}%${r.focus ? ' · 정책 지정 +4' : ''}${r.eligible ? '' : ' · 성격·규모가 맞지 않아 제외'}</div>`;
+  }
+  function showHover(id) {
+    const box = $('hov'); if (!id) { box.hidden = true; return; }
+    const r = all.find(x => x.site.id === id), pin = $('map').querySelector(`.at-pin[data-id="${CSS.escape(id)}"]`); if (!r || !pin) { box.hidden = true; return; }
+    box.innerHTML = hoverHTML(r); box.hidden = false;
+    const A = $('atlas').getBoundingClientRect(), P = pin.getBoundingClientRect(), bw = box.offsetWidth, bh = box.offsetHeight;
+    let x = P.left - A.left + 18, y = P.top - A.top - bh / 2;
+    if (x + bw > A.width - 8) x = P.left - A.left - bw - 18;
+    y = Math.max(8, Math.min(A.height - bh - 8, y));
+    box.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
 
   // ---------- 상세 ----------
@@ -172,7 +200,7 @@ export function mount(root) {
 
   function select(id, fromMap) {
     st.sel = id;
-    renderPick(); renderMap(); renderMatrix(); renderDossier();
+    renderPick(); renderMap(); renderDossier();
     $('r-list').querySelectorAll('[data-id]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.id === id)));
     if (!fromMap && atlas) { const s = KR_SITES.find(x => x.id === id); atlas.lookAt(s.lng, s.lat, Math.max(atlas.zoom, 8.2), 700); }
   }
@@ -181,15 +209,17 @@ export function mount(root) {
     store.set({ site: { id: st.sel }, mass: isHousingGen(use) ? null : s.mass, siteW: { ...(s.siteW || {}), [use]: st.w } });
     location.hash = '#/mass';
   }
-  function refresh() { compute(); renderRank(); renderMap(); renderPick(); renderMatrix(); renderDossier(); }
+  function refresh() { compute(); renderRank(); renderMap(); renderPick(); renderDossier(); }
 
   root.addEventListener('click', (e) => {
     if (e.target.closest('#go, #go2')) { launch(); return; }
     if (e.target.id === 'w-reset') { st.w = { ...u.w }; renderWeights(); refresh(); return; }
-    const b = e.target.closest('#r-list [data-id], #mx tr[data-id]'); if (b) select(b.dataset.id);
+    const pr = e.target.closest('[data-pre]'); if (pr) { const P = PRESETS.find(x => x.id === pr.dataset.pre); st.w = presetW(P); renderWeights(); refresh(); return; }
+    if (e.target.closest('#dos-t')) { const d = $('dossier'); d.hidden = !d.hidden; renderPick(); if (!d.hidden) d.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+    const b = e.target.closest('#r-list [data-id]'); if (b) select(b.dataset.id);
   });
   $('r-reg').addEventListener('change', (e) => {
-    st.region = e.target.value; renderRank(); renderMatrix();
+    st.region = e.target.value; renderRank();
     if (atlas) { if (st.region === 'all') atlas.fit(KOREA_BOX, 30); else { const list = KR_SITES.filter(s => s.reg === st.region); const xs = list.map(s => lngLatToWorld(s.lng, s.lat)); const pad = 0.05; atlas.fit([Math.min(...xs.map(p => p[0])) - pad, Math.min(...xs.map(p => p[1])) - pad, Math.max(...xs.map(p => p[0])) + pad, Math.max(...xs.map(p => p[1])) + pad], 60); } }
   });
   let wq = 0;
@@ -199,17 +229,13 @@ export function mount(root) {
     const row = e.target.closest('.kr-wi'); row.classList.toggle('z', !st.w[k]); row.classList.toggle('changed', st.w[k] !== (u.w[k] || 0));
     const tot = Object.values(st.w).reduce((a, b) => a + b, 0) || 1;
     root.querySelectorAll('.kr-wi').forEach(el => { const kk = el.querySelector('[data-w]').dataset.w; el.querySelector('.v').innerHTML = `${st.w[kk] || 0}<small>${Math.round((st.w[kk] || 0) / tot * 100)}%</small>`; });
-    if (!wq) wq = requestAnimationFrame(() => { wq = 0; if (alive) refresh(); });
+    if (!wq) wq = requestAnimationFrame(() => { wq = 0; if (!alive) return; refresh(); renderMix(); });
   });
-  $('mx').addEventListener('pointermove', (e) => {
-    const td = e.target.closest('td.hc'); if (!td) { tip(null); return; }
-    const tr = td.closest('tr'), i = [...tr.children].indexOf(td) - 2, keys = CRIT_KEYS.filter(k => st.w[k] > 0).sort((a, b) => st.w[b] - st.w[a]);
-    const k = keys[i]; if (!k) return;
-    tip(`<b>${CRITERIA[k].name}</b> ${td.textContent}점<br><span class="muted">${CRITERIA[k].note}</span>`, e.clientX, e.clientY);
-  });
-  $('mx').addEventListener('pointerleave', () => tip(null));
+  // 순위 목록에 마우스를 올려도 지도 위 세부 점수
+  $('r-list').addEventListener('pointerover', (e) => { const b = e.target.closest('[data-id]'); if (b) showHover(b.dataset.id); });
+  $('r-list').addEventListener('pointerleave', () => showHover(null));
 
-  compute(); renderWeights(); renderRank(); initMap(); renderMap(); renderPick(); renderMatrix(); renderDossier();
+  compute(); renderWeights(); renderRank(); initMap(); renderMap(); renderPick(); renderDossier();
   const offTheme = onThemeChange(() => { if (atlas) atlas.theme(); });
   return () => { alive = false; offTheme(); if (atlas) atlas.dispose(); tip(null); };
 }

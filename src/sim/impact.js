@@ -22,9 +22,25 @@ export function mainBuilding(gen) {
   const pool = cand.length ? cand : bl;
   return pool.reduce((best, b) => { const s = Math.sqrt(w(b)) * (b.height || 10); return !best || s > best.s ? { b, s } : best; }, null).b;
 }
+// 제스처(층마다 판 크기·위치가 바뀌는 형태)의 외곽: 모든 층 판을 담는 사각형과, 층마다 그 안의 비율 사각형
+// 시뮬레이션 축: x = 짧은 변, z = 긴 변. 회전(트위스트)은 시뮬레이션에서 회전 없는 같은 크기 판으로 단순화한다
+function envelopeOf(main) {
+  const r = main.rect, W = r.u1 - r.u0, D = r.v1 - r.v0;
+  const fl = main.floors || [];
+  if (!fl.some(f => f.g || (f.s && f.s !== 1))) return null;
+  const rect = (f) => { const s = f.s || 1, g = f.g || { sx: 1, sz: 1, ox: 0, oz: 0 }; const w = W * (f.roof ? 1 : s * g.sx), d = D * (f.roof ? 1 : s * g.sz), cu = g.ox * W, cv = g.oz * D; return { u0: cu - w / 2, u1: cu + w / 2, v0: cv - d / 2, v1: cv + d / 2 }; };
+  const R = fl.map(f => (f.roof ? null : rect(f)));
+  const top = R.filter(Boolean).slice(-1)[0] || { u0: -W / 2, u1: W / 2, v0: -D / 2, v1: D / 2 };
+  const RR = R.map(x => x || top);
+  const eu0 = Math.min(...RR.map(x => x.u0)), eu1 = Math.max(...RR.map(x => x.u1)), ev0 = Math.min(...RR.map(x => x.v0)), ev1 = Math.max(...RR.map(x => x.v1));
+  const du = eu1 - eu0, dv = ev1 - ev0, xIsU = du <= dv;
+  const fr = RR.map(x => (xIsU ? { x0: (x.u0 - eu0) / du, x1: (x.u1 - eu0) / du, z0: (x.v0 - ev0) / dv, z1: (x.v1 - ev0) / dv } : { x0: (x.v0 - ev0) / dv, x1: (x.v1 - ev0) / dv, z0: (x.u0 - eu0) / du, z1: (x.u1 - eu0) / du }));
+  const cx = xIsU ? -eu0 / du : -ev0 / dv, baseX = (xIsU ? W : D) / (xIsU ? du : dv);
+  return { short: Math.min(du, dv), long: Math.max(du, dv), fr, cx, baseX };
+}
 export function sectionGeom(gen, d) {
   const main = mainBuilding(gen);
-  const r = main.rect, bwRaw = Math.min(r.u1 - r.u0, r.v1 - r.v0);
+  const r = main.rect, env = envelopeOf(main), bwRaw = env ? env.short : Math.min(r.u1 - r.u0, r.v1 - r.v0);
   const bw = clamp(bwRaw, 12, 90);
   const bs = gen.bldgs.filter(b => b.kind === 'basement' && (b.block === main.block || !main.block));
   const bsAll = bs.length ? bs : gen.bldgs.filter(b => b.kind === 'basement');
@@ -35,13 +51,14 @@ export function sectionGeom(gen, d) {
   const allB = gen.bldgs.filter(b => b.kind === 'basement'), tot = allB.reduce((a, b) => a + area(b), 0);
   const share = tot > 0 && bs.length ? clamp(bs.reduce((a, b) => a + area(b), 0) / tot, 0.01, 1) : 1;
   const depth = Math.max(0, d.depth || 0);
-  const floors = (main.floors || []).map(f => ({ e0: f.y0, e1: f.y1, use: f.use }));
+  const floors = (main.floors || []).map((f, i) => ({ e0: f.y0, e1: f.y1, use: f.use, ...(env ? { fr: env.fr[i] } : {}) }));
   const H = main.height || (floors.length ? floors[floors.length - 1].e1 : 20);
   const podium = gen.bldgs.find(b => b.kind === 'podium' && b.block === main.block);
   const bx0 = clamp((pw - bw) * 0.58, 4, pw - bw - 4);
   return {
     main, share, bw, pw, nB: depth > 0.5 ? Math.max(1, nB) : 0, depth, floors, H, bx0, bx1: bx0 + bw,
-    core: { x0: bx0 + bw * 0.36, x1: bx0 + bw * 0.64 },
+    core: env ? { x0: bx0 + bw * clamp(env.cx - 0.14 * env.baseX, 0.04, 0.8), x1: bx0 + bw * clamp(env.cx + 0.14 * env.baseX, 0.2, 0.96) } : { x0: bx0 + bw * 0.36, x1: bx0 + bw * 0.64 },
+    env: env ? { long: env.long } : null, gesture: main.gesture || null, gestureName: main.gestureName || null,
     podium: podium ? { h: Math.min(podium.height || 12, H * 0.5) } : null,
     stack: gen.bldgs.find(b => b.kind === 'stack') ? Math.min(140, Math.max(...gen.bldgs.filter(b => b.kind === 'stack').map(b => b.height || 40))) : 0,
     tank: gen.bldgs.some(b => b.kind === 'tank'),

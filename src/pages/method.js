@@ -82,6 +82,7 @@ export function mount(root) {
     <header class="sws-top">
       <a class="sws-back" href="#/mass" title="03 매스로" aria-label="03 매스로">←</a>
       <div class="sws-t"><span class="sws-code">04 · METHOD ${dot('BUILD SIMULATOR', 'acc')}</span><h1>어떻게 지을까<span class="pd">.</span></h1><span class="sws-dim">${escH(R.site.name)} · ${R.u.name} · ${N}개 공종 · ${nOpt}개 공법</span></div>
+      <nav class="sws-strip" id="strip" aria-label="공종 진행 (누르면 그 공종으로)"></nav>
       <dl class="sws-k">
         <div><dt>확정</dt><dd id="k-done">—</dd><span id="k-done2"></span></div>
         <div><dt>공기</dt><dd id="k-mo">—</dd><span id="k-mo2"></span></div>
@@ -123,7 +124,7 @@ export function mount(root) {
     </aside>
   </section>`;
   const ws = $('wz-sec');
-  try { if (localStorage.getItem('bim.simNav') === '0') ws.classList.add('no-nav'); if (localStorage.getItem('bim.simSide') === '0') ws.classList.add('no-side'); } catch { /* 저장소 없음 */ }
+  try { if (localStorage.getItem('bim.simNav') !== '1') ws.classList.add('no-nav'); if (localStorage.getItem('bim.simSide') === '0') ws.classList.add('no-side'); } catch { /* 저장소 없음 */ }
 
   // ---------- 조건 · 우선순위 ----------
   function renderCond() {
@@ -176,6 +177,10 @@ export function mount(root) {
       return `<li class="rg-li${g === open ? ' open' : ''}">${head}${chips}</li>`;
     }).join('');
     $('rail').innerHTML = `<ol class="rg-tabs" aria-label="공종 묶음">${html}</ol>`;
+    // 머리글 진행 막대: 공종 ${N}개를 묶음별로 한 칸씩 (확정 · 지금 고를 차례 · 잠김), 누르면 그 공종으로
+    const cg = grpOf(ui.cur);
+    $('strip').innerHTML = `<div class="st-h"><b>${Math.min(done, N)} / ${N}</b><span>공종 확정</span><em>${escH(cg.name)} · ${Lof(ui.cur).wp.code} ${escH(Lof(ui.cur).wp.name)}</em></div>
+      <div class="st-segs">${GR.map(g => `<span class="st-g${g === cg ? ' on' : ''}" title="${escH(g.name)}">${R.M.list.slice(g.a, g.b).map((L, j) => { const i = g.a + j, st2 = i < done ? 'done' : i === done ? 'next' : 'lock'; return `<button type="button" class="st-s ${st2}${i === ui.cur ? ' cur' : ''}" data-wp="${i}" title="${L.wp.code} ${escH(L.wp.name)} · ${st2 === 'done' ? escH(chosenName(L)) : st2 === 'next' ? '지금 고를 차례' : '앞 공종을 먼저 확정'}" aria-label="${L.wp.code} ${escH(L.wp.name)}"></button>`; }).join('')}</span>`).join('')}</div>`;
     const on = $('rail').querySelector('.rl.on');
     if (on) { const box = $('rail'), r1 = on.getBoundingClientRect(), r0 = box.getBoundingClientRect(); if (r1.top < r0.top || r1.bottom > r0.bottom) box.scrollTop += r1.top - r0.top - box.clientHeight / 3; if (r1.left < r0.left || r1.right > r0.right) box.scrollLeft += r1.left - r0.left - (box.clientWidth - r1.width) / 2; }
   }
@@ -194,7 +199,9 @@ export function mount(root) {
     const last = ui.cur === N - 1;
     const goLabel = st === 'next' ? (last ? `${wp.code} 확정 · 모든 공종 완료` : `${wp.code} 확정하고 다음 공종 <span class="ar">→</span>`) : (done >= N ? (last ? '05 4D·간섭으로 <span class="ar">→</span>' : '다음 공종 보기 <span class="ar">→</span>') : (ui.cur + 1 < done ? '다음 공종 보기 <span class="ar">→</span>' : `고를 차례인 ${Lof(done).wp.code}로 <span class="ar">→</span>`));
     $('side').innerHTML = `<div class="ws-h"><span class="sx-code-s">${wp.code} · ${wp.en}</span>${dot(st === 'done' ? 'CONFIRMED' : 'SELECTING', st === 'done' ? 'mute' : 'acc')}</div>
-      <h3 class="in-t">${wp.name}</h3><p class="in-d">${wp.desc}</p>
+      <h3 class="in-t">${wp.name}</h3>
+      <div class="ws-do"><span class="n">${st === 'done' ? '✓' : '1'}</span><span>${st === 'done' ? '확정한 공종 · 다른 공법을 눌러 비교해 볼 수 있어요' : multi ? '쓸 기술을 고르세요 (여러 개 가능)' : `공법 ${ev.filter(e => e.ok).length}개 중 하나를 고르세요 · 누르면 바로 시공 장면이 바뀝니다`}</span></div>
+      <details class="in-dd"><summary>이 공종은?</summary><p class="in-d">${wp.desc}</p></details>
       <div class="wz-opts" role="${multi ? 'group' : 'radiogroup'}" aria-label="${wp.name} 공법">${ev.map(e => {
         const o = e.o, on = isOn(o.id), rec = recSet.includes(o.id), base = !multi && baseOpt(L) === o.id;
         return `<button type="button" class="wo${on ? ' on' : ''}${e.ok ? '' : ' no'}" data-opt="${o.id}" role="${multi ? 'checkbox' : 'radio'}" aria-checked="${on}" ${e.ok ? '' : 'aria-disabled="true"'}>
@@ -204,8 +211,7 @@ export function mount(root) {
       }).join('')}</div>
       <div class="wz-go">
         <button type="button" class="btn ${st === 'next' ? 'acc' : 'ghost'} big" id="wz-go">${goLabel}</button>
-        ${st === 'next' && bulkN() > 1 ? `<button type="button" class="btn ghost" id="wz-grp">${grpOf(ui.cur).name} 묶음 남은 ${bulkN()}개 AI 추천대로 확정</button>` : ''}
-        ${st === 'next' && N - done > bulkN() ? `<button type="button" class="chipbtn" id="wz-all">남은 ${N - done}개 공종 모두 AI 추천대로 확정</button>` : ''}
+        ${st === 'next' && (bulkN() > 1 || N - done > bulkN()) ? `<div class="wz-quick"><span>빠르게</span>${bulkN() > 1 ? `<button type="button" class="chipbtn" id="wz-grp">이 묶음 ${bulkN()}개 AI 추천대로</button>` : ''}${N - done > bulkN() ? `<button type="button" class="chipbtn" id="wz-all">남은 ${N - done}개 모두 AI 추천대로</button>` : ''}</div>` : ''}
         <span class="note">${st === 'next' ? (last ? '확정하면 05 4D·간섭 단계가 열립니다.' : `확정하면 ${Lof(ui.cur + 1).wp.code} ${Lof(ui.cur + 1).wp.name}${josaIGa(Lof(ui.cur + 1).wp.name)} 열립니다.`) : '이미 확정한 공종입니다. 바꾸면 뒤 공종 판정이 다시 계산됩니다.'}</span>
       </div>`;
     fillDeltas();

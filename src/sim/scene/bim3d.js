@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { facadeMaterial, PAT, surf } from './facade.js';
 import { Buf, strip, frames, quad, dashMaterial, treeGeometry, repaintTree } from './context3d.js';
 import { FLOOR_USES } from '../uses.js';
+import { floorParts, formKey } from '../gesture.js';
 
 const unitBox = () => { const g = new THREE.BoxGeometry(1, 1, 1); g.translate(0, 0.5, 0); return g; };
 // 옆면만 있는 상자 (갱폼·울타리 같은 얇은 껍질)
@@ -105,9 +106,12 @@ export function createBim(site, P0, { lite = false } = {}) {
   let ghost = null, edgeLines = null, craneLines = null;
   const lineGeo = (pos) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); return g; };
   function floorBoxes(b, f) {
-    const s = f.s || 1;
-    if (f.roof) { const e = Math.sqrt(Math.max(1, f.area)); return [{ cu: b.core.u, cv: b.core.v, w: e, d: e, a: b.parts[0].a || 0, roof: true, faces: null }]; }
-    return b.parts.map(q2 => ({ cu: q2.cu, cv: q2.cv, w: q2.w * s, d: q2.d * s, a: q2.a || 0, faces: q2.faces }));
+    if (f.roof) {
+      const e = Math.sqrt(Math.max(1, f.area)), g = f.g, R = b.rect;
+      const du = g && R ? g.ox * (R.u1 - R.u0) : 0, dv = g && R ? g.oz * (R.v1 - R.v0) : 0;
+      return [{ cu: b.core.u + du, cv: b.core.v + dv, w: e, d: e, a: (b.parts[0].a || 0) + (g ? g.rot : 0), roof: true, faces: null }];
+    }
+    return floorParts(b, f);
   }
   const faceMask = (b, x) => {
     if (!x.faces) return 15;
@@ -337,7 +341,7 @@ export function createBim(site, P0, { lite = false } = {}) {
           }
           // 파라펫: 그 부분의 맨 위층
           const nx2 = fl[fi + 1];
-          if (showEnv && (!nx2 || nx2.roof || (nx2.s || 1) !== (f.s || 1))) {
+          if (showEnv && (!nx2 || nx2.roof || formKey(nx2) !== formKey(f))) {
             const t = 0.25, hh = 1.2, wc = P[KIND_WALL[b.kind] || 'wCom'];
             [[0, -x.d / 2 + t / 2, x.w, t], [0, x.d / 2 - t / 2, x.w, t], [-x.w / 2 + t / 2, 0, t, x.d], [x.w / 2 - t / 2, 0, t, x.d]].forEach(([lx, lz, ww, dd]) => { const [u, v] = loc(x.cu, x.cv, a, lx, lz); S(u, f.y1, v, ww, hh, dd, a, wc); });
             // 옥상 설비 (준공 후)
@@ -479,7 +483,7 @@ export function createBim(site, P0, { lite = false } = {}) {
     // 외피 윤곽선 (같은 크기 층이 이어진 구간마다 상자 하나)
     const pos = [];
     const runs = new Map();
-    env.forEach(e => { if (e.x.roof) return; const k = e.bi * 100 + e.pi; const r = runs.get(k); if (r && r.fi === e.fi - 1 && r.s === (e.f.s || 1)) { r.y1 = e.f.y1; r.fi = e.fi; } else { if (r) boxEdges(pos, r.x.cu, r.x.cv, r.x.w, r.x.d, r.x.a, r.y0, r.y1, true); runs.set(k, { x: e.x, y0: e.f.y0, y1: e.f.y1, fi: e.fi, s: e.f.s || 1 }); } });
+    env.forEach(e => { if (e.x.roof) return; const k = e.bi * 100 + e.pi; const r = runs.get(k); if (r && r.fi === e.fi - 1 && r.s === formKey(e.f)) { r.y1 = e.f.y1; r.fi = e.fi; } else { if (r) boxEdges(pos, r.x.cu, r.x.cv, r.x.w, r.x.d, r.x.a, r.y0, r.y1, true); runs.set(k, { x: e.x, y0: e.f.y0, y1: e.f.y1, fi: e.fi, s: formKey(e.f) }); } });
     runs.forEach(r => boxEdges(pos, r.x.cu, r.x.cv, r.x.w, r.x.d, r.x.a, r.y0, r.y1, true));
     if (edgeLines) { root.remove(edgeLines); edgeLines.geometry.dispose(); }
     edgeLines = new THREE.LineSegments(lineGeo(pos), M.edge); root.add(edgeLines);

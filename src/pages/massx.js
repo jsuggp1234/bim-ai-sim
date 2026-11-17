@@ -6,6 +6,8 @@ import { createViewer } from '../sim/viewer.js';
 import { store } from '../store.js';
 import { pipeline, fmt, won, onThemeChange, tip } from '../pipeline.js';
 import { head, sub, dot, escH } from '../ui/sys.js';
+import { gestureHTML, bindGesture } from '../ui/gesture-ui.js';
+import { mainBuilding } from '../sim/impact.js';
 
 export const title = '03 매스 배치';
 const man = (v) => fmt(v / 1e4, 1) + '만㎡';
@@ -19,6 +21,7 @@ export function mount(root) {
   let R = pipeline(), viewer = null, alive = true, ctl = null;
   const site = R.site;
   const $ = (id) => root.querySelector('#' + id);
+  const GEST = ['tower', 'hospital', 'campus'].includes(u.gen);
 
   root.innerHTML = head({
     n: 3, key: 'MASS', title: '어떻게 배치할까', status: `${u.code} · ${u.en}`,
@@ -33,7 +36,7 @@ export function mount(root) {
       <div class="seg" id="x-views" role="group" aria-label="시점">${VIEWS.map(([k, n]) => `<button type="button" data-view="${k}" aria-pressed="${k === 'axon'}">${n}</button>`).join('')}</div></div>
     <aside class="float f-l" id="x-fl" aria-label="배치 변수">
       <div class="f-head"><span class="label-sm">Parameters · 배치 변수</span><button type="button" data-fold="x-fl" aria-expanded="true" aria-label="변수 패널 접기">−</button></div>
-      <div class="f-body m-ctl"><div class="grp"><div class="sec-h" style="margin-bottom:8px"><span class="label-sm">${u.code} · ${u.name}</span><button class="chipbtn" id="x-reset" type="button">기본값</button></div><div id="x-ctl"></div></div>
+      <div class="f-body m-ctl">${GEST ? `<div class="grp gx" id="x-gx"><div class="sec-h" style="margin-bottom:6px"><span class="label-sm">형태 제스처 · Form</span></div><div id="x-gxb"></div></div>` : ''}<div class="grp"><div class="sec-h" style="margin-bottom:8px"><span class="label-sm">${u.code} · ${u.name}</span><button class="chipbtn" id="x-reset" type="button">기본값</button></div><div id="x-ctl"></div></div>
         <div class="grp"><span class="label-sm">맥락 지도</span><div class="map-state" id="x-map" role="status"></div></div></div>
     </aside>
     <aside class="float f-r side" id="x-fr" aria-label="배치 결과">
@@ -58,7 +61,8 @@ export function mount(root) {
       <span class="inbox"><input type="number" id="xn-${k}" data-k="${k}" value="${v}" min="${m.min}" max="${m.max}" step="${m.step}" aria-label="${m.label} 값"><span class="unit">${m.unit}</span></span>
       <input type="range" id="xc-${k}" data-k="${k}" value="${v}" min="${m.min}" max="${m.max}" step="${m.step}">${m.note ? `<span class="hint">${m.note}</span>` : ''}</div>`;
   }
-  function renderCtl() { $('x-ctl').innerHTML = XKEYS(use).map(ctlHTML).join(''); }
+  function renderCtl() { $('x-ctl').innerHTML = XKEYS(use).map(ctlHTML).join(''); renderGx(); }
+  function renderGx() { if (GEST) $('x-gxb').innerHTML = gestureHTML(params); }
   function syncCtl() {
     root.querySelectorAll('#x-ctl [data-k]').forEach(el => { const k = el.dataset.k; if (document.activeElement !== el) el.value = params[k]; el.closest('.ctl').classList.toggle('changed', Math.abs(params[k] - XDEF[use][k]) > 1e-9); });
   }
@@ -98,7 +102,7 @@ export function mount(root) {
     const top = list.slice(0, 80);
     $('x-table').innerHTML = `<thead><tr><th class="l">ID</th><th class="l">종류</th><th>블록</th><th>층·단</th><th>높이</th><th>바닥 면적</th><th>연면적</th><th class="l">주 용도</th></tr></thead>
       <tbody>${top.map(({ b, bi }) => { const main = b.floors.filter(f => f.lv > 0).reduce((m, f) => (m[f.use] = (m[f.use] || 0) + f.area, m), {}); const mu = Object.entries(main).sort((a, c) => c[1] - a[1])[0];
-        return `<tr data-bi="${bi}"><td class="l mono">${b.id}</td><td class="l">${escH(b.formName || KIND_NAME[b.kind] || b.kind)}</td><td class="mono">${b.block}</td><td>${b.storeys}${b.shape === 'cyl' ? '단' : '층'}</td><td>${fmt(b.height, 1)}m</td><td>${fmt(b.foot)}㎡</td><td>${fmt(b.gfa)}㎡</td><td class="l">${mu ? (floorUseName(mu[0]) || mu[0]) : ''}</td></tr>`; }).join('')}</tbody>
+        return `<tr data-bi="${bi}"><td class="l mono">${b.id}</td><td class="l">${escH(b.formName || KIND_NAME[b.kind] || b.kind)}${b.gestureName ? ` <span class="gx-chip">${escH(b.gestureName)}</span>` : ''}</td><td class="mono">${b.block}</td><td>${b.storeys}${b.shape === 'cyl' ? '단' : '층'}</td><td>${fmt(b.height, 1)}m</td><td>${fmt(b.foot)}㎡</td><td>${fmt(b.gfa)}㎡</td><td class="l">${mu ? (floorUseName(mu[0]) || mu[0]) : ''}</td></tr>`; }).join('')}</tbody>
       ${list.length > top.length ? `<tfoot><tr><td colspan="8" class="l note">외 ${list.length - top.length}개 (탱크·탑류 등)</td></tr></tfoot>` : ''}`;
   }
   function renderUses() {
@@ -107,7 +111,7 @@ export function mount(root) {
       <div class="mixleg x-ul">${L.map(([k, v]) => `<div><span><i style="background:var(${FLOOR_USES[k].tok})"></i>${FLOOR_USES[k].name}</span><span class="num">${fmt(v)}㎡ · ${fmt(v / tot * 100, 1)}%</span></div>`).join('')}</div>`;
   }
   const RULES = {
-    tower: ['기준층 면적과 최고 층수로 타워 수를 정하고, 저층부는 포디움으로 가로를 채웁니다.', '코어는 기준층 중앙, 피난안전층은 30개 층마다 둡니다.', '지하층은 주차·기계실, 굴착 깊이가 흙막이·차수 공법을 결정합니다.'],
+    tower: ['기준층 면적과 최고 층수로 타워 수를 정하고, 저층부는 포디움으로 가로를 채웁니다.', '형태 제스처(셋백·테이퍼·캔틸레버·트위스트 등)는 포디움 위 기준층부터 층마다 판의 크기·위치·회전을 바꿉니다. 평균 바닥면적은 기준층과 같게 맞춰 연면적·층수가 유지되고, 코어는 늘 판 안에 곧게 섭니다.', '코어는 기준층 중앙, 피난안전층은 30개 층마다 둡니다.', '지하층은 주차·기계실, 굴착 깊이가 흙막이·차수 공법을 결정합니다.'],
     mall: ['대형 판매동 + 중앙 아트리움 + 주차 램프.', '장스팬(12m 안팎) 철골·PC, 층고 6m.'],
     museum: ['전시동·수장고·로비를 나누고, 수장고는 항온항습을 위해 지하·북측에 둡니다.'],
     arena: ['타원형 볼(관람석 단)과 대공간 지붕 트러스, 주변 광장.'],
@@ -126,7 +130,7 @@ export function mount(root) {
     const b = R.gen.bldgs[ui.pick.bi], f = b.floors[ui.pick.fi];
     card.hidden = false;
     card.innerHTML = `<div class="pk-h"><span class="sx-code-s">${b.id}</span><button type="button" class="chipbtn" id="x-pickx" aria-label="닫기">×</button></div>
-      <b>${escH(b.formName || KIND_NAME[b.kind])}</b><span class="note">${b.storeys}${b.shape === 'cyl' ? '단' : '층'} · ${fmt(b.height, 1)}m · 연면적 ${fmt(b.gfa)}㎡</span>
+      <b>${escH(b.formName || KIND_NAME[b.kind])}${b.gestureName ? ` · ${escH(b.gestureName)}` : ''}</b><span class="note">${b.storeys}${b.shape === 'cyl' ? '단' : '층'} · ${fmt(b.height, 1)}m · 연면적 ${fmt(b.gfa)}㎡</span>
       ${f ? `<span class="note">${f.lv > 0 ? f.lv + (b.shape === 'cyl' ? '단' : '층') : 'B' + -f.lv}: ${floorUseName(f.use) || f.use} · ${fmt(f.area)}㎡ · 층고 ${fmt(f.h, 1)}m</span>` : ''}`;
   }
 
@@ -162,6 +166,11 @@ export function mount(root) {
   $('x-table').addEventListener('pointerover', (e) => { const tr = e.target.closest('tr[data-bi]'); if (tr && viewer) viewer.select(+tr.dataset.bi); });
   $('x-table').addEventListener('click', (e) => { const tr = e.target.closest('tr[data-bi]'); if (tr && viewer) viewer.focusBuilding(+tr.dataset.bi); });
 
+  if (GEST) bindGesture($('x-gx'), {
+    get: () => params,
+    onChange: (patch, slider) => { params = { ...params, ...patch }; if (!slider) renderGx(); if (!q) q = requestAnimationFrame(() => { q = 0; if (alive) recompute(); }); },
+    main: () => mainBuilding(R.gen),
+  });
   viewer = createViewer($('x-stage'), {
     onPick: (bi, fi) => { ui.pick = bi == null ? null : { bi, fi }; renderPick(); },
     onView: (k) => { $('x-views').querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === k))); },

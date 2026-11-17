@@ -3,6 +3,7 @@
 // 동별 높이 리듬)과 인동간격(건축법 시행령 제86조 제3항)을 지키도록 층수를 정한다. 층마다 층고·면적·세대수를 기록한다.
 import { makePlan } from './plan.js';
 import { resolveSite } from './sites.js';
+import { applyGesture } from './gesture.js';
 
 // 현재 계산 중인 대지 계획 (generate가 정한다)
 let PL = makePlan(resolveSite(null));
@@ -673,6 +674,18 @@ export function generate(pIn) {
   BLOCKS.filter(b => b.zone === 'intl').forEach(b => {
     bldgs.push(...officeBlock(b, p, { far: p.intlFar, officetelUnits: 0, landmark: b.id === PL.landmarkBlock, zone: 'intl' }, warnings));
   });
+  // 형태 제스처: 주동·업무·오피스텔·랜드마크 타워에 (기준층부터)
+  if (p.gesture && p.gesture !== 'box') {
+    let seed = 0;
+    bldgs.forEach(b => {
+      if (!['apt', 'officetel', 'office', 'landmark'].includes(b.kind)) return;
+      if (b.kind === 'landmark') b.floors.forEach(f => { if (!f.roof && f.s && f.s !== 1) { f.area /= f.s * f.s; f.s = 1; } });
+      const from = (b.floors.find(f => ['res', 'officetel', 'office'].includes(f.use)) || { lv: 2 }).lv;
+      const w = b.rect.u1 - b.rect.u0, d = b.rect.v1 - b.rect.v0;
+      const cd = b.kind === 'apt' ? [6.5, 8.5] : b.kind === 'officetel' ? [Math.min(12, w * 0.4), Math.min(9, d * 0.45)] : [Math.max(10, w * 0.38), Math.max(10, d * 0.4)];
+      applyGesture(b, p, { from, seed: seed++, coreDims: cd });
+    });
+  }
   BLOCKS.forEach(b => { const inb = bldgs.filter(x => x.block === b.id); if (inb.length) bldgs.push(basement(b, inb, p)); });
 
   bldgs.forEach(b => {

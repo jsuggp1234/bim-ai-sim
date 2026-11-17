@@ -56,9 +56,42 @@ function renderSteps(active) {
   if (curEl && nav.scrollWidth > nav.clientWidth) nav.scrollLeft += curEl.getBoundingClientRect().left - nav.getBoundingClientRect().left - (nav.clientWidth - curEl.offsetWidth) / 2;
   const top = document.querySelector('.top');
   top.style.setProperty('--prog', ai < 0 ? 0 : ((ai + 1) / STEPS.length).toFixed(3));
+  renderGuide(active);
   const u = useOf(s.use || 'housing');
   document.getElementById('top-proj').textContent = active === 'intro' ? 'SYS.READY' : `${u.en || u.id.toUpperCase()} @ ${currentSite(s).name}`;
 }
+
+// 지금 할 일: 단계마다 무엇을 골라야 다음으로 가는지 머리글 아래 한 줄로 (공법 단계는 남은 공종 수까지)
+function guideFor(name) {
+  const s = store.get();
+  if (name === 'use') return { n: '01', t: '지을 용도를 하나 고르세요', d: '고르면 02 입지에서 그 용도에 맞는 후보지를 평가합니다' };
+  if (name === 'site' || name === 'seoul') return { n: '02', t: '지도에서 후보지를 고르세요', d: '핀에 마우스를 올리면 세부 점수 · 고른 뒤 [이 택지로 매스 배치]' };
+  if (name === 'mass' || name === 'schedule') return { n: '03', t: '건물 형태를 고르고 변수를 맞추세요', d: '형태·층수·용적률이 다음 단계 시뮬레이션에 그대로 쓰입니다' };
+  if (name === 'method') {
+    try {
+      const R = pipeline(), N = R.M.list.length, d = Math.min(N, ((s.mdone || {})[projKey()]) || 0);
+      if (d >= N) return { n: '04', t: `공종 ${N}개를 모두 확정했습니다`, d: '05 4D·간섭으로 넘어가세요', ok: true };
+      const L = R.M.list[d];
+      return { n: '04', t: `${L.wp.code} ${L.wp.name}: 공법을 고르고 [확정]`, d: `${d} / ${N} 공종 확정 · 지반조사부터 차례로`, prog: d / N };
+    } catch (e) { return null; }
+  }
+  if (name === 'process') return { n: '05', t: '간섭을 확인하고 AI 공정 최적화를 눌러 보세요', d: '공정 순서를 바꿔 간섭을 없앱니다' };
+  if (name === 'budget') return { n: '06', t: '공정에 따라 쌓이는 공사비를 확인하세요', d: '월별 집행·누적 곡선' };
+  if (name === 'risk') return { n: '07', t: '대응안을 골라 P80 공기·공사비를 낮춰 보세요', d: '몬테카를로 2,000회' };
+  return null;
+}
+function renderGuide(active) {
+  let el = document.getElementById('guide');
+  if (!el) { el = document.createElement('div'); el.id = 'guide'; el.className = 'guide'; el.setAttribute('role', 'status'); document.querySelector('.top').appendChild(el); }
+  const g = active === 'intro' ? null : guideFor(active);
+  el.hidden = !g; if (!g) return;
+  const cur = document.querySelector('#steps [aria-current]');
+  if (cur) { const r = cur.getBoundingClientRect(), tr = document.querySelector('.top').getBoundingClientRect(); el.style.setProperty('--gx', `${Math.round(r.left - tr.left + r.width / 2)}px`); }
+  el.classList.toggle('ok', !!g.ok);
+  el.innerHTML = `<span class="g-k">${g.ok ? '✓' : '지금 할 일'}</span><b>${g.t}</b><span class="g-d">${g.d}</span>${g.prog != null ? `<i class="g-p"><i style="width:${(g.prog * 100).toFixed(1)}%"></i></i>` : ''}`;
+}
+window.addEventListener('resize', () => renderGuide(parse().name));
+window.addEventListener('scroll', () => { const el = document.getElementById('guide'); if (el) el.classList.toggle('far', window.scrollY > 140); }, { passive: true });
 
 async function route() {
   const { name, arg } = parse();

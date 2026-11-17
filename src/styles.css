@@ -383,7 +383,10 @@ body[data-page="intro"] .top { position: fixed; left: 0; right: 0; background: t
 .at-layer { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 .at-layer img { position: absolute; width: 256px; height: 256px; opacity: 0; transition: opacity .35s; max-width: none; }
 .at-layer img.on { opacity: 1; }
-:root[data-theme="dark"] .at-layer img.on { opacity: .92; }
+/* OSM 표준 타일: 밝은 테마는 옅은 흑백, 어두운 테마는 반전한 흑백 (시스템 화면과 같은 톤) */
+.atlas-root[data-prov="osm"] .at-layer img { filter: grayscale(1) contrast(.92) brightness(1.04); }
+:root:not([data-theme="light"]) .atlas-root[data-prov="osm"] .at-layer img { filter: grayscale(1) invert(1) contrast(.86) brightness(.78); }
+:root:not([data-theme="light"]) .atlas-root[data-prov="osm"] .at-layer img.on { opacity: .9; }
 .at-vec .v-gu path { fill: none; stroke: color-mix(in srgb, var(--ink) 30%, transparent); stroke-width: .8; vector-effect: non-scaling-stroke; stroke-dasharray: 3 3; }
 .at-vec .v-river { fill: none; stroke: transparent; stroke-linecap: round; stroke-linejoin: round; }
 .at-vec .v-foot circle { fill: color-mix(in srgb, var(--ink) 4%, transparent); stroke: var(--ink); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; opacity: .55; }
