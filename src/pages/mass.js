@@ -6,9 +6,11 @@ import { mainBuilding } from '../sim/impact.js';
 import { meets, sunAltAz, analyze, unitSamples, contextSamples, projectBoxes } from '../sim/analysis.js';
 import { makePlan } from '../sim/plan.js';
 import { SITE_IDS, CUSTOM_DEFAULT, FABRICS, resolveSite, siteName } from '../sim/sites.js';
-import { fallbackFor, osmFor, analysisBoxes } from '../sim/ctxload.js';
+import { fallbackFor, osmFor, osmReady, rawReady, analysisBoxes } from '../sim/ctxload.js';
+import { mapFacts } from '../sim/sitefit.js';
+import { mapCardHTML, ctxBadge } from '../ui/mapcard.js';
 import { createViewer } from '../sim/viewer.js';
-import { store, massParamsFromStage1, currentSite, paramsForSite } from '../store.js';
+import { store, massParamsFromStage1, currentSite, paramsForSite, fitFromMap, saveFacts, fitKey } from '../store.js';
 import { fmt, onThemeChange } from '../pipeline.js';
 import { code, dot } from '../ui/sys.js';
 
@@ -60,13 +62,13 @@ const LAW_SOURCES = [
 
 export function mount(root) {
   const S = store.get();
-  let site = currentSite(S), plan = makePlan(site), ctx = fallbackFor(plan);
+  let site = currentSite(S), plan = makePlan(site), ctx = (S.useMap !== false && osmReady(plan)) || fallbackFor(plan);
   let params = { ...DEFAULTS, ...(S.mass || paramsForSite(site, DEFAULTS)) };
   delete params.site;
   if (!TYPOLOGIES[params.typology]) params.typology = DEFAULTS.typology;
   if (!S.mass) store.set({ mass: params, massFrom: 'default' });
   const ui = { mode: 'real', decl: -23.44, hour: 10, view: 'axon', pick: null, block: null };
-  const map = { state: 'fallback', msg: '', ctl: null };
+  const map = { state: 'fallback', msg: '', ctl: null, facts: null };
   let gxDrag = false; // 제스처 슬라이더를 끄는 중에는 패널을 다시 그리지 않는다
   let gen = null, agg = null, viewer = null, worker = null, reqId = 0, alive = true, analysisMs = 0;
   const gp = () => ({ ...params, site });
@@ -86,7 +88,7 @@ export function mount(root) {
     <div class="stage" id="m-stage"></div>
     <div class="ov f-top"><div class="seg" id="m-modes" role="group" aria-label="색 표시"></div>
       <div class="seg" id="m-views" role="group" aria-label="시점"></div>
-      <span class="busy" id="m-busy" hidden>Ray casting</span></div>
+      <span class="busy" id="m-busy" hidden>Ray casting</span><span class="ctxb" id="m-ctxb" hidden></span></div>
     <aside class="float f-l" id="m-fl" aria-label="배치 변수">
       <div class="f-head"><span class="label-sm">Parameters · 배치 변수</span><button type="button" data-fold="m-fl" aria-expanded="true" aria-label="변수 패널 접기">−</button></div>
       <div class="f-body m-ctl">
@@ -464,7 +466,7 @@ export function mount(root) {
   function renderAssume() {
     const S2 = plan.SITE, W = S2.u1 - S2.u0, D = S2.v1 - S2.v0;
     const list = site.id === 'yongsan' ? YS_ASSUME : [
-      `대지는 ${fmt(W)}m × ${fmt(D)}m 직사각형(${fmt(site.area / 1e4, 1)}만㎡)으로 단순화하고, 장축을 동쪽에서 ${fmt(Math.abs(plan.rotDeg))}° ${plan.rotDeg >= 0 ? '남' : '북'}쪽으로 기울였습니다. 순주거용지 ${site.netRatio}%만큼 획지 ${plan.BLOCKS.length}곳을 만들고, 나머지는 단지 내 도로·공원${plan.publics.some(p => p.kind === 'school') ? '·학교' : ''}로 둡니다.`,
+      `대지는 ${fmt(W)}m × ${fmt(D)}m 직사각형(${fmt(site.area / 1e4, 1)}만㎡)으로 단순화했습니다. 후보지 자료에는 좌표와 면적만 있고 필지 경계는 없어서, ${site.fit ? `실제 지도의 도로망 방향(장축 ${fmt(Math.abs(plan.rotDeg), 1)}° ${plan.rotDeg >= 0 ? '남' : '북'}쪽)과 큰길·건물을 피한 자리(좌표에서 ${fmt(site.fit.moved)}m)에 맞췄습니다` : `장축을 동쪽에서 ${fmt(Math.abs(plan.rotDeg))}° ${plan.rotDeg >= 0 ? '남' : '북'}쪽으로 기울여 두었습니다(실제 지도를 받으면 도로망에 맞춥니다)`}. 실제 필지 모양과는 다를 수 있습니다. 순주거용지 ${site.netRatio}%만큼 획지 ${plan.BLOCKS.length}곳을 만들고, 나머지는 단지 내 도로·공원${plan.publics.some(p => p.kind === 'school') ? '·학교' : ''}로 둡니다.`,
       `획지 사이 도로는 20m, 대지 둘레는 12m 띠로 비웁니다. 블록 번호(R 주거, M 복합)는 이 모델의 배치이며 실제 지구단위계획 획지와 다릅니다.`,
       YS_ASSUME[1], YS_ASSUME[3], YS_ASSUME[4], YS_ASSUME[5], YS_ASSUME[6],
       `조망: ${plan.views.water ? `창 정면 ±60° 안의 ${plan.views.water.name} 표적 ${plan.views.water.targets.length}곳 중 3곳 이상이 보이면 ${plan.views.water.name} 조망` : '수변 조망 대상 없음'}, ${plan.views.peak ? `${plan.views.peak.name} 정상이 보이면 ${plan.views.peak.name} 조망` : '산 조망 대상 없음'}으로 봅니다.`,
@@ -499,8 +501,14 @@ export function mount(root) {
     if (sw) { params = { ...params, sideWin: +sw.dataset.sidewin }; queue(); }
     if (e.target.id === 'm-reset') { params = paramsForSite(site, DEFAULTS); store.set({ massFrom: 'default' }); queue(); }
     if (e.target.id === 'm-reapply') { const h = store.get().handoff1; if (h) { params = massParamsFromStage1(h, DEFAULTS); queue(); } }
-    if (e.target.id === 'm-map-retry') loadMap(true);
-    if (e.target.id === 'm-map-off') { store.set({ useMap: false }); ctx = fallbackFor(plan); if (viewer) viewer.setContext(ctx); map.state = 'off'; renderMap(); requestAnalysis(); renderAssume(); }
+    const mb = e.target.closest('[data-map]');
+    if (mb) {
+      const k = mb.dataset.map;
+      if (k === 'retry') loadMap(true);
+      if (k === 'fit-off') setFit(false);
+      if (k === 'fit-on') setFit(true);
+      if (k === 'off') { if (map.ctl) map.ctl.abort(); store.set({ useMap: false }); ctx = fallbackFor(plan); map.facts = null; if (viewer) viewer.setContext(ctx); map.state = 'off'; renderMap(); requestAnalysis(); renderAssume(); }
+    }
   });
   root.querySelectorAll('[data-fold]').forEach(btn => btn.addEventListener('click', () => {
     const panel = $(btn.dataset.fold), off = !panel.classList.contains('collapsed');
@@ -525,42 +533,65 @@ export function mount(root) {
   }
   function renderMap() {
     const el = $('m-map'); if (!el) return;
-    const t = { loading: `<span class="dot busy"></span>실제 지도 받는 중 · ${map.msg || ''}`, osm: `<span class="dot on"></span>실제 지도 (OpenStreetMap)${ctx.cached ? ' · 저장본' : ''}`,
-      fallback: `<span class="dot"></span>${ctx.source === 'preset' ? '정리한 지형(용산)' : '자동 생성 맥락'}`, failed: `<span class="dot off"></span>지도 서버에 연결하지 못해 ${ctx.source === 'preset' ? '정리한 지형' : '자동 생성 맥락'}을 씁니다`, off: `<span class="dot"></span>지도 끔 · ${ctx.source === 'preset' ? '정리한 지형' : '자동 생성 맥락'}` }[map.state] || '';
-    const st = viewer && viewer.stats;
-    el.innerHTML = `<span class="ms">${t}</span>${st ? `<span class="note">건물 ${fmt(st.buildings)} · 도로 ${fmt(st.roads)} · 수목 ${fmt(st.trees)}</span>` : ''}
-      <span class="ma">${map.state === 'osm' ? `<button type="button" class="chipbtn" id="m-map-off">지도 끄기</button>` : map.state === 'loading' ? '' : `<button type="button" class="chipbtn" id="m-map-retry">실제 지도 받기</button>`}</span>`;
+    el.innerHTML = mapCardHTML({ state: map.state, msg: map.msg, ctx, site, facts: map.facts, stats: viewer && viewer.stats, useFit: store.get().useFit });
+    const bd = $('m-ctxb'), bt = ctxBadge(map.state, ctx);
+    if (bd) { bd.hidden = !bt; bd.textContent = bt; }
+  }
+  // 지도가 왔을 때: ① 대지를 도로망·빈 자리에 맞추고(택지마다 한 번) ② 그 자리를 비워 주변을 그리고 ③ 대지 네 변 바깥을 잰다
+  function onMap(final) {
+    const raw = rawReady(site); if (!raw) return;
+    if (fitFromMap(raw)) {
+      site = currentSite(); plan = makePlan(site);
+      ctx = osmReady(plan) || fallbackFor(plan);
+      if (viewer) viewer.setPlan(plan, ctx);
+      renderHeader(); renderSitePick(); recompute();
+    } else { const c = osmReady(plan); if (c) { ctx = c; if (viewer) viewer.setContext(ctx); } }
+    map.facts = mapFacts(ctx, plan); saveFacts(site, map.facts);
+    if (final) map.state = 'osm';
+    requestAnalysis(); renderAssume(); renderLegend(); renderMap();
   }
   async function loadMap(force) {
     if (map.ctl) map.ctl.abort();
     if (!force && store.get().useMap === false) { map.state = 'off'; renderMap(); return; }
     if (force) store.set({ useMap: true });
     const ctl = new AbortController(); map.ctl = ctl;
-    const pl = plan;
+    const key = fitKey(site), live = () => alive && map.ctl === ctl && fitKey(site) === key;
     map.state = 'loading'; map.msg = ''; renderMap();
     try {
-      const c = await osmFor(pl, { signal: ctl.signal, onStep: (m) => { map.msg = m; if (map.ctl === ctl) renderMap(); } });
-      if (!alive || pl !== plan || map.ctl !== ctl) return;
-      ctx = c; map.state = 'osm';
-      if (viewer) viewer.setContext(ctx);
-      requestAnalysis(); renderAssume(); renderLegend();
+      await osmFor(plan, { signal: ctl.signal, onStep: (m) => { map.msg = m; if (map.ctl === ctl) renderMap(); }, onNear: () => { if (live()) onMap(false); } });
+      if (!live()) return;
+      onMap(true);
     } catch (e) {
-      if (!alive || pl !== plan || map.ctl !== ctl) return;
-      map.state = 'failed'; map.msg = String(e && e.message || e);
+      if (!live()) return;
+      // 넓은 지도를 못 받아도 대지 둘레 지도가 있으면 그것을 쓴다
+      if (ctx.source === 'osm') map.state = 'osm'; else { map.state = 'failed'; map.msg = String(e && e.message || e); }
     }
     renderMap();
   }
+  function resite() {
+    site = currentSite(); plan = makePlan(site);
+    ctx = (store.get().useMap !== false && osmReady(plan)) || fallbackFor(plan);
+    map.facts = mapFacts(ctx, plan);
+  }
   function applySite(sel, resetParams) {
     store.set({ site: sel });
-    site = resolveSite(sel, store.get().use || 'housing'); plan = makePlan(site); ctx = fallbackFor(plan);
+    resite();
     if (resetParams) { params = paramsForSite(site, DEFAULTS); store.set({ massFrom: 'default' }); }
     if (viewer) viewer.setPlan(plan, ctx);
     if (!plan.views.water && ui.mode === 'river') ui.mode = 'use';
     if (!plan.views.peak && ui.mode === 'namsan') ui.mode = 'use';
-    renderHeader(); renderSitePick(); renderAssume(); map.state = 'fallback'; renderMap();
+    renderHeader(); renderSitePick(); renderAssume(); map.state = ctx.source === 'osm' ? 'osm' : 'fallback'; renderMap();
     recompute();
     if (viewer) viewer.setView('axon');
     loadMap(false);
+  }
+  // 지도 맞춤 켜고 끄기: 대지 자리만 바뀐다 (변수는 그대로)
+  function setFit(on) {
+    store.set({ useFit: on });
+    resite();
+    if (viewer) viewer.setPlan(plan, ctx);
+    renderHeader(); renderSitePick(); renderAssume(); renderMap(); recompute();
+    if (on) onMap(map.state === 'osm');
   }
   function renderHeader() {
     const zs = Object.values(makePlan(site).ZONES).map(z => z.name.split('(')[0].trim());
@@ -587,6 +618,8 @@ export function mount(root) {
     const lim = { lat: [33, 39], lng: [124, 132], area: [3000, 3000000], aspect: [1, 4], rot: [-60, 60], units: [100, 30000], maxFloors: [5, 80], netRatio: [10, 100] }[k];
     const val = lim ? Math.min(lim[1], Math.max(lim[0], v)) : v;
     const sel = { ...CUSTOM_DEFAULT, ...(store.get().site || {}), id: 'custom', [k]: val };
+    if (k === 'rot' || k === 'aspect') sel.manual = true; // 방향·비례를 직접 넣으면 지도 맞춤을 하지 않는다
+    if (k === 'lat' || k === 'lng' || k === 'area') delete sel.manual;
     clearTimeout(csT); csT = setTimeout(() => applySite(sel, ['units', 'maxFloors', 'zoning'].includes(k)), 150);
   });
 

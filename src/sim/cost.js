@@ -1,19 +1,25 @@
 import { FLOOR_USES } from './uses.js';
 // 5단계 예산(5D): 층별 물량 × 공종별 단가 → 공사비, 4D 공정에 얹어 월별 기성·누계(S커브)
 // 단가는 2026년 기준 근사치(만원). 실제 내역서 단가로 바꿔 쓸 수 있도록 모두 변수로 둔다.
+//
+// 2026.11 주거 단가 보정 (산군 입찰DB의 LH 아파트 건설공사 낙찰 10건, bench.js)
+//  · 고양창릉 S-4BL 6공구: 낙찰 2,305억 / 연면적 144,212㎡ = 160만원/㎡ (세대당 2.25억). 건축·토목 도급분만의 금액이다
+//  · 전기·통신·소방(분리 발주)과 발주처 지급자재를 합친 전체 공사비는 그 1.4배쯤으로 보았다 (도급분 70% 가정 — 산군 자료가 아닌 가정)
+//  · 예전 단가로는 같은 조건의 도급 범위가 271만원/㎡로 실제 추정치(약 228만원/㎡)보다 19% 높았다.
+//    흙막이를 지하연속벽 값으로, 기초를 전 면적 두꺼운 매트 값으로, 주거 외장을 커튼월에 가까운 값으로 잡은 탓이라 이 항목들을 낮췄다
 
 export const P5_DEFAULTS = {
-  earth: 4.5,        // 터파기·잔토 처리 (만원/㎥)
-  retain: 110,       // 흙막이 지하연속벽 (만원/㎡ 벽면)
-  found: 95,         // 기초 매트 (만원/㎡)
+  earth: 3.5,        // 터파기·잔토 처리 (만원/㎥)
+  retain: 60,        // 흙막이 (만원/㎡ 벽면, CIP·버팀보 기준 — 지하연속벽은 공법 단계에서 배수로 올라간다)
+  found: 55,         // 기초 (만원/㎡, 동 아래 매트와 주차장 구간 얇은 기초의 평균)
   structRes: 48,     // 지상 골조 · 주거 (만원/㎡)
   structOffice: 62,  // 지상 골조 · 업무·상업
-  structBase: 72,    // 지하 골조
-  skinRes: 55,       // 외장 · 주거(창호+석재/도장) (만원/㎡ 외벽)
+  structBase: 62,    // 지하 골조
+  skinRes: 34,       // 외장 · 주거(창호+도장, 저층부 석재) (만원/㎡ 외벽)
   skinOffice: 120,   // 외장 · 업무 커튼월
   skinLandmark: 165, // 외장 · 랜드마크 고성능 커튼월
-  finRes: 62, finOfficetel: 58, finOffice: 40, finRetail: 38, finBase: 12, // 마감 (만원/㎡)
-  mepRes: 64, mepOffice: 94, mepBase: 24, // 기계·전기·통신·소방 (만원/㎡)
+  finRes: 58, finOfficetel: 56, finOffice: 40, finRetail: 38, finBase: 12, // 마감 (만원/㎡)
+  mepRes: 52, mepOffice: 94, mepBase: 20, // 기계·전기·통신·소방 (만원/㎡)
   liftBase: 1.2,     // 승강기 1대 기본 (억원)
   liftPerFl: 0.025,  // 승강기 층당 추가 (억원)
   landscape: 18,     // 조경·외부 (만원/㎡ 외부 면적)
@@ -32,7 +38,7 @@ export const P5_META = {
   finRes: { label: '주거 마감', unit: '만원/㎡', min: 30, max: 120, step: 1, g: 'unit' },
   mepRes: { label: '주거 설비·전기', unit: '만원/㎡', min: 30, max: 120, step: 1, g: 'unit' },
   mepOffice: { label: '업무 설비·전기', unit: '만원/㎡', min: 50, max: 160, step: 1, g: 'unit' },
-  retain: { label: '흙막이 (지하연속벽)', unit: '만원/㎡', min: 50, max: 200, step: 1, g: 'unit' },
+  retain: { label: '흙막이 (CIP·버팀보 기준)', unit: '만원/㎡', min: 30, max: 200, step: 1, g: 'unit', note: '벽면 넓이당. 지하연속벽은 100~130' },
   highRise: { label: '30층 초과 층당 할증', unit: '%', min: 0, max: 2, step: 0.05, g: 'rate' },
   temp: { label: '가설·공통비', unit: '%', min: 3, max: 15, step: 0.5, g: 'rate' },
   overhead: { label: '일반관리비·이윤', unit: '%', min: 5, max: 20, step: 0.5, g: 'rate' },

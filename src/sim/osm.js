@@ -7,10 +7,27 @@ import { llToXZ } from './sites.js';
 export const OSM_ATTRIB = '지도 © OpenStreetMap contributors';
 const ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
   'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
 ];
 const VER = 'v3';
+// 가까운 둘레만 먼저 받는 작은 질의 (대지 둘레 건물·도로·철도·물·녹지). 몇 초면 오므로 넓은 지도를 기다리지 않고 대지 주변부터 실제 지도로 바꾼다
+export const NEAR_R = { bldg: 450, major: 900, minor: 650, area: 900, rail: 900 };
+export function nearQuery(lat, lng, R = NEAR_R) {
+  const A = (rad) => `(around:${rad},${lat.toFixed(6)},${lng.toFixed(6)})`;
+  return `[out:json][timeout:40];(
+way["building"]${A(R.bldg)};relation["building"]${A(R.bldg)};
+way["highway"~"^(motorway|trunk|primary|secondary|tertiary|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$"]${A(R.major)};
+way["highway"~"^(unclassified|residential|living_street|pedestrian|service)$"]${A(R.minor)};
+way["railway"~"^(rail|light_rail|subway)$"]${A(R.rail)};
+way["natural"="water"]${A(R.area)};relation["natural"="water"]${A(R.area)};
+way["waterway"="riverbank"]${A(R.area)};way["waterway"~"^(stream|canal)$"]${A(R.area)};
+way["leisure"~"^(park|garden|golf_course|pitch|playground)$"]${A(R.area)};
+way["landuse"~"^(forest|grass|recreation_ground|meadow|cemetery|village_green)$"]${A(R.area)};
+way["natural"~"^(wood|scrub|grassland)$"]${A(R.area)};
+);out geom qt;`;
+}
 
 export function queries(lat, lng, R = {}) {
   const r = { bldg: 1000, major: 2300, minor: 1200, area: 2700, rail: 2300, peak: 8000, coast: 5200, ...R };
@@ -51,36 +68,61 @@ async function cachePut(key, val) {
   catch (e) { /* 저장 실패는 무시 */ }
 }
 
-async function overpass(q, signal) {
+async function overpassAt(url, q, signal, ms) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  const onAbort = () => ctl.abort();
+  if (signal) signal.addEventListener('abort', onAbort, { once: true });
+  try {
+    const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (!j || !Array.isArray(j.elements)) throw new Error('형식 오류');
+    return j;
+  } finally { clearTimeout(timer); if (signal) signal.removeEventListener('abort', onAbort); }
+}
+// race: 앞의 두 서버에 같이 묻고 먼저 온 답을 쓴다 (작은 질의). 아니면 차례로
+async function overpass(q, signal, { race = false, ms = 95000 } = {}) {
   let lastErr = null;
+  if (race && typeof Promise.any === 'function') {
+    try { return await Promise.any(ENDPOINTS.slice(0, 2).map(u => overpassAt(u, q, signal, ms))); }
+    catch (e) { lastErr = (e && e.errors && e.errors[0]) || e; if (signal && signal.aborted) throw lastErr; }
+    for (const url of ENDPOINTS.slice(2)) { try { return await overpassAt(url, q, signal, ms); } catch (e) { lastErr = e; if (signal && signal.aborted) throw e; } }
+    throw lastErr || new Error('지도 서버에 연결하지 못했습니다');
+  }
   for (const url of ENDPOINTS) {
-    try {
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 95000);
-      if (signal) signal.addEventListener('abort', () => ctl.abort(), { once: true });
-      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
-      clearTimeout(timer);
-      if (!r.ok) { lastErr = new Error('HTTP ' + r.status); continue; }
-      const j = await r.json();
-      if (!j || !Array.isArray(j.elements)) { lastErr = new Error('형식 오류'); continue; }
-      return j;
-    } catch (e) { lastErr = e; if (signal && signal.aborted) throw e; }
+    try { return await overpassAt(url, q, signal, ms); } catch (e) { lastErr = e; if (signal && signal.aborted) throw e; }
   }
   throw lastErr || new Error('지도 서버에 연결하지 못했습니다');
 }
 
 // 지도 받기: onStep(단계 문구)로 진행 표시. 실패하면 예외
-export async function loadOSM(site, { onStep, signal, cacheOnly = false } = {}) {
+// onNear(ctx): 넓은 지도를 받기 전에 대지 둘레(약 450m)만 담은 지도를 먼저 넘긴다. 넓은 지도를 못 받으면 그 둘레 지도를 그대로 돌려준다(ctx.partial)
+export async function loadOSM(site, { onStep, signal, cacheOnly = false, onNear } = {}) {
   const { feat, bldg } = queries(site.lat, site.lng);
   const key = (k) => `${VER}:${site.lat.toFixed(5)},${site.lng.toFixed(5)}:${k}`;
   let jf = await cacheGet(key('feat')), jb = await cacheGet(key('bldg'));
   const cached = !!(jf && jb);
-  if (cacheOnly && !cached) throw new Error('저장된 지도 없음');
-  if (!jf) { onStep && onStep('도로·하천·녹지 받는 중'); jf = await overpass(feat, signal); cachePut(key('feat'), jf); }
-  if (!jb) { onStep && onStep('건물 받는 중'); jb = await overpass(bldg, signal); cachePut(key('bldg'), jb); }
+  if (cached) { onStep && onStep('3D로 바꾸는 중'); const ctx = parseOSM([...(jf.elements || []), ...(jb.elements || [])], site); ctx.cached = true; return ctx; }
+  let jn = await cacheGet(key('near'));
+  if (cacheOnly && !jn) throw new Error('저장된 지도 없음');
+  let near = null;
+  try {
+    if (!jn) { onStep && onStep('대지 둘레 지도 받는 중'); jn = await overpass(nearQuery(site.lat, site.lng), signal, { race: true, ms: 45000 }); cachePut(key('near'), jn); }
+    near = parseOSM(jn.elements || [], site); near.partial = true; near.radius = NEAR_R.bldg;
+    if (onNear) onNear(near);
+  } catch (e) { if (signal && signal.aborted) throw e; /* 둘레 질의 실패: 넓은 질의로 계속 */ }
+  if (cacheOnly) { if (near) return near; throw new Error('저장된 지도 없음'); }
+  try {
+    if (!jf) { onStep && onStep('넓은 주변(도로·하천·녹지) 받는 중'); jf = await overpass(feat, signal); cachePut(key('feat'), jf); }
+    if (!jb) { onStep && onStep('넓은 주변 건물 받는 중'); jb = await overpass(bldg, signal); cachePut(key('bldg'), jb); }
+  } catch (e) {
+    if ((signal && signal.aborted) || !near) throw e;
+    return near; // 넓은 지도는 못 받았지만 대지 둘레는 실제 지도
+  }
   onStep && onStep('3D로 바꾸는 중');
   const ctx = parseOSM([...(jf.elements || []), ...(jb.elements || [])], site);
-  ctx.cached = cached;
+  ctx.cached = false;
   return ctx;
 }
 

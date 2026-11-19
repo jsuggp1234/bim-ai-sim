@@ -311,7 +311,8 @@ export function relief(base, ctx, plan, off = false) {
   const S = plan.SITE, n1 = vn2(17), n2 = vn2(29), n3 = vn2(43);
   // 물 가림판: 물·개천을 칠하고 흐리게 한 작은 지도 (1 = 물가)
   const M = 192, K2 = M / (2 * E), cv = document.createElement('canvas'); cv.width = cv.height = M;
-  const g = cv.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, M, M); g.filter = 'blur(3px)'; g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineCap = 'round';
+  // 읽어 오는 캔버스는 CPU에 둔다 (GPU 캔버스는 읽을 때 3D 그리기가 끝나기를 기다려 지도를 바꿀 때 화면이 오래 멈춘다)
+  const g = cv.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#000'; g.fillRect(0, 0, M, M); g.filter = 'blur(3px)'; g.fillStyle = '#fff'; g.strokeStyle = '#fff'; g.lineCap = 'round';
   (ctx.water || []).forEach(w => { g.beginPath(); w.outer.forEach(([x, z], i) => (i ? g.lineTo((x + E) * K2, (z + E) * K2) : g.moveTo((x + E) * K2, (z + E) * K2))); g.closePath(); g.fill(); g.lineWidth = 4; g.stroke(); });
   (ctx.streams || []).forEach(st => { g.beginPath(); st.pts.forEach(([x, z], i) => (i ? g.lineTo((x + E) * K2, (z + E) * K2) : g.moveTo((x + E) * K2, (z + E) * K2))); g.lineWidth = 5; g.stroke(); });
   let wm = null; try { wm = g.getImageData(0, 0, M, M).data; } catch (e) { wm = null; }

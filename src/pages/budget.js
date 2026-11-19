@@ -8,6 +8,7 @@ import { FLOOR_USES } from '../sim/uses.js';
 import { programFor } from '../sim/siting.js';
 import { siteById } from '../sim/kr-sites.js';
 import { head, escH } from '../ui/sys.js';
+import { costBenchHTML } from '../ui/benchcard.js';
 
 export const title = '06 5D 예산';
 
@@ -54,7 +55,9 @@ export function mount(root) {
       <section><div class="sec-title"><span class="n">06.4</span><h2>개략 추정과 비교</h2><span class="hint" id="b-cmp-h"></span></div>
         <div class="cols2"><div class="panel pad"><div class="cmp" id="b-cmp"></div><p class="note" id="b-cmp-note" style="margin:12px 0 0"></p></div>
         <div class="panel pad"><span class="label-sm">용도별 직접비</span><div class="mixbar" id="b-use-bar" style="margin:10px 0" role="img" aria-label="용도별 직접비 구성"></div><div class="mixleg" id="b-use"></div></div></div></section>
-      <section><div class="sec-title"><span class="n">06.5</span><h2>예산 가정</h2></div><ul class="issues" id="b-assume"></ul></section>
+      <section><div class="sec-title"><span class="n">06.5</span><h2>실제 낙찰 금액과 비교</h2><span class="hint">산군 입찰DB의 LH 아파트 건설공사 낙찰 금액과 같은 범위(도급분)로 맞춰 견줍니다.</span></div>
+        <div class="panel pad" id="b-bench"></div></section>
+      <section><div class="sec-title"><span class="n">06.6</span><h2>예산 가정</h2></div><ul class="issues" id="b-assume"></ul></section>
     </div>
     <aside class="panel" id="b-ctl" aria-label="단가와 비율">
       <div class="grp"><div class="sec-h" style="margin:0"><span class="label-sm">Unit rates · 공종 단가</span><button class="chipbtn" id="b-reset" type="button">기본값</button></div></div>
@@ -212,6 +215,7 @@ export function mount(root) {
     }).join('');
     $('b-cmp-note').textContent = `1단계는 연면적 × 평당 단가(${fmt(s1.unit)}만원) × 30층 초과 할증의 한 줄 추정입니다. 5단계는 층별 물량과 공종 단가로 쌓아 올리고 공정 시점까지 물가상승을 더했습니다. 전체 사업(업무·랜드마크 포함)은 ${won(E.total)}입니다.`;
     }
+    $('b-bench').innerHTML = costBenchHTML(R);
     const uses = USES.map(([k, nm, col]) => [nm, E.byUse[k] + (k === 'retail' ? (E.byUse.lobby || 0) : 0) || 0, col]).filter(x => x[1] > 0);
     const ut = uses.reduce((a, x) => a + x[1], 0);
     $('b-use-bar').innerHTML = uses.map(([nm, v, col]) => `<i style="width:${(v / ut * 100).toFixed(2)}%;background:var(${col})" title="${nm} ${won(v)}"></i>`).join('');
@@ -267,7 +271,7 @@ export function mount(root) {
   });
 
   $('b-assume').innerHTML = [
-    '단가는 2026년 서울 초고층·고급 공동주택 공사비 보도와 공종별 비중을 바탕으로 잡은 근사값입니다(예: 골조 주거 48만원/㎡, 업무 커튼월 120만원/㎡ 외벽). 실제 내역서 단가로 바꿔 쓸 수 있도록 오른쪽에 변수로 두었습니다.',
+    '단가는 2026년 공사비 보도와 공종별 비중을 바탕으로 잡은 근사값이고(예: 골조 주거 48만원/㎡, 업무 커튼월 120만원/㎡ 외벽), 주거 단가는 LH 아파트 낙찰 금액(산군 입찰DB)에 맞춰 낮췄습니다: 흙막이 110 → 60만원/㎡(CIP 기준), 기초 95 → 55, 지하 골조 72 → 62, 주거 외장 55 → 34, 주거 설비 64 → 52, 터파기 4.5 → 3.5만원/㎥. 실제 내역서 단가로 바꿔 쓸 수 있도록 오른쪽에 변수로 두었습니다.',
     '물량: 골조·마감·설비는 층별 바닥면적, 외장은 층 둘레 × 층고(외벽 면적), 흙막이는 지하 외곽 둘레 × (굴토 깊이 + 3m), 굴토는 지하 바닥면적 ÷ 0.9 × 깊이, 승강기는 동 형식별 대수 × (기본가 + 층당 추가)입니다.',
     '할증: 30층을 넘는 층마다 골조 단가를 층당 할증률만큼 올립니다(랜드마크는 외장에도 적용). 옥상층 골조 1.3배, 피난안전층 1.25배, 기계층 설비 1.8배입니다.',
     '간접비: 가설·공통비는 직접비 비율, 일반관리비·이윤은 (직접비 + 물가상승 + 가설) 비율, 설계·감리는 그 합의 비율이며 30%는 착공 전 첫 달에 지출합니다. 예비비는 마지막에 더합니다.',

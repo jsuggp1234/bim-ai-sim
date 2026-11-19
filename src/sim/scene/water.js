@@ -14,7 +14,7 @@ export function shoreMask(polys, H = 1600, n = 768) {
   const K = n / (2 * H), tx = (v) => (v + H) * K;
   const draw = (list) => {
     const c = document.createElement('canvas'); c.width = c.height = n;
-    const g = c.getContext('2d'); g.fillStyle = '#000'; g.fillRect(0, 0, n, n); g.fillStyle = '#fff';
+    const g = c.getContext('2d', { willReadFrequently: true }); g.fillStyle = '#000'; g.fillRect(0, 0, n, n); g.fillStyle = '#fff';
     list.forEach(w => { g.beginPath(); [w.outer, ...(w.holes || [])].forEach(r => { r.forEach(([x, z], i) => (i ? g.lineTo(tx(x), tx(z)) : g.moveTo(tx(x), tx(z)))); g.closePath(); }); g.fill('evenodd'); });
     const d = g.getImageData(0, 0, n, n).data, out = new Float32Array(n * n);
     for (let i = 0; i < n * n; i++) out[i] = d[i * 4] / 255;

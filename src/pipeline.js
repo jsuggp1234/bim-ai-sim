@@ -8,7 +8,8 @@ import { estimate, P5_DEFAULTS } from './sim/cost.js';
 import { siteConditions, derive, resolveMethods, PRIO_DEFAULT, BASELINE } from './sim/methods.js';
 import { detect } from './sim/clash.js';
 import { register, monteCarlo, exposure, exposureTimeline } from './sim/risk.js';
-import { store, currentSite } from './store.js';
+import { store, currentSite, factsFor, paramsForSite } from './store.js';
+import { condFromFacts } from './sim/sitefit.js';
 
 // 용도·택지마다 따로 저장하는 설정의 열쇠
 export const projKey = (s = store.get()) => `${s.use || 'housing'}@${currentSite(s).id}`;
@@ -37,16 +38,18 @@ export function pipeline(over = {}) {
   const use = s.use || 'housing';
   const housing = isHousingGen(use);
   const site = currentSite(s);
-  const mp = housing ? { ...MASS_D, ...(s.mass || {}), ...(over.mass || {}), site, use }
+  // 매스 단계를 거치지 않고 온 경우에도 그 택지의 물량·층수 기본값으로 계산한다 (예전에는 용산 기본값 6,000호·55층이 들어갔다)
+  const mp = housing ? { ...MASS_D, ...(s.mass || paramsForSite(site, MASS_D)), ...(over.mass || {}), site, use }
     : { ...(XDEF[use] || {}), ...((s.massx || {})[use] || {}), ...(over.mass || {}), site, use };
   const ms = { ...methodState(s), ...(over.methods || {}) };
   const opt = over.noOpt ? null : optState(s);
   const cp = { ...P5_DEFAULTS, ...(s.cost || {}), ...(over.cost || {}) };
-  const km = JSON.stringify(mp), kmeth = JSON.stringify(ms), kc = JSON.stringify(cp);
+  const facts = s.useMap === false ? null : factsFor(site, s);
+  const km = JSON.stringify(mp), kmeth = JSON.stringify(ms) + (facts ? JSON.stringify([facts.adj, facts.adjH, facts.nB, facts.rail, facts.road]) : ''), kc = JSON.stringify(cp);
   if (memo.km !== km) { memo = { km }; memo.gen = housing ? generate(mp) : generateX(mp); memo.Q = quantities(memo.gen); }
   if (memo.kmeth !== kmeth) {
     memo.kmeth = kmeth; memo.kp = null; memo.base = null;
-    const cond0 = siteConditions(site, memo.gen, memo.Q);
+    const cond0 = condFromFacts(siteConditions(site, memo.gen, memo.Q), facts);
     memo.cond0 = cond0;
     memo.cond = { ...cond0, ...(ms.cond || {}) };
     memo.d = derive(memo.cond, memo.gen, memo.Q, site);
@@ -57,15 +60,15 @@ export function pipeline(over = {}) {
   const pp = { ...pp0, ...optProc(opt && opt.x, pp0) };
   const kp = JSON.stringify(pp) + '|' + (opt ? opt.x.stagger : '');
   if (memo.kp !== kp) {
-    memo.kp = kp; memo.kc = null; memo.risk = null;
+    memo.kp = kp; memo.kc = null; memo.risk = null; memo.base = null;
     memo.S = schedule(memo.gen, memo.Q, pp);
     memo.C = detect(memo.gen, memo.S, { stagger: !!(opt && opt.x.stagger), noise: memo.cond.noise });
   }
-  if (memo.kc !== kc) { memo.kc = kc; memo.risk = null; memo.E = estimate(memo.gen, memo.Q, memo.S, cp); }
+  if (memo.kc !== kc) { memo.kc = kc; memo.risk = null; memo.base = null; memo.E = estimate(memo.gen, memo.Q, memo.S, cp); }
   const m = memo;
   return {
     mp, pp, pp0, cp, use, u: useOf(use), site, gen: m.gen, Q: m.Q, S: m.S, E: m.E, C: m.C, opt,
-    cond: m.cond, cond0: m.cond0, d: m.d, M: m.M, fx: m.M.fx, prio: m.prio, ms,
+    cond: m.cond, cond0: m.cond0, facts, d: m.d, M: m.M, fx: m.M.fx, prio: m.prio, ms,
     // 기준선(전통 공법) 공정·예산: 비교용, 필요할 때만 계산
     base() {
       if (!m.base) {

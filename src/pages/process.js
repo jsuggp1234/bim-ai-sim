@@ -6,6 +6,7 @@ import { store } from '../store.js';
 import { pipeline, fmt, won, tip, download, csv, onThemeChange, setOptState } from '../pipeline.js';
 import { CLASH_TYPES, optimize, describeMoves } from '../sim/clash.js';
 import { head, sub, dot, escH } from '../ui/sys.js';
+import { scheduleBenchHTML, bindBenchTips } from '../ui/benchcard.js';
 
 export const title = '05 4D·간섭';
 
@@ -73,16 +74,20 @@ export function mount(root) {
       </div>
       <div class="panel"><div class="tw"><table class="cl-list" id="cl-list"></table></div></div>
     </section>
+    <section class="sx-sec" id="bench" aria-label="실제 준공 현장과 비교">
+      ${sub('05.2', '실제 준공 현장과 비교', '산군 현장DB의 착공일 → 사용승인일 실적입니다. 점 하나가 현장 하나이고, 점에 마우스를 올리면 현장 이름과 날짜가 나옵니다.')}
+      <div class="panel pad" id="p-bench"></div>
+    </section>
     <div class="sec">
-      <div class="sec-title"><span class="n">05.2</span><h2>블록별 공정 간트</h2><span class="hint">월 단위 격자. 블록마다 다섯 줄이 공종 그룹이고, 주황 마름모는 상량(골조 완료), 검은 마름모는 준공입니다. 막대에 마우스를 올리면 기간이 나옵니다.</span></div>
+      <div class="sec-title"><span class="n">05.3</span><h2>블록별 공정 간트</h2><span class="hint">월 단위 격자. 블록마다 다섯 줄이 공종 그룹이고, 주황 마름모는 상량(골조 완료), 검은 마름모는 준공입니다. 막대에 마우스를 올리면 기간이 나옵니다.</span></div>
       <div class="gantt" id="p-gantt"></div>
       <div class="g-leg" id="p-gleg"></div>
     </div>
     <div class="sec p4">
-      <div><div class="sec-title"><span class="n">05.3</span><h2>마일스톤</h2><span class="hint">상량 = 블록의 마지막 동 골조 완료</span></div>
+      <div><div class="sec-title"><span class="n">05.4</span><h2>마일스톤</h2><span class="hint">상량 = 블록의 마지막 동 골조 완료</span></div>
         <div class="panel"><div class="tw"><table class="ms-table" id="p-ms"></table></div></div>
         <div class="row" style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><button class="btn ghost" type="button" id="p-csv">공정표 CSV</button></div></div>
-      <div><div class="sec-title"><span class="n">05.4</span><h2>공정 변수</h2></div>
+      <div><div class="sec-title"><span class="n">05.5</span><h2>공정 변수</h2></div>
         <div class="panel" id="p-ctl">
           <div class="grp"><div class="ctl"><label for="p-start">건축 착공</label><span class="inbox"><input type="month" id="p-start" min="2026-01" max="2035-12"></span></div>
             <span class="label-sm" style="display:block;margin:8px 0 6px">착공 순서</span><div class="seg" id="p-order" role="group" aria-label="착공 순서"></div></div>
@@ -91,7 +96,7 @@ export function mount(root) {
         </div></div>
     </div>
     <div class="sec">
-      <div class="sec-title"><span class="n">05.5</span><h2>공정 가정</h2></div>
+      <div class="sec-title"><span class="n">05.6</span><h2>공정 가정</h2></div>
       <ul class="issues" id="p-assume"></ul>
     </div>
   </div>`;
@@ -235,6 +240,9 @@ export function mount(root) {
       ${milestones.map(b => `<tr><td>${b.id}</td><td style="text-align:right;font-family:var(--f-body)">${gen.zones[b.zone].name.replace('(주거)', '')}</td><td>${D(b.start)}</td><td>${D(b.baseEnd)}</td><td>${D(b.topping)}</td><td>${D(b.end)}</td><td>${fmt(b.months, 0)}개월</td><td>${b.towers}</td></tr>`).join('')}</tbody>`;
   }
 
+  // ---------- 실제 현장 대비 ----------
+  function renderBench() { $('p-bench').innerHTML = scheduleBenchHTML(R); }
+
   // ---------- 변수 ----------
   const params = () => ({ ...P4_DEFAULTS, ...(store.get().proc || {}) });
   function renderCtl() {
@@ -257,7 +265,7 @@ export function mount(root) {
       const ratio = ui.t / S.end;
       R = pipeline(); lmRec = derive();
       $('p-t').max = S.end;
-      renderStats(); renderGantt(); renderMilestones(); renderClash(); syncCtl();
+      renderStats(); renderGantt(); renderMilestones(); renderClash(); renderBench(); syncCtl();
       setT(ratio * S.end, true);
     });
   }
@@ -316,10 +324,13 @@ export function mount(root) {
   });
 
   $('p-assume').innerHTML = [
-    '작업일 달력: 월~금 1일, 토요일 0.5일, 일요일 0일. 12~2월은 동절기 손실률, 7월은 장마 손실률만큼 하루 작업량을 줄입니다.',
-    '블록 공정: 착공·가설 18작업일 → 지하연속벽(흙막이 면적 ÷ 하루 시공 면적) → 굴토(굴토량 ÷ 하루 굴토량, 흙막이 45% 진행 시 시작) → 기초 매트 → 지하 골조(지하 층수 × 층당 일수). 물량은 3단계 일람표 값입니다.',
-    '동 공정: 지하 골조가 끝나면 블록 안 동마다 6작업일 간격으로 크레인을 세우고 층마다 골조 사이클을 반복합니다. 1층·포디움·피난안전층·옥탑은 특수층 사이클(12일, 옥탑 1.5배)입니다.',
-    '외장은 골조가 지정 층수만큼 앞선 뒤, 마감은 지정 층수 + 20일 뒤 시작합니다. 승강기 설치·시운전·사용승인은 마감 후 70일(랜드마크 110일)입니다. 조경은 블록 준공 200일 전부터입니다.',
+    '작업일 달력: 월~금 1일, 토요일 0.5일(공공 발주는 주 5일이라 0일), 일요일·공휴일 0일. 12~2월은 동절기 손실률, 7월은 장마 손실률(8월 70%, 6·9월 40%), 나머지 달은 비 오는 날 4%만큼 하루 작업량을 줄입니다. 한 해 평균으로 달력 한 주에 작업일은 약 4.6일입니다.',
+    '실제 현장과 맞춘 값: 굴착은 터 2,500㎡마다 1조(하루 650㎥)가 붙고 8m보다 깊으면 느려집니다. 지하 골조는 넓은 층일수록 한 층이 오래 걸립니다(3,000㎡ 1.35배, 12,000㎡ 1.7배). 단지형은 동 자리 지하를 먼저 올려 지상 골조를 시작하고 주차장 구간이 뒤따릅니다. 넓은 지상 층(물류·공장·포디움)도 층 넓이에 따라 길어집니다.',
+    '블록 공정: 착공·가설(18작업일 × 블록 넓이 보정) → 흙막이(흙막이 면적 ÷ 하루 시공 면적) → 굴토(흙막이 45% 진행 시 시작) → 기초 → 지하 골조(지하 층수 × 층당 일수). 물량은 3단계 일람표 값입니다.',
+    '동 공정: 타워크레인·거푸집 세팅 18작업일 뒤 층마다 골조 사이클을 반복합니다. 같은 블록의 동은 6작업일 간격으로 시작합니다. 1층·포디움·피난안전층·옥탑은 특수층 사이클(12일, 옥탑 1.5배)입니다.',
+    '설비·마감: 골조가 지정 층수만큼 앞선 뒤 층마다 차례로 시작하고, 한 층에 여러 공종이 차례로 들어가 끝나기까지의 기간(리드타임)을 둡니다. 아파트 한 층 마감은 115작업일, 업무 85일이고 병원·데이터센터·공장은 설치 물량(마감·설비 단가)에 비례합니다. 지상 마감은 지하 기계·전기실 마감(지하 골조 완료 + 30일 + 층당 12일)보다 먼저 끝나지 않습니다. 승강기·시운전·사용승인은 마감 뒤 80일 + 승인 절차 15일(랜드마크 110일, 병원 90일, 물류 30일, 데이터홀·팹 150일)입니다.',
+    '공법 효과: 공법 단계에서 고른 공법들의 단축·지연 배수는 겹쳐 곱한 값의 40%만 반영합니다. 그대로 곱하면 층당 4일 같은 실제에 없는 속도가 나오기 때문입니다. 이 비율에서 전통 공법 기준선은 실제 현장의 중앙값, 추천 공법 묶음은 실제 현장의 빠른 쪽 끝에 놓입니다(05.2).',
+    '발주 방식: 공공 발주는 주 5일에 표준 공기 여유 10%를 더합니다. 이렇게 하면 전통 공법 기준선이 LH 고양창릉 S-4BL 계약 공기(1,324일)와 3% 안에서 맞습니다.',
     site.id === 'yongsan' ? '착공 시점: 기반시설은 2025년 11월 착공, 주택 분양 목표는 2027년 말로 보도되었습니다. 건축 착공은 2028년 3월을 기본으로 가정했습니다. 착공 순서와 존 사이 간격으로 여러 시나리오를 비교할 수 있습니다.'
       : `착공 시점은 ${site.name}의 사업 일정과 관계없이 2028년 3월을 기본으로 둡니다. 위 착공 칸에서 바꿀 수 있습니다.`,
     '3D 부재: 거푸집·철근 단계는 주황 갱폼과 데크 합판, 타설이 끝난 층은 콘크리트 슬래브와 기둥(아파트는 벽식 내력벽), 설비 단계는 덕트·스프링클러·급수관·케이블 트레이, 창호 단계는 보호 필름이 붙은 유리와 발코니 난간, 내부 마감 단계는 실내가 비치는 유리, 준공한 층은 완성 외피로 그립니다. 초고층·업무동은 코어가 3개 층 먼저 올라갑니다.',
@@ -444,7 +455,7 @@ export function mount(root) {
   function refreshAll() {
     const ratio = ui.t / S.end;
     R = pipeline(); lmRec = derive(); $('p-t').max = S.end;
-    renderStats(); renderGantt(); renderMilestones(); renderClash();
+    renderStats(); renderGantt(); renderMilestones(); renderClash(); renderBench();
     setT(ratio * S.end, true);
   }
   $('clash').addEventListener('click', (e) => {
@@ -478,7 +489,9 @@ export function mount(root) {
   const flush = setInterval(() => { if (pendingPush) push3D(true); }, 150);
 
   $('p-t').max = S.end;
-  renderCtl(); renderStats(); renderGantt(); renderMilestones(); renderClash();
+  renderCtl(); renderStats(); renderGantt(); renderMilestones(); renderClash(); renderBench();
+  bindBenchTips($('p-bench'), tip);
+  $('p-bench').addEventListener('click', (e) => { const b = e.target.closest('[data-owner]'); if (b) update({ owner: b.dataset.owner }); });
   setT(ui.t, true);
   if (!store.get().proc) store.set({ proc: params() });
 

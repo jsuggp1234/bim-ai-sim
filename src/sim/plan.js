@@ -3,12 +3,14 @@
 // 월드 좌표 (x, y, z) — x 동쪽, z 남쪽. 대지 장축은 동쪽에서 남쪽으로 rot도 기울어 있다.
 import { siteFrom, DEFAULT_SITE_ID } from './sites.js';
 
-function frame(rotDeg) {
+// off: 대지 중심이 택지 좌표(위경도)에서 벗어난 거리 [동, 남] m. 실제 지도에 대지를 맞출 때 쓴다 (sitefit.js)
+function frame(rotDeg, off) {
   const R = rotDeg * Math.PI / 180, COS = Math.cos(R), SIN = Math.sin(R);
+  const ox = off && Number.isFinite(off[0]) ? off[0] : 0, oz = off && Number.isFinite(off[1]) ? off[1] : 0;
   return {
-    rotDeg, cos: COS, sin: SIN,
-    toWorld: (u, v) => [u * COS - v * SIN, u * SIN + v * COS],
-    toSite: (x, z) => [x * COS + z * SIN, -x * SIN + z * COS],
+    rotDeg, cos: COS, sin: SIN, off: [ox, oz],
+    toWorld: (u, v) => [u * COS - v * SIN + ox, u * SIN + v * COS + oz],
+    toSite: (x, z) => [(x - ox) * COS + (z - oz) * SIN, -(x - ox) * SIN + (z - oz) * COS],
     dirToSite: ([x, y, z]) => [x * COS + z * SIN, y, -x * SIN + z * COS],
   };
 }
@@ -97,7 +99,7 @@ function yongsanPlan(site) {
 // ---------- 일반 택지: 직사각형 근사 + 블록 격자 ----------
 const ROAD_W = 20, EDGE = 12, SPINE_W = 40;
 function genericPlan(site) {
-  const F = frame(Math.max(-45, Math.min(45, site.rot || 0)));
+  const F = frame(Math.max(-45, Math.min(45, site.rot || 0)), site.off);
   const A = site.area, asp = Math.max(1, site.aspect || 1.5);
   const W = Math.sqrt(A * asp), D = A / W;
   const SITE = { u0: -W / 2, u1: W / 2, v0: -D / 2, v1: D / 2, area: A };
@@ -195,7 +197,7 @@ function finish(pl) {
 const cache = new Map();
 export function makePlan(site) {
   const s = site || siteFrom(DEFAULT_SITE_ID);
-  const key = JSON.stringify([s.id, s.area, s.aspect, s.rot, s.netRatio, s.resShare, s.units, s.features, s.cell, s.use]);
+  const key = JSON.stringify([s.id, s.area, s.aspect, s.rot, s.off, s.netRatio, s.resShare, s.units, s.features, s.cell, s.use]);
   if (cache.has(key)) return cache.get(key);
   const pl = s.id === 'yongsan' && !s.generic ? yongsanPlan(s) : genericPlan(s);
   if (cache.size > 24) cache.clear();

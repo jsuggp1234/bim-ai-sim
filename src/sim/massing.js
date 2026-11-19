@@ -616,24 +616,41 @@ function officeBlock(block, p, opts, warnings) {
   return out;
 }
 
-// 블록 지하층: 주차 수요로 층수 산정
+// 블록 지하층: 주차 수요 + 기계·전기실로 필요한 면적만큼만 판다.
+// (예전에는 대지 전체를 B1 + 주차 2개 층 이상으로 잡아 지하 면적이 실제 단지의 두 배쯤 나왔다.
+//  실제 준공 단지는 지상·지하를 합친 연면적이 세대당 135~141㎡ 안팎이다 — src/sim/bench.js 참고)
+const MECH_SHARE = 0.045; // 기계·전기실·저수조·지하 공용 = 지상 연면적의 4.5%
 function basement(block, bldgs, p) {
-  const L = block.lot;
-  const foot = (L.u1 - L.u0 - 2 * SETBACK) * (L.v1 - L.v0 - 2 * SETBACK) * 0.9;
-  let spaces = 0;
-  bldgs.forEach(b => b.floors.forEach(f => {
-    if (f.use === 'res') spaces += f.units * p.parkRes * (b.type === 't59' ? 0.85 : b.type === 't114' ? 1.25 : 1);
-    else if (f.use === 'officetel') spaces += f.units * p.parkOfficetel;
-    else if (f.use === 'office' || f.use === 'retail') spaces += f.area / p.parkOfficePer;
-  }));
+  const L = block.lot, s = SETBACK;
+  const full = { u0: L.u0 + s, u1: L.u1 - s, v0: L.v0 + s, v1: L.v1 - s };
+  const fullA = (full.u1 - full.u0) * (full.v1 - full.v0) * 0.9;
+  let spaces = 0, above = 0, top = 0;
+  bldgs.forEach(b => {
+    let n = 0;
+    b.floors.forEach(f => {
+      if (f.lv > 0) { above += f.area; if (!f.roof) n++; }
+      if (f.use === 'res') spaces += f.units * p.parkRes * (b.type === 't59' ? 0.85 : b.type === 't114' ? 1.25 : 1);
+      else if (f.use === 'officetel') spaces += f.units * p.parkOfficetel;
+      else if (f.use === 'office' || f.use === 'retail') spaces += f.area / p.parkOfficePer;
+    });
+    top = Math.max(top, n);
+  });
   spaces = Math.ceil(spaces);
-  const parkLv = Math.max(2, Math.ceil(spaces * PARK_AREA / foot));
-  const floors = [{ lv: -1, name: 'B1', use: 'b1', h: p.hB1, area: foot, units: 0, s: 1 }];
-  for (let i = 0; i < parkLv; i++) floors.push({ lv: -2 - i, name: 'B' + (2 + i), use: 'parking', h: p.hPark, area: foot, units: 0, s: 1 });
+  const need = spaces * PARK_AREA + Math.max(400, above * MECH_SHARE);
+  // 층수: 필요한 면적을 대지 안에서 담을 수 있는 만큼. 고층 동은 기초 묻힘 깊이 때문에 최소 층수가 있다
+  const minLv = top >= 40 ? 3 : (top >= 12 || spaces > 150) ? 2 : 1;
+  const nLv = Math.max(minLv, Math.ceil(need / fullA));
+  const per = Math.min(fullA, need / nLv);
+  // 파는 자리: 필요한 면적만큼 줄이되, 동이 선 자리는 모두 덮는다 (동 지하와 주차장이 이어진다)
+  const k = Math.sqrt(per / fullA), cu = (full.u0 + full.u1) / 2, cv = (full.v0 + full.v1) / 2, hw = (full.u1 - full.u0) / 2 * k, hd = (full.v1 - full.v0) / 2 * k;
+  const rect = { u0: cu - hw, u1: cu + hw, v0: cv - hd, v1: cv + hd };
+  bldgs.forEach(b => { const r = b.rect; if (!r) return; rect.u0 = Math.min(rect.u0, r.u0 - 3); rect.u1 = Math.max(rect.u1, r.u1 + 3); rect.v0 = Math.min(rect.v0, r.v0 - 3); rect.v1 = Math.max(rect.v1, r.v1 + 3); });
+  rect.u0 = Math.max(rect.u0, full.u0); rect.u1 = Math.min(rect.u1, full.u1); rect.v0 = Math.max(rect.v0, full.v0); rect.v1 = Math.min(rect.v1, full.v1);
+  const floors = [{ lv: -1, name: 'B1', use: 'b1', h: p.hB1, area: per, units: 0, s: 1 }];
+  for (let i = 1; i < nLv; i++) floors.push({ lv: -1 - i, name: 'B' + (1 + i), use: 'parking', h: p.hPark, area: per, units: 0, s: 1 });
   let y = 0; floors.forEach(f => { f.y1 = y; y -= f.h; f.y0 = y; });
-  const s = SETBACK, rect = { u0: L.u0 + s, u1: L.u1 - s, v0: L.v0 + s, v1: L.v1 - s };
   return { id: `${block.id}-B`, block: block.id, zone: block.zone, kind: 'basement', spaces, rect, parts: [boxPart(rect.u0, rect.u1, rect.v0, rect.v1, ALLWIN)],
-    core: { u: (rect.u0 + rect.u1) / 2, v: (rect.v0 + rect.v1) / 2 }, perim: 2 * (rect.u1 - rect.u0 + rect.v1 - rect.v0), plate: foot, floors };
+    core: { u: (rect.u0 + rect.u1) / 2, v: (rect.v0 + rect.v1) / 2 }, perim: 2 * (rect.u1 - rect.u0 + rect.v1 - rect.v0), plate: per, floors, need };
 }
 
 // ---------- 전체 ----------

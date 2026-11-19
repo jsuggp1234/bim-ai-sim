@@ -55,13 +55,14 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   const site = new THREE.Group(); site.name = 'site'; scene.add(site);
   const bim = createBim(site, P, { lite: LITE });
   let plan = null, ctx = null, ctx3d = null, gen = null;
+  const stale = [];
   let mode = 'use', agg = null, selected = null, build = null, xray = false;
 
   // ---------- 장면 ----------
   function setPlan(pl, c) {
     const changed = pl !== plan;
     plan = pl;
-    site.rotation.y = -plan.rotDeg * Math.PI / 180;
+    site.rotation.y = -plan.rotDeg * Math.PI / 180; site.position.set(plan.off ? plan.off[0] : 0, 0, plan.off ? plan.off[1] : 0);
     const R0 = Math.hypot(plan.SITE.u1 - plan.SITE.u0, plan.SITE.v1 - plan.SITE.v0) / 2;
     const half = Math.max(1100, R0 + 800);
     Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half, near: 10, far: 14000 });
@@ -71,7 +72,8 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   }
   function setContext(c) {
     if (!plan) return;
-    if (ctx3d) { scene.remove(ctx3d.group); ctx3d.dispose(); ctx3d = null; }
+    // 옛 맥락은 새 맥락을 한 번 그린 뒤에 지운다: 같은 셰이더를 계속 쓰게 해서 맥락을 바꿀 때마다 다시 컴파일하지 않는다
+    if (ctx3d) { scene.remove(ctx3d.group); stale.push(ctx3d); ctx3d = null; }
     ctx = c;
     ctx3d = buildContext(ctx, plan, P, { lite: LITE, maxTex: renderer.capabilities.maxTextureSize, aniso: Math.min(8, renderer.capabilities.getMaxAnisotropy()) });
     ctx3d.stencilMats.forEach(m => Object.assign(m, { stencilWrite: true, stencilFunc: THREE.NotEqualStencilFunc, stencilRef: 1, stencilWriteMask: 0 }));
@@ -149,11 +151,11 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   const R0 = () => (plan ? Math.hypot(plan.SITE.u1 - plan.SITE.u0, plan.SITE.v1 - plan.SITE.v0) / 2 : 600);
   const dir = (x, y, z, d) => new THREE.Vector3(x, y, z).normalize().multiplyScalar(d);
   const VIEWS = {
-    axon: { cam: 'ortho', p: () => dir(-0.52, 0.52, 0.68, 4200), t: () => new THREE.Vector3(0, 40, 0), half: () => R0() * 1.05 + 160 },
-    hero: { cam: 'ortho', p: () => dir(-0.62, 0.5, 0.6, 4200), t: () => new THREE.Vector3(0, 0, 0), half: () => R0() * 0.86 + 90 },
-    bird: { cam: 'persp', p: () => dir(-0.45, 0.42, 0.79, R0() * 2.6 + 650), t: () => new THREE.Vector3(0, 30, 0) },
-    wide: { cam: 'persp', p: () => dir(-0.45, 0.48, 0.75, R0() * 4.5 + 2600), t: () => new THREE.Vector3(0, 0, 0) },
-    top: { cam: 'ortho', p: () => new THREE.Vector3(0, 6000, 1), t: () => new THREE.Vector3(0, 0, 0), half: () => R0() * 0.95 + 120 },
+    axon: { rel: true, cam: 'ortho', p: () => dir(-0.52, 0.52, 0.68, 4200), t: () => new THREE.Vector3(0, 40, 0), half: () => R0() * 1.05 + 160 },
+    hero: { rel: true, cam: 'ortho', p: () => dir(-0.62, 0.5, 0.6, 4200), t: () => new THREE.Vector3(0, 0, 0), half: () => R0() * 0.86 + 90 },
+    bird: { rel: true, cam: 'persp', p: () => dir(-0.45, 0.42, 0.79, R0() * 2.6 + 650), t: () => new THREE.Vector3(0, 30, 0) },
+    wide: { rel: true, cam: 'persp', p: () => dir(-0.45, 0.48, 0.75, R0() * 4.5 + 2600), t: () => new THREE.Vector3(0, 0, 0) },
+    top: { rel: true, cam: 'ortho', p: () => new THREE.Vector3(0, 6000, 1), t: () => new THREE.Vector3(0, 0, 0), half: () => R0() * 0.95 + 120 },
     river: { cam: 'persp', ok: () => !!(plan && plan.views.water), p: () => { const t = nearestWater(); return W(t[0], t[1], 28); }, t: () => W(0, 0, 120) },
     east: { cam: 'persp', p: () => W(plan.SITE.u1 + 650, 40, 160), t: () => W(0, 0, 90) },
     namsan: { cam: 'persp', ok: () => !!(plan && plan.views.peak), p: () => { const pt = plan.views.peak.pt; return W(pt[0], pt[1], pt[2]); }, t: () => W(0, 0, 60) },
@@ -174,6 +176,8 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     useCamera(V.cam);
     if (V.cam === 'ortho') { orthoHalf = V.half(); ortho.zoom = 1; }
     camera.position.copy(V.p()); controls.target.copy(V.t());
+    // 대지가 택지 좌표에서 벗어나 있으면(지도에 맞춘 대지) 대지 중심을 본다
+    if (V.rel && plan.off) { camera.position.x += plan.off[0]; camera.position.z += plan.off[1]; controls.target.x += plan.off[0]; controls.target.z += plan.off[1]; }
     camera.updateProjectionMatrix(); controls.update(); dirty = true;
     viewKind = kind;
     if (onView) onView(kind);
@@ -338,6 +342,7 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     persp.near = Math.max(0.5, Math.min(25, dist / 250)); persp.aspect = asp; persp.updateProjectionMatrix();
     ortho.left = -orthoHalf * asp; ortho.right = orthoHalf * asp; ortho.top = orthoHalf; ortho.bottom = -orthoHalf; ortho.updateProjectionMatrix();
     tickWater(); look.render(camera);
+    if (stale.length) { stale.forEach(o => o.dispose()); stale.length = 0; }
   }
   function frame() {
     if (!alive) return;
@@ -392,6 +397,7 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     alive = false; ro.disconnect(); controls.dispose(); clearTimeout(skyT);
     look.dispose();
     if (ctx3d) ctx3d.dispose();
+    stale.forEach(o => o.dispose()); stale.length = 0;
     bim.dispose();
     renderer.dispose(); renderer.forceContextLoss();
     labelBox.remove(); compass.remove(); scaleBar.remove(); attrib.remove(); canvas.remove();

@@ -1,7 +1,10 @@
 // 03 매스 (주거 외 용도): 용도별 생성 규칙으로 획지에 동·설비를 배치한다. 변수를 바꾸면 물량·공정·예산·위험이 이어서 다시 계산된다.
 import { XMETA, XDEF, XKEYS, KIND_NAME, floorUseName } from '../sim/massx.js';
 import { useOf, FLOOR_USES } from '../sim/uses.js';
-import { fallbackFor, osmFor } from '../sim/ctxload.js';
+import { fallbackFor, osmFor, osmReady, rawReady } from '../sim/ctxload.js';
+import { mapFacts } from '../sim/sitefit.js';
+import { mapCardHTML, ctxBadge } from '../ui/mapcard.js';
+import { fitFromMap, saveFacts, fitKey } from '../store.js';
 import { createViewer } from '../sim/viewer.js';
 import { store } from '../store.js';
 import { pipeline, fmt, won, onThemeChange, tip } from '../pipeline.js';
@@ -33,7 +36,7 @@ export function mount(root) {
   <section class="ws" aria-label="3D 매스 작업 화면">
     <div class="stage" id="x-stage"></div>
     <div class="ov f-top"><div class="seg" id="x-modes" role="group" aria-label="색 표시">${MODES.map(([k, n]) => `<button type="button" data-mode="${k}" aria-pressed="${k === ui.mode}">${n}</button>`).join('')}</div>
-      <div class="seg" id="x-views" role="group" aria-label="시점">${VIEWS.map(([k, n]) => `<button type="button" data-view="${k}" aria-pressed="${k === 'axon'}">${n}</button>`).join('')}</div></div>
+      <div class="seg" id="x-views" role="group" aria-label="시점">${VIEWS.map(([k, n]) => `<button type="button" data-view="${k}" aria-pressed="${k === 'axon'}">${n}</button>`).join('')}</div><span class="ctxb" id="x-ctxb" hidden></span></div>
     <aside class="float f-l" id="x-fl" aria-label="배치 변수">
       <div class="f-head"><span class="label-sm">Parameters · 배치 변수</span><button type="button" data-fold="x-fl" aria-expanded="true" aria-label="변수 패널 접기">−</button></div>
       <div class="f-body m-ctl">${GEST ? `<div class="grp gx" id="x-gx"><div class="sec-h" style="margin-bottom:6px"><span class="label-sm">형태 제스처 · Form</span></div><div id="x-gxb"></div></div>` : ''}<div class="grp"><div class="sec-h" style="margin-bottom:8px"><span class="label-sm">${u.code} · ${u.name}</span><button class="chipbtn" id="x-reset" type="button">기본값</button></div><div id="x-ctl"></div></div>
@@ -70,7 +73,7 @@ export function mount(root) {
   function recompute() {
     store.set({ massx: { ...(store.get().massx || {}), [use]: params } });
     R = pipeline();
-    if (viewer) { viewer.setModel(R.gen); paint(); }
+    if (viewer) { const c = pickCtx(); if (c !== ctx) { ctx = c; viewer.setPlan(R.gen.plan, ctx); } viewer.setModel(R.gen); paint(); }
     syncCtl(); renderStats(); renderSide(); renderTable(); renderUses(); renderLegend();
   }
   const usesOf = () => Object.entries(R.gen.totals.byUse).filter(([k, v]) => v > 0 && FLOOR_USES[k]).sort((a, b) => b[1] - a[1]);
@@ -135,17 +138,40 @@ export function mount(root) {
   }
 
   // ---------- 맥락 지도 ----------
-  let ctx = fallbackFor(R.gen.plan);
-  async function loadMap() {
-    if (ctl) ctl.abort(); ctl = new AbortController(); const my = ctl;
-    $('x-map').textContent = '실제 지도(OpenStreetMap) 불러오는 중…';
-    try {
-      const c = await osmFor(R.gen.plan, { signal: my.signal, onStep: (m) => { if (my === ctl) $('x-map').textContent = m; } });
-      if (!alive || my !== ctl) return;
-      if (c) { ctx = c; if (viewer) viewer.setContext(ctx); $('x-map').textContent = '실제 지도 맥락 (OpenStreetMap)'; }
-      else $('x-map').textContent = '지도 자료가 없어 자동 생성 맥락을 씁니다.';
-    } catch (e) { if (alive && my === ctl) $('x-map').textContent = '지도를 받지 못해 자동 생성 맥락을 씁니다.'; }
+  // 지도가 오면 대지를 도로망에 맞추고(택지마다 한 번), 대지 둘레를 실제 지도에서 잰다 (공법 단계의 인접 조건이 이 값을 쓴다)
+  const pickCtx = () => (store.get().useMap !== false && osmReady(R.gen.plan)) || fallbackFor(R.gen.plan);
+  let ctx = pickCtx(), facts = mapFacts(ctx, R.gen.plan), mapState = ctx.source === 'osm' ? 'osm' : 'fallback', mapMsg = '';
+  function renderMap() {
+    $('x-map').innerHTML = mapCardHTML({ state: mapState, msg: mapMsg, ctx, site: R.site, facts, stats: viewer && viewer.stats, useFit: store.get().useFit });
+    const bd = $('x-ctxb'), bt = ctxBadge(mapState, ctx); if (bd) { bd.hidden = !bt; bd.textContent = bt; }
   }
+  function showAll() { if (viewer) { viewer.setPlan(R.gen.plan, ctx); viewer.setModel(R.gen); paint(); } renderStats(); renderSide(); renderTable(); renderUses(); }
+  function onMap(final) {
+    const raw = rawReady(R.site); if (!raw) return;
+    if (fitFromMap(raw)) { R = pipeline(); ctx = pickCtx(); showAll(); }
+    else { const c = osmReady(R.gen.plan); if (c) { ctx = c; if (viewer) viewer.setContext(ctx); } }
+    facts = mapFacts(ctx, R.gen.plan);
+    if (saveFacts(R.site, facts)) R = pipeline();
+    if (final) mapState = 'osm';
+    renderMap();
+  }
+  async function loadMap(force) {
+    if (ctl) ctl.abort();
+    if (!force && store.get().useMap === false) { mapState = 'off'; renderMap(); return; }
+    if (force) store.set({ useMap: true });
+    ctl = new AbortController(); const my = ctl, key = fitKey(R.site), live = () => alive && my === ctl && fitKey(R.site) === key;
+    mapState = 'loading'; mapMsg = ''; renderMap();
+    try {
+      await osmFor(R.gen.plan, { signal: my.signal, onStep: (m) => { mapMsg = m; if (my === ctl) renderMap(); }, onNear: () => { if (live()) onMap(false); } });
+      if (!live()) return;
+      onMap(true);
+    } catch (e) {
+      if (!live()) return;
+      if (ctx.source === 'osm') mapState = 'osm'; else { mapState = 'failed'; mapMsg = String(e && e.message || e); }
+    }
+    renderMap();
+  }
+  function setFit(on) { store.set({ useFit: on }); R = pipeline(); ctx = pickCtx(); facts = mapFacts(ctx, R.gen.plan); showAll(); renderMap(); if (on) onMap(mapState === 'osm'); }
 
   // ---------- 이벤트 ----------
   let q = 0;
@@ -157,6 +183,9 @@ export function mount(root) {
     if (!q) q = requestAnimationFrame(() => { q = 0; if (alive) recompute(); });
   });
   root.addEventListener('click', (e) => {
+    const mb = e.target.closest('[data-map]');
+    if (mb) { const k = mb.dataset.map; if (k === 'retry') loadMap(true); if (k === 'fit-off') setFit(false); if (k === 'fit-on') setFit(true);
+      if (k === 'off') { if (ctl) ctl.abort(); store.set({ useMap: false }); ctx = fallbackFor(R.gen.plan); facts = null; if (viewer) viewer.setContext(ctx); mapState = 'off'; R = pipeline(); renderMap(); } return; }
     if (e.target.id === 'x-reset') { params = { ...XDEF[use] }; renderCtl(); recompute(); return; }
     if (e.target.id === 'x-pickx') { ui.pick = null; renderPick(); if (viewer) viewer.select(null); return; }
     const md = e.target.closest('[data-mode]'); if (md) { ui.mode = md.dataset.mode; $('x-modes').querySelectorAll('[data-mode]').forEach(x => x.setAttribute('aria-pressed', String(x === md))); paint(); renderLegend(); return; }
@@ -179,6 +208,7 @@ export function mount(root) {
   else $('x-stage').insertAdjacentHTML('beforeend', '<div class="ov" style="left:14px;right:14px;top:60px"><div class="warnbox">이 기기에서 WebGL을 쓸 수 없어 3D를 표시하지 못했습니다. 표와 지표는 그대로 쓸 수 있습니다.</div></div>');
   const offTheme = onThemeChange(() => { if (viewer) viewer.applyTheme(); });
   renderCtl(); renderRules(); renderStats(); renderSide(); renderTable(); renderUses(); renderLegend();
-  if (store.get().useMap !== false) loadMap(); else $('x-map').textContent = '자동 생성 맥락';
+  renderMap();
+  loadMap(false);
   return () => { alive = false; if (ctl) ctl.abort(); offTheme(); if (viewer) viewer.dispose(); tip(null); };
 }
