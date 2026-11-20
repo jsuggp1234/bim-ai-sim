@@ -201,6 +201,7 @@ export function mount(root) {
     main: () => mainBuilding(R.gen),
   });
   viewer = createViewer($('x-stage'), {
+    dayToggle: true,
     onPick: (bi, fi) => { ui.pick = bi == null ? null : { bi, fi }; renderPick(); },
     onView: (k) => { $('x-views').querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === k))); },
   });

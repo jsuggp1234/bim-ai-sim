@@ -1,6 +1,6 @@
 // 2단계: 매스 배치 (택지 선택 → 블록·주동 형식·높이 계획·인동간격 + 일조·조망·주변 영향)
 // 택지는 1단계 후보지 8곳 또는 직접 입력. 주변 맥락은 실제 지도(OpenStreetMap)를 받으면 그것으로, 아니면 자동 생성
-import { DEFAULTS, META, generate, USE_LABEL, TYPOLOGIES, FORMS, RULES } from '../sim/massing.js';
+import { DEFAULTS, META, generate, USE_LABEL, TYPOLOGIES, FORMS, RULES, LAYOUTS } from '../sim/massing.js';
 import { gestureHTML, bindGesture } from '../ui/gesture-ui.js';
 import { mainBuilding } from '../sim/impact.js';
 import { meets, sunAltAz, analyze, unitSamples, contextSamples, projectBoxes } from '../sim/analysis.js';
@@ -41,6 +41,19 @@ const TYPO_ICON = {
   mixed: '<rect x="11" y="2" width="12" height="11"/><rect x="3" y="16" width="28" height="7"/>',
 };
 const TYPO_ORDER = ['tower', 'y', 'slab', 'l', 'v', 'court', 'mixed'];
+// 배치 방식 아이콘 (위에서 본 단지: 동 = 작은 막대)
+const bar = (x, y, r = 0, w = 8, h = 3.4) => `<rect x="${x - w / 2}" y="${y - h / 2}" width="${w}" height="${h}"${r ? ` transform="rotate(${r} ${x} ${y})"` : ''}/>`;
+const LAY_ICON = {
+  auto: [6, 17, 28].map(x => bar(x, 6)).join('') + [6, 17, 28].map(x => bar(x, 20)).join('') + '<path class="s" d="M17 10.5v5M14.5 13h5"/>',
+  rows: [6, 17, 28].map(x => bar(x, 6)).join('') + [6, 17, 28].map(x => bar(x, 20)).join(''),
+  multi: [5, 13].map(y => [6, 17, 28].map(x => bar(x, y)).join('')).join('') + [6, 17, 28].map(x => bar(x, 21)).join(''),
+  stagger: [6, 17, 28].map(x => bar(x, 5)).join('') + [11.5, 22.5].map(x => bar(x, 13)).join('') + [6, 17, 28].map(x => bar(x, 21)).join(''),
+  diag: [7, 17, 27].map(x => bar(x, 7, -24)).join('') + [7, 17, 27].map(x => bar(x, 19, -24)).join(''),
+  fan: bar(6, 8, 24) + bar(17, 6, 0) + bar(28, 8, -24) + bar(6, 20, 24) + bar(17, 18, 0) + bar(28, 20, -24),
+  zig: [[6, -22], [17, 22], [28, -22]].map(([x, r]) => bar(x, 7, r)).join('') + [[6, 22], [17, -22], [28, 22]].map(([x, r]) => bar(x, 19, r)).join(''),
+  ring: bar(11, 4.5) + bar(23, 4.5) + bar(4.5, 14, 90) + bar(29.5, 14, 90) + bar(4.5, 22.5, 90, 5) + bar(29.5, 22.5, 90, 5) + '<rect class="s" x="13" y="12" width="8" height="8" rx="1"/>',
+};
+const LAY_ORDER = ['auto', 'rows', 'multi', 'stagger', 'diag', 'fan', 'zig', 'ring'];
 // 조망 이름은 택지마다 다르다 (한강·양재천·중랑천 / 남산·청계산·불암산 …)
 const modesFor = (pl) => [['real', '실사'], ['use', '용도'], ['sun', '일조'], ...(pl.views.water ? [['river', pl.views.water.name + ' 조망']] : []), ...(pl.views.peak ? [['namsan', pl.views.peak.name + ' 조망']] : []), ['ctx', '주변 영향'], ['model', '흰 모형']];
 const viewsFor = (pl) => [['axon', 'AXON'], ['bird', '조감'], ['wide', '광역'], ['top', '평면'], ['street', '가로'], ...(pl.views.water ? [['river', pl.views.water.name]] : []), ['east', '동측'], ...(pl.views.peak ? [['namsan', pl.views.peak.name]] : [])];
@@ -66,6 +79,7 @@ export function mount(root) {
   let params = { ...DEFAULTS, ...(S.mass || paramsForSite(site, DEFAULTS)) };
   delete params.site;
   if (!TYPOLOGIES[params.typology]) params.typology = DEFAULTS.typology;
+  if (!LAYOUTS[params.layout]) params.layout = DEFAULTS.layout;
   if (!S.mass) store.set({ mass: params, massFrom: 'default' });
   const ui = { mode: 'real', decl: -23.44, hour: 10, view: 'axon', pick: null, block: null };
   const map = { state: 'fallback', msg: '', ctl: null, facts: null };
@@ -101,6 +115,8 @@ export function mount(root) {
         <div class="src-banner" id="m-src"></div>
         <div class="grp"><div class="sec-h" style="margin-bottom:8px"><span class="label-sm">Scenario</span><button class="chipbtn" id="m-reset" type="button">기본값</button></div><div class="presets" id="m-presets"></div></div>
         <div class="grp"><span class="label-sm">주동 형식</span><div class="typo" id="m-typo" role="group" aria-label="주동 형식"></div><div class="note" id="m-typo-note" style="margin-top:8px"></div></div>
+        <div class="grp"><span class="label-sm">배치 방식</span><div class="typo" id="m-lay" role="group" aria-label="배치 방식"></div><div class="note" id="m-lay-note" style="margin-top:8px"></div>
+          <label class="lay-fs"><span>남측 열 주동 형식</span><select id="m-forms" aria-label="남측 열 주동 형식"></select></label></div>
         <div class="grp gx" id="m-gx"><div class="sec-h" style="margin-bottom:6px"><span class="label-sm">형태 제스처 · Form</span></div><div id="m-gxb"></div></div>
         <div class="grp"><span class="label-sm" style="display:block">용도지역 · 적용 법규</span>
           <div class="seg" id="m-zone" role="group" aria-label="업무지원존 용도지역" style="margin-top:6px"></div>
@@ -164,6 +180,10 @@ export function mount(root) {
     $('m-presets').innerHTML = PRESETS.map(x => `<button type="button" class="chipbtn" data-preset="${x.key}" aria-pressed="${pr === x}">${x.label}</button>`).join('');
     $('m-typo').innerHTML = TYPO_ORDER.map(k => `<button type="button" data-typo="${k}" aria-pressed="${params.typology === k}" title="${TYPOLOGIES[k].name}"><svg viewBox="0 0 34 26" aria-hidden="true">${TYPO_ICON[k]}</svg>${TYPOLOGIES[k].name.replace(' 중정형', '')}</button>`).join('');
     const ty = TYPOLOGIES[params.typology];
+    const lay = LAYOUTS[params.layout] ? params.layout : 'auto';
+    $('m-lay').innerHTML = LAY_ORDER.map(k => `<button type="button" data-lay="${k}" aria-pressed="${lay === k}" title="${LAYOUTS[k].name}"><svg viewBox="0 0 34 26" aria-hidden="true">${LAY_ICON[k]}</svg>${LAYOUTS[k].name}</button>`).join('');
+    $('m-lay-note').textContent = LAYOUTS[lay].note + (['diag', 'fan', 'zig'].includes(lay) ? ` 트는 각은 ‘주동 회전 각’(지금 ${params.rot ?? DEFAULTS.rot}°)으로 바꿉니다.` : '');
+    $('m-forms').innerHTML = `<option value="">주동 형식과 같게</option>` + Object.keys(FORMS).map(k => `<option value="${k}"${params.formS === k ? ' selected' : ''}>${FORMS[k].name}</option>`).join('');
     $('m-typo-note').textContent = params.typology === 'mixed' ? '북측 열은 탑상형, 남측 열은 판상형으로 둡니다. ' + FORMS.slab.note : FORMS[ty.rows[0]].note;
     $('m-zone').innerHTML = [['gc', '일반상업'], ['semi', '준주거']].map(([k, n]) => `<button type="button" data-zone="${k}" aria-pressed="${params.resZone === k}">${n}</button>`).join('');
     $('m-zone-note').textContent = params.resZone === 'gc'
@@ -368,8 +388,8 @@ export function mount(root) {
   function renderLegend() {
     let html;
     if (ui.mode === 'real') {
-      html = [['--s-glass', '유리 커튼월·창'], ['--s-w-res', '외벽 패널'], ['--s-frame', '멀리언·프레임'], ['--s-park', '조경·녹지'], ['--s-w-com', ctx.source === 'osm' ? '주변 건물 (실제 지도)' : '주변 건물 (근사)']]
-        .map(([c, n]) => `<span class="lg"><i style="background:var(${c})"></i>${n}</span>`).join('') + '<span class="note">준공 후 모습 · 용도별 색은 \'용도\'</span>';
+      html = [['--s-pj-glass', '유리 커튼월·창'], ['--s-pj-res', '외벽 패널'], ['--s-pj-base', '저층부 석재·상가'], ['--s-pj-mech', '기계실·옥탑'], ['--s-park', '조경·녹지'], ['--s-w-com', ctx.source === 'osm' ? '주변 건물 (실제 지도)' : '주변 건물 (근사)']]
+        .map(([c, n]) => `<span class="lg"><i style="background:var(${c})"></i>${n}</span>`).join('') + '<span class="note">준공 후 모습 · 계획 건물만 재료 색 · 용도별 색은 \'용도\'</span>';
     } else if (ui.mode === 'use') {
       html = [['--res', '아파트'], ['--officetel', '오피스텔'], ['--office', '업무'], ['--retail', '상업·로비·근생'], ['--refuge', '피난안전층'], ['--mech', '옥탑·기계'], ['--s-w-com', ctx.source === 'osm' ? '주변 건물 (실제 지도)' : '주변 건물 (근사)']]
         .map(([c, n]) => `<span class="lg"><i style="background:var(${c})"></i>${n}</span>`).join('');
@@ -493,10 +513,12 @@ export function mount(root) {
     onChange: (patch, slider) => { params = { ...params, ...patch }; gxDrag = !!slider; queue(); },
     main: () => (gen ? mainBuilding(gen) : null),
   });
+  fl.addEventListener('change', e => { if (e.target.id === 'm-forms') { params = { ...params, formS: e.target.value }; queue(); } });
   fl.addEventListener('click', e => {
     const pr = e.target.closest('[data-preset]'), ty = e.target.closest('[data-typo]'), zn = e.target.closest('[data-zone]'), sw = e.target.closest('[data-sidewin]');
     if (pr) { params = { ...params, ...presetsFor(site).find(x => x.key === pr.dataset.preset).p }; queue(); }
     if (ty) { params = { ...params, typology: ty.dataset.typo }; queue(); }
+    const ly = e.target.closest('[data-lay]'); if (ly) { params = { ...params, layout: ly.dataset.lay }; queue(); }
     if (zn) { params = { ...params, resZone: zn.dataset.zone }; queue(); }
     if (sw) { params = { ...params, sideWin: +sw.dataset.sidewin }; queue(); }
     if (e.target.id === 'm-reset') { params = paramsForSite(site, DEFAULTS); store.set({ massFrom: 'default' }); queue(); }
@@ -648,6 +670,7 @@ export function mount(root) {
 
   // ---------- 3D ----------
   viewer = createViewer($('m-stage'), {
+    dayToggle: true,
     onPick: (bi, fi) => { ui.pick = bi == null ? null : { bi, fi }; renderPick(); },
     onView: (k) => { ui.view = k; $('m-views').querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.view === k))); },
   });

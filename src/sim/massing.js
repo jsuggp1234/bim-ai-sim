@@ -15,6 +15,9 @@ export const DEFAULTS = {
   rentalShare: 30,      // 아파트 중 공공임대 비율(%) — 동·층에 섞어 배치(소셜믹스)
   mix59: 30, mix84: 50, mix114: 20, // 아파트 세대 구성(%)
   typology: 'tower',    // 주동 형식: tower | y | slab | l | v | court | mixed
+  layout: 'auto',       // 배치 방식: auto 두 열(모자라면 열 추가) | rows 남북 두 열 | multi 여러 열 | stagger 엇갈림 | diag 사선 | fan 부채꼴 | zig 지그재그 | ring 둘레(중정)
+  rot: 18,              // 주동 회전 각(°): 사선·부채꼴·지그재그 배치에서 쓴다
+  formS: '',            // 남측 열 주동 형식 ('' = 주동 형식과 같게)
   resZone: 'gc',        // 주거 블록 용도지역: gc 일반상업(법 61조② 적용 제외) | semi 준주거·주거지역(시행령 86조③ 적용)
   sideWin: 0,           // 탑상·Y자형 측면 채광창 (1 있음: 측면도 가목 0.5H 적용, 0 0.5㎡ 미만 창만: 측벽으로 보아 4m)
   resMaxFloors: 55,     // 주거 최고 층수 (스카이라인 정점)
@@ -43,6 +46,7 @@ export const META = {
   mix59: { label: '전용 59㎡ 비율', unit: '%', min: 0, max: 100, step: 1, group: 'res' },
   mix84: { label: '전용 84㎡ 비율', unit: '%', min: 0, max: 100, step: 1, group: 'res' },
   mix114: { label: '전용 114㎡ 비율', unit: '%', min: 0, max: 100, step: 1, group: 'res' },
+  rot: { label: '주동 회전 각', unit: '°', min: -40, max: 40, step: 1, group: 'res', note: '사선·부채꼴·지그재그 배치에서 주동을 트는 각' },
   podiumRes: { label: '주거 포디움 층수', unit: '층', min: 0, max: 4, step: 1, group: 'res' },
   resMaxFloors: { label: '주거 최고 층수 (정점)', unit: '층', min: 7, max: 80, step: 1, group: 'height' },
   skylineWest: { label: '스카이라인 낮은 끝 비율', unit: '%', min: 30, max: 100, step: 1, group: 'height', note: '대지 끝을 낮추고 랜드마크·복합 블록 쪽으로 높아지는 스카이라인' },
@@ -95,6 +99,17 @@ export const TYPOLOGIES = {
   mixed: { name: '혼합형', rows: ['tower', 'slab'] },
 };
 
+// 배치 방식: 같은 주동 형식이라도 열 수·엇갈림·회전·둘레 배치로 단지 구성이 달라진다
+export const LAYOUTS = {
+  auto: { name: '자동', note: '남북 두 열로 두고, 목표 세대를 못 채우면 열을 더 넣습니다.' },
+  rows: { name: '두 열', note: '북측·남측 두 열. 가운데를 넓은 마당으로 비웁니다.' },
+  multi: { name: '여러 열', note: '대지 깊이에 맞춰 3~4열까지. 낮은 층수로 같은 세대를 채웁니다.' },
+  stagger: { name: '엇갈림', note: '앞뒤 열을 반 칸씩 엇갈려 뒤 동이 앞 동 사이로 조망을 얻습니다.' },
+  diag: { name: '사선', note: '모든 동을 같은 각으로 틀어 남동·남서를 보게 하고 맞보기를 피합니다.' },
+  fan: { name: '부채꼴', note: '가운데는 정남, 양 끝으로 갈수록 바깥으로 틀어 조망을 넓게 폅니다.' },
+  zig: { name: '지그재그', note: '이웃한 동을 번갈아 좌우로 틀어 마주보는 창을 어긋나게 합니다.' },
+  ring: { name: '둘레(중정)', note: '북·동·서 변을 따라 동을 두르고 남쪽으로 열린 큰 중정을 만듭니다.' },
+};
 const OFFICETEL = { area: 45, upf: 10, aspect: 2.6 };
 const SETBACK = 6;      // 획지 경계 건축선 후퇴
 const SIDE_GAP = 12;    // 같은 열 동 사이 최소 간격 (소방차 진입·측벽 4m보다 여유)
@@ -269,6 +284,18 @@ function placeForm(F, uc, vc) {
     core: { u: F.core[0] + uc, v: F.core[1] + vc },
   };
 }
+// 놓인 주동을 중심(uc, vc) 둘레로 th만큼 돌린다 (부분·세대 표본점·코어를 함께)
+function rotatePlaced(pl, uc, vc, th) {
+  if (!th) return pl;
+  const c = Math.cos(th), s = Math.sin(th), R = (u, v) => [uc + (u - uc) * c - (v - vc) * s, vc + (u - uc) * s + (v - vc) * c];
+  const cr = R(pl.core.u, pl.core.v);
+  return {
+    parts: pl.parts.map(q => { const [u, v] = R(q.cu, q.cv); return mkPart(u, v, q.w, q.d, q.a + th, q.faces); }),
+    units: pl.units.map(us => us.map(([u, v, nu, nv]) => { const [a, b] = R(u, v); return [a, b, nu * c - nv * s, nu * s + nv * c]; })),
+    core: { u: cr[0], v: cr[1] },
+  };
+}
+const shiftPlaced = (pl, du, dv) => (!du && !dv ? pl : { parts: pl.parts.map(q => mkPart(q.cu + du, q.cv + dv, q.w, q.d, q.a, q.faces)), units: pl.units.map(us => us.map(([u, v, nu, nv]) => [u + du, v + dv, nu, nv])), core: { u: pl.core.u + du, v: pl.core.v + dv } });
 const rectOf = (parts) => ({ u0: Math.min(...parts.map(q => q.u0)), u1: Math.max(...parts.map(q => q.u1)), v0: Math.min(...parts.map(q => q.v0)), v1: Math.max(...parts.map(q => q.v1)) });
 
 // ---------- 높이 계획 ----------
@@ -390,7 +417,8 @@ function rule1Dist(parts, lines) {
 function housingBlock(block, unitsByType, p, warnings, ht) {
   const L = block.lot, uS = L.u0 + SETBACK, uE = L.u1 - SETBACK, vN = L.v0 + SETBACK, vS = L.v1 - SETBACK;
   const usableW = uE - uS;
-  const [formN, formS] = TYPOLOGIES[p.typology].rows;
+  const [formN, formS0] = TYPOLOGIES[p.typology].rows, formS = FORMS[p.formS] ? p.formS : formS0;
+  const MODE = LAYOUTS[p.layout] ? p.layout : 'auto', ROT = (MODE === 'diag' || MODE === 'fan' || MODE === 'zig' ? clamp(+p.rot || 0, -40, 40) : 0) * DEG;
   const coef = p.resZone === 'semi' ? Math.max(0.5, p.spacingCoef) : p.spacingCoef;
   const sideWin = !!p.sideWin;
   const lines = p.resZone === 'semi' ? boundaryLines(block) : null;
@@ -407,38 +435,69 @@ function housingBlock(block, unitsByType, p, warnings, ht) {
   const rowW = (list, row) => sum(list.map(t => t[row].w)) + SIDE_GAP * Math.max(0, list.length - 1);
   const riverFront = FRONT.has(block.id);
 
+  // 회전한 주동이 차지하는 폭·깊이 (둘레 상자)
+  const cR = Math.abs(Math.cos(ROT)), sR = Math.abs(Math.sin(ROT)), wOf = (F) => F.w * cR + F.d * sR, dOf = (F) => F.w * sR + F.d * cR;
+  const rowWk = (list, key) => sum(list.map(t => wOf(t[key]))) + SIDE_GAP * Math.max(0, list.length - 1);
   // 한 열에 동을 고르게 분산 (실제 폭 기준)
   const place = (list, row) => {
     if (list.length === 1) return [(uS + uE) / 2];
-    const w = list.map(t => t[row].w), g = (usableW - sum(w)) / (list.length - 1);
+    const w = list.map(t => wOf(t[row])), g = (usableW - sum(w)) / (list.length - 1);
     let u = uS; return w.map(x => { const c = u + x / 2; u += x + g; return c; });
   };
-  function layout(north, south, kN, kS) {
-    let uN = place(north, kN), uSo = south.length ? place(south, kS) : [];
-    const nN = north.length, nS = south.length, pointy = (f) => f === 'tower' || f === 'y';
-    if (nS === nN && nN >= 2 && pointy(formN) && pointy(formS)) {
-      const wm = Math.max(...north.map(t => t[kN].w), ...south.map(t => t[kS].w));
-      const a = uS + wm / 2, b = uE - wm / 2, pitch = (b - a) / (nN - 0.5);
-      if (pitch - wm >= SIDE_GAP) { uN = north.map((_, i) => a + i * pitch); uSo = south.map((_, i) => a + pitch / 2 + i * pitch); }
-    } else if (nS === nN - 1 && nS >= 1 && pointy(formN) && pointy(formS)) {
-      uSo = south.map((_, i) => (uN[i] + uN[i + 1]) / 2);
+  // 동 하나 놓기: tag 열 이름(N·M·S·W·E), rk 0(북) → 1(남) 위치, th 회전
+  const mkMod = (t, key, form, tag, uc, vc, i, n, rk, th, last) => {
+    const mirror = form === 'l' && n > 1 && i % 2 === 0;
+    const F = mirror ? makeForm(form, t, p, { sideWin, mirror: true }) : t[key];
+    let pl = rotatePlaced(placeForm(F, uc, vc), uc, vc, th);
+    // 대지 건축선 밖으로 나가면 안쪽으로 민다
+    const r0 = rectOf(pl.parts), du = r0.u0 < uS ? uS - r0.u0 : r0.u1 > uE ? uE - r0.u1 : 0, dv = r0.v0 < vN ? vN - r0.v0 : r0.v1 > vS ? vS - r0.v1 : 0;
+    pl = shiftPlaced(pl, du, dv);
+    // 높이 계수: 스카이라인(서→동) × 열(남저북고) × 동별 리듬
+    const rhythm = (i + Math.round(rk * 3)) % 2 === 0 ? 1 : 1 - p.heightVar / 100;
+    const fct = skylineAt(uc, p) * (1 - (1 - p.southRatio / 100) * rk) * rhythm;
+    let cap = p.resMaxFloors;
+    if (last && riverFront) cap = Math.min(cap, p.riverFrontMax);
+    if (lines) { const D = rule1Dist(pl.parts, lines); cap = Math.min(cap, ht.floorsFor(4 * D)); }
+    return { t, row: tag, i, form: F.form, upf: F.upf, plate: F.plate, perim: F.perim, ...pl, fct, cap, F: 5, mainS: Math.abs(th) < 0.8 };
+  };
+  const thAt = (uc, i) => (MODE === 'diag' ? ROT : MODE === 'fan' ? -ROT * clamp((uc - (uS + uE) / 2) / Math.max(1, usableW / 2), -1, 1) : MODE === 'zig' ? (i % 2 ? -ROT : ROT) : 0);
+  // 여러 열 배치. rows: 북 → 남 순서의 동 목록들, keys: 열마다 쓸 형태(N·Nc·S·Sc)
+  function layoutRows(rows, keys) {
+    const R = rows.length, mods = [], pointy = (f) => f === 'tower' || f === 'y';
+    const formOf = (r) => (R > 1 && r === R - 1 ? formS : formN);
+    const us = rows.map((list, r) => place(list, keys[r]));
+    // 엇갈림: 열마다 동 수가 같으면 반 칸씩, 한 동 적으면 앞 열 동 사이에
+    const stag = MODE === 'stagger' || (pointy(formN) && pointy(formS) && MODE !== 'ring');
+    if (stag) for (let r = 1; r < R; r++) {
+      const a0 = rows[r - 1], b0 = rows[r];
+      if (b0.length === a0.length && b0.length >= 2) {
+        const wm = Math.max(...a0.map(t => wOf(t[keys[r - 1]])), ...b0.map(t => wOf(t[keys[r]])));
+        const a = uS + wm / 2, b = uE - wm / 2, pitch = (b - a) / (b0.length - 0.5);
+        if (pitch - wm >= SIDE_GAP) { if (r === 1) us[0] = a0.map((_, i) => a + i * pitch); us[r] = b0.map((_, i) => a + (r % 2 ? pitch / 2 : 0) + i * pitch); }
+      } else if (b0.length === a0.length - 1 && b0.length >= 1) us[r] = b0.map((_, i) => (us[r - 1][i] + us[r - 1][i + 1]) / 2);
     }
-    const mods = [];
-    const mk = (t, row, uc, i, n) => {
-      const mirror = (row === 'N' ? formN : formS) === 'l' && n > 1 && i % 2 === 0;
-      const F = mirror ? makeForm(row === 'N' ? formN : formS, t, p, { sideWin, mirror: true }) : t[row === 'N' ? kN : kS];
-      const vc = row === 'N' ? vN + F.d / 2 : vS - F.d / 2;
-      const pl = placeForm(F, uc, vc);
-      // 높이 계수: 스카이라인(서→동) × 열(남저북고) × 동별 리듬
-      const rhythm = (i + (row === 'S' ? 1 : 0)) % 2 === 0 ? 1 : 1 - p.heightVar / 100;
-      const fct = skylineAt(uc, p) * (row === 'S' ? p.southRatio / 100 : 1) * rhythm;
-      let cap = p.resMaxFloors;
-      if (row === 'S' && riverFront) cap = Math.min(cap, p.riverFrontMax);
-      if (lines) { const D = rule1Dist(pl.parts, lines); cap = Math.min(cap, ht.floorsFor(4 * D)); }
-      return { t, row, i, form: F.form, upf: F.upf, plate: F.plate, perim: F.perim, ...pl, fct, cap, F: 5, mainS: true };
+    const dMax = rows.map((list, r) => Math.max(...list.map(t => dOf(t[keys[r]]))));
+    const vTop = vN + dMax[0] / 2, vBot = vS - dMax[R - 1] / 2;
+    rows.forEach((list, r) => {
+      const rk = R > 1 ? r / (R - 1) : 0, vr = R > 1 ? vTop + (vBot - vTop) * rk : vTop, tag = r === 0 ? 'N' : r === R - 1 ? 'S' : 'M';
+      list.forEach((t, i) => {
+        const F = t[keys[r]], vc = r === 0 ? vN + dOf(F) / 2 : r === R - 1 ? vS - dOf(F) / 2 : vr;
+        mods.push(mkMod(t, keys[r], formOf(r), tag, us[r][i], vc, i, list.length, rk, thAt(us[r][i], i + r), R > 1 && r === R - 1));
+      });
+    });
+    return mods;
+  }
+  // 둘레(중정) 배치: 북변 열 + 서·동변에 90° 돌려 세운 동 (채광창이 중정을 본다)
+  function layoutRing(north, west, east, kN) {
+    const mods = [], uN = place(north, kN);
+    north.forEach((t, i) => mods.push(mkMod(t, kN, formN, 'N', uN[i], vN + t[kN].d / 2, i, north.length, 0, 0, false)));
+    const dN = Math.max(...north.map(t => t[kN].d)), v0 = vN + dN + Math.max(SIDE_GAP, 14);
+    const col = (list, tag, west2) => {
+      if (!list.length) return;
+      const len = list.map(t => t.S.w), g = list.length > 1 ? (vS - v0 - sum(len)) / (list.length - 1) : 0; let v = list.length > 1 ? v0 : (v0 + vS) / 2 - len[0] / 2;
+      list.forEach((t, i) => { const F = t.S, vc = v + F.w / 2, uc = west2 ? uS + F.d / 2 : uE - F.d / 2; v += F.w + g; mods.push(mkMod(t, 'S', formS, tag, uc, vc, i, list.length, clamp((vc - vN) / Math.max(1, vS - vN), 0, 1), west2 ? -Math.PI / 2 : Math.PI / 2, false)); });
     };
-    north.forEach((t, i) => mods.push(mk(t, 'N', uN[i], i, nN)));
-    south.forEach((t, i) => mods.push(mk(t, 'S', uSo[i], i, nS)));
+    col(west, 'W', true); col(east, 'E', false);
     return mods;
   }
   const unitsAt = (mods) => sum(mods.map(m => m.upf * resFloorsFor(m.F, p)));
@@ -447,48 +506,83 @@ function housingBlock(block, unitsByType, p, warnings, ht) {
     const ok = enforce(mods, pairs, ht, coef);
     return { ok, u: unitsAt(mods) };
   }
-
-  const nList = [];
-  for (let n = types.length; n <= 12; n++) nList.push(n);
-  for (let n = types.length - 1; n >= 1; n--) nList.push(n);
-  let best = null;
-  for (const n of nList) {
-    let act = types.map((_, i) => i);
-    if (n < types.length) act = act.sort((a, b) => wts[b] - wts[a]).slice(0, n);
-    const ws = sum(act.map(i => wts[i]));
-    const cnt = types.map(() => 0);
-    act.forEach(i => { cnt[i] = Math.max(1, Math.round(n * wts[i] / ws)); });
-    while (sum(cnt) > n) { let k = -1; cnt.forEach((c, i) => { if (c > 1 && (k < 0 || c > cnt[k])) k = i; }); if (k < 0) break; cnt[k]--; }
-    while (sum(cnt) < n) { let k = act[0]; act.forEach(i => { if (wts[i] / cnt[i] > wts[k] / cnt[k]) k = i; }); cnt[k]++; }
-    const towers = []; types.forEach((t, i) => { for (let k = 0; k < cnt[i]; k++) towers.push(t); });
-    towers.sort((a, b) => b.area - a.area); // 큰 평형을 북측(뒷열, 고층)으로
-    const half = Math.ceil(n / 2), splits = [];
-    for (let k = half; k <= n; k++) splits.push(k);
-    for (let k = half - 1; k >= 1; k--) splits.push(k);
-    for (const nN of splits) {
-      const north = towers.slice(0, nN), south = towers.slice(nN);
-      const kN = rowW(north, 'N') <= usableW ? 'N' : rowW(north, 'Nc') <= usableW ? 'Nc' : null;
-      const kS = !south.length || rowW(south, 'S') <= usableW ? 'S' : rowW(south, 'Sc') <= usableW ? 'Sc' : null;
-      if (!kN || !kS) continue;
-      if (south.length) {
-        const dN = Math.max(...north.map(t => t[kN].d)), dS = Math.max(...south.map(t => t[kS].d));
-        if ((vS - dS) - (vN + dN) < 10) continue;
+  // n개 동을 놓는 후보 배치들 (좋은 순서대로)
+  function* arrangements(towers, n, R) {
+    if (MODE === 'ring') {
+      for (let nN = Math.min(n, Math.max(1, Math.round(n * 0.5))); nN >= 1; nN--) {
+        const north = towers.slice(0, nN), rest = towers.slice(nN), west = rest.filter((_, i) => i % 2 === 0), east = rest.filter((_, i) => i % 2 === 1);
+        const kN = rowWk(north, 'N') <= usableW ? 'N' : rowWk(north, 'Nc') <= usableW ? 'Nc' : null; if (!kN) continue;
+        const dN = Math.max(...north.map(t => t[kN].d)), room = vS - (vN + dN + Math.max(SIDE_GAP, 14));
+        const fitC = (list) => !list.length || sum(list.map(t => t.S.w)) + SIDE_GAP * (list.length - 1) <= room;
+        if (!fitC(west) || !fitC(east)) continue;
+        const dC = Math.max(0, ...rest.map(t => t.S.d)); if (rest.length > 1 && usableW - 2 * dC < 30) continue; // 중정 폭
+        yield () => layoutRing(north, west, east, kN);
       }
-      const mods = layout(north, south, kN, kS);
-      const pairs = pairsOf(mods);
-      // 최고 B에서 가능한지 먼저 확인
-      const top = solve(mods, pairs, p.resMaxFloors);
-      if (!top.ok) continue;
-      const cand = { n, north, south, mods, pairs, merged: n < types.length };
-      if (top.u >= total) {
-        let lo = 5, hi = p.resMaxFloors;
-        for (let k = 0; k < 18 && hi - lo > 0.25; k++) { const mid = (lo + hi) / 2; if (solve(mods, pairs, mid).u >= total) hi = mid; else lo = mid; }
-        solve(mods, pairs, hi);
-        best = { ...cand, u: unitsAt(mods), ok: true };
-        break;
-      }
-      if (!best || top.u > best.u) best = { ...cand, u: top.u, B: p.resMaxFloors };
+      return;
     }
+    if (R === 2) {
+      const half = Math.ceil(n / 2), splits = [];
+      for (let k = half; k <= n; k++) splits.push(k);
+      for (let k = half - 1; k >= 1; k--) splits.push(k);
+      for (const nN of splits) {
+        const north = towers.slice(0, nN), south = towers.slice(nN);
+        const kN = rowWk(north, 'N') <= usableW ? 'N' : rowWk(north, 'Nc') <= usableW ? 'Nc' : null;
+        const kS = !south.length || rowWk(south, 'S') <= usableW ? 'S' : rowWk(south, 'Sc') <= usableW ? 'Sc' : null;
+        if (!kN || !kS) continue;
+        if (south.length) { const dN = Math.max(...north.map(t => dOf(t[kN]))), dS = Math.max(...south.map(t => dOf(t[kS]))); if ((vS - dS) - (vN + dN) < 10) continue; }
+        yield () => layoutRows(south.length ? [north, south] : [north], south.length ? [kN, kS] : [kN]);
+      }
+      return;
+    }
+    // 여러 열: 북쪽 열부터 고르게 나눈다 (남는 동은 북쪽 열에)
+    if (n < R) return;
+    const rows = []; let at = 0;
+    for (let r = 0; r < R; r++) { const c = Math.floor(n / R) + (r < n % R ? 1 : 0); rows.push(towers.slice(at, at + c)); at += c; }
+    const keys = rows.map((list, r) => { const a = r === R - 1 ? 'S' : 'N', b = a + 'c'; return rowWk(list, a) <= usableW ? a : rowWk(list, b) <= usableW ? b : null; });
+    if (keys.includes(null)) return;
+    const dSum = sum(rows.map((list, r) => Math.max(...list.map(t => dOf(t[keys[r]])))));
+    if ((vS - vN) - dSum < 10 * (R - 1)) return;
+    yield () => layoutRows(rows, keys);
+  }
+  const maxRows = Math.max(2, Math.min(4, Math.floor((vS - vN + 14) / (Math.min(...types.map(t => dOf(t.N))) + 26))));
+  const rowTries = MODE === 'rows' || MODE === 'ring' ? [2] : MODE === 'auto' || MODE === 'diag' || MODE === 'fan' || MODE === 'zig' ? [2, 3, 4].filter(r => r <= maxRows) : [3, 4, 2].filter(r => r <= maxRows || r === 2);
+  if (MODE === 'stagger' && maxRows >= 3) rowTries.sort((a, b) => a - b);
+
+  let best = null;
+  for (const R of rowTries) {
+    const nMax = R === 2 ? 12 : Math.min(24, R * 6), nList = [];
+    for (let n = Math.max(types.length, MODE === 'ring' ? 3 : R > 2 ? R : 1); n <= nMax; n++) nList.push(n);
+    if (R === 2) for (let n = types.length - 1; n >= 1; n--) nList.push(n);
+    let found = null;
+    for (const n of nList) {
+      let act = types.map((_, i) => i);
+      if (n < types.length) act = act.sort((a, b) => wts[b] - wts[a]).slice(0, n);
+      const ws = sum(act.map(i => wts[i]));
+      const cnt = types.map(() => 0);
+      act.forEach(i => { cnt[i] = Math.max(1, Math.round(n * wts[i] / ws)); });
+      while (sum(cnt) > n) { let k = -1; cnt.forEach((c, i) => { if (c > 1 && (k < 0 || c > cnt[k])) k = i; }); if (k < 0) break; cnt[k]--; }
+      while (sum(cnt) < n) { let k = act[0]; act.forEach(i => { if (wts[i] / cnt[i] > wts[k] / cnt[k]) k = i; }); cnt[k]++; }
+      const towers = []; types.forEach((t, i) => { for (let k = 0; k < cnt[i]; k++) towers.push(t); });
+      towers.sort((a, b) => b.area - a.area); // 큰 평형을 북측(뒷열, 고층)으로
+      for (const make of arrangements(towers, n, R)) {
+        const mods = make();
+        const pairs = pairsOf(mods);
+        // 최고 B에서 가능한지 먼저 확인
+        const top = solve(mods, pairs, p.resMaxFloors);
+        if (!top.ok) continue;
+        const cand = { n, mods, pairs, merged: n < types.length, R };
+        if (top.u >= total) {
+          let lo = 5, hi = p.resMaxFloors;
+          for (let k = 0; k < 18 && hi - lo > 0.25; k++) { const mid = (lo + hi) / 2; if (solve(mods, pairs, mid).u >= total) hi = mid; else lo = mid; }
+          solve(mods, pairs, hi);
+          found = { ...cand, u: unitsAt(mods), ok: true };
+          break;
+        }
+        if (!found || top.u > found.u) found = { ...cand, u: top.u, B: p.resMaxFloors };
+      }
+      if (found && found.ok) break;
+    }
+    if (found && (!best || (found.ok && !best.ok) || (!best.ok && found.u > best.u))) best = found;
     if (best && best.ok) break;
   }
   if (!best) { warnings.push(`${block.id}: 획지가 좁아 주거동을 배치하지 못했습니다`); return []; }
@@ -499,15 +593,16 @@ function housingBlock(block, unitsByType, p, warnings, ht) {
 
   // 목표 초과분은 남측 열·낮은 동부터 층수를 낮춘다 (일조·조망에 유리). 인동간격은 층을 낮춰도 유지된다
   let excess = best.u - Math.min(total, best.u);
-  const order = mods.slice().sort((a, b) => (a.row === b.row ? a.F - b.F : a.row === 'S' ? -1 : 1));
+  const rowRank = { S: 0, E: 1, W: 1, M: 2, N: 3 };
+  const order = mods.slice().sort((a, b) => (a.row === b.row ? a.F - b.F : rowRank[a.row] - rowRank[b.row]));
   for (const m of order) {
     while (excess >= m.upf && m.F > 5) { const before = resFloorsFor(m.F, p); m.F--; excess -= (before - resFloorsFor(m.F, p)) * m.upf; }
   }
   const out = [];
-  const idx = { N: 0, S: 0 };
+  const idx = {};
   mods.forEach(m => {
     const floors = stackFloors({ F: m.F, lobbyH: p.hResLobby, typH: p.hRes, typUse: 'res', plate: m.plate, upf: m.upf, refugeH: p.hRefuge, mechH: p.hMech, mechArea: Math.min(m.plate * 0.3, 260) });
-    out.push({ id: `${block.id}-${m.row}${++idx[m.row]}`, block: block.id, zone: block.zone, kind: 'apt', type: m.t.key, typeName: m.t.name, upf: m.upf, row: m.row,
+    out.push({ id: `${block.id}-${m.row}${idx[m.row] = (idx[m.row] || 0) + 1}`, block: block.id, zone: block.zone, kind: 'apt', type: m.t.key, typeName: m.t.name, upf: m.upf, row: m.row,
       form: m.form, formName: FORMS[m.form].name, parts: m.parts, rect: rectOf(m.parts), core: m.core, layout: m.units, perim: m.perim, plate: m.plate, floors });
   });
 
@@ -515,7 +610,7 @@ function housingBlock(block, unitsByType, p, warnings, ht) {
   const nS = mods.filter(m => m.row === 'S').length;
   if (p.podiumRes > 0 && nS > 0) {
     const hp = p.podiumRes * p.hPodium, clear = Math.max(12, hp);
-    const nEdge = Math.max(...mods.filter(m => m.row === 'N').map(m => rectOf(m.parts).v1));
+    const nEdge = Math.max(...mods.filter(m => m.row !== 'S' && m.row !== 'W' && m.row !== 'E').map(m => rectOf(m.parts).v1));
     const sEdge = Math.min(...mods.filter(m => m.row === 'S').map(m => rectOf(m.parts).v0));
     const v0 = nEdge + clear, v1 = sEdge - clear;
     if (v1 - v0 >= 10) {

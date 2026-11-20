@@ -5,7 +5,7 @@
 // 판정 번호는 2D와 같은 위치(단면 좌표)에 HTML 표식으로 띄운다.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { progAt, focusOf, winFor, CUT_WPS, UNDER_WPS } from './buildsim.js';
+import { progAt, focusOf, winFor, lensAt, CUT_WPS, UNDER_WPS } from './buildsim.js';
 import { WP_BY_ID } from '../sim/methods.js';
 import { dateAt, ym } from '../sim/process.js';
 import { HOIST, elevSpeed } from '../sim/impact-more.js';
@@ -113,7 +113,7 @@ export function createSim3D(host, opts = {}) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const wrap = document.createElement('div'); wrap.className = 's3';
-  wrap.innerHTML = `<div class="s3-hud"><span class="s3-c"></span><b class="s3-t"></b></div><div class="s3-hud r"><span class="s3-d"></span><b class="s3-day"></b></div><div class="s3-now" hidden></div>
+  wrap.innerHTML = `<div class="s3-hud"><span class="s3-c"></span><b class="s3-t"></b></div><div class="s3-hud r"><span class="s3-d"></span><b class="s3-day"></b></div><div class="s3-now" hidden></div><div class="s3-ff" hidden></div>
     <div class="s3-lbs"></div><div class="s3-mks"></div><div class="s3-help">드래그 회전 · 휠/두 손가락 확대 · 우클릭 이동 · 사람을 누르면 이야기를 들어요</div><div class="s3-attr" hidden></div><div class="seg s3-vw" role="group" aria-label="3D 시점"><button type="button" data-v3="all" aria-pressed="true">전체 보기</button><button type="button" data-v3="focus" aria-pressed="false">작업 부위</button><button type="button" data-v3="life" aria-pressed="false">현장 사람들</button></div>
     <div class="s3-talk" role="dialog" aria-label="현장 사람과 대화" hidden><div class="s3-tk-h"><i class="s3-tk-av" aria-hidden="true"></i><div class="s3-tk-who"><b class="s3-tk-n"></b><span class="s3-tk-m"></span></div><button type="button" class="s3-tk-x" aria-label="대화 닫기">×</button></div><p class="s3-tk-l" aria-live="polite"></p><div class="s3-tk-f"><span class="s3-tk-i"></span><button type="button" class="s3-tk-p">‹ 이전</button><button type="button" class="s3-tk-nx">다음 ›</button></div></div>`;
   wrap.prepend(renderer.domElement);
@@ -409,7 +409,7 @@ export function createSim3D(host, opts = {}) {
     // 기둥 철근 (다음 층으로 이어질 주근이 슬래브 위로 솟는다)
     const starterI = inst(BOX, clipM(0x6e4a36, { metal: 0.35, rough: 0.7 }), 900, 'rebar');
     const rebarP = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), rebarM); root.add(rebarP); tag(rebarP, 'rebar');
-    const pourM = clipM(0x8f8e8a, { rough: 0.35, tex: 'conc' }), pourBox = mesh(BOX, pourM, 'pour');
+    const pourM = clipM(0x8f8e8a, { rough: 0.35, tex: 'conc' }), pourBox = mesh(BOX, pourM, 'pour'), pourBox2 = mesh(BOX, pourM, 'pour');
     const cageI = inst(BOX, clipM(COL.rebar), 6, 'rebar');
     // 철골 용접 불꽃
     const sparkI = inst(BOX, mat(0xffb547, { em: 1.2 }), 40, 'steel');
@@ -587,7 +587,21 @@ export function createSim3D(host, opts = {}) {
       core.forEach((w, i) => { w.visible = hasCore; if (!hasCore) return; const t3 = 0.4; if (i === 0) setBox(w, cx0, cx0 + t3, 0, ctop, -cz, cz); if (i === 1) setBox(w, cx1 - t3, cx1, 0, ctop, -cz, cz); if (i === 2) setBox(w, cx0, cx1, 0, ctop, -cz, -cz + t3); if (i === 3) setBox(w, cx0, cx1, 0, ctop, cz - t3, cz); });
       // 현재 층 사이클
       const active = K('frame') && structP > 0 && structP < 1 && nF < NF;
-      const f = active ? sc.floors[nF] : null, fr = fl - nF, stage = fr < 0.35 ? 0 : fr < 0.6 ? 1 : fr < 0.78 ? 2 : 3, fp = active ? D.fp[nF] : null;
+      // 빨리 감기(렌즈의 반복 층 구간, 또는 골조가 아닌 공종을 보는 동안): 단계가 층마다 깜빡이지 않게 거푸집 단계 모습으로 고정한다
+      const FRW = ['frame', 'form', 'rebar', 'conc', 'pour', 'steel', 'lift'];
+      const ffNow = st.lens && st.lens.lens ? st.lens.kind === 'ff' : !FRW.includes(wpId);
+      const f = active ? sc.floors[nF] : null, fr = fl - nF, stage = ffNow ? (wpId === 'rebar' ? 1 : 0) : fr < 0.35 ? 0 : fr < 0.6 ? 1 : fr < 0.78 ? 2 : 3, fp = active ? D.fp[nF] : null;
+      // 단계 안 진행률: 거푸집이 한쪽부터 깔리고 → 철근이 뒤따라 깔리고 → 타설이 띠 하나씩 번지고 → 마감·양생 막이 덮인다
+      const sm = (v) => { const t = clamp(v, 0, 1); return t * t * (3 - 2 * t); };
+      const formK = !active ? 0 : ffNow || stage > 0 ? 1 : clamp(fr / 0.35, 0, 1), rebarK = !active ? 0 : ffNow || stage > 1 ? 1 : stage === 1 ? clamp((fr - 0.35) / 0.25, 0, 1) : 0;
+      const pourK = active && stage === 2 ? clamp((fr - 0.6) / 0.18, 0, 1) : stage === 3 ? 1 : 0, cureK = active && stage === 3 ? clamp((fr - 0.78) / 0.22, 0, 1) : 0;
+      // 타설 위치: 붐을 펴는 동안(처음 8%)은 치지 않고, 펌프에서 먼 끝부터 폭 약 6m 띠를 하나씩, 띠 안에서는 앞뒤로 오가며 채운다
+      let pourPt = null;
+      if (active && stage === 2) {
+        const Wx = fp.x1 - fp.x0, Dz = fp.z1 - fp.z0, ns = Math.max(2, Math.round(Wx / 6)), ws = Wx / ns;
+        const u = clamp((pourK - 0.08) / 0.92, 0, 1), sx = Math.min(ns - 1e-6, u * ns), k = Math.floor(sx), t = sx - k, fwd = k % 2 === 0;
+        pourPt = { x: fp.x0 + (k + 0.5) * ws, z: fwd ? fp.z0 + t * Dz : fp.z1 - t * Dz, k, t, ws, fwd, u, setup: sm(pourK / 0.08) };
+      }
       formBox.visible = active && K('form') && stage < 3 && ids.form !== 'pcf';
       if (formBox.visible) setBox(formBox, fp.x0 - 0.3, fp.x1 + 0.3, f.e0 + 0.2, f.e1 + 0.2, fp.z0 - 0.3, fp.z1 + 0.3);
       acs.visible = active && K('form') && (ids.form === 'acs' || ids.form === 'slip') && hasCore;
@@ -596,9 +610,12 @@ export function createSim3D(host, opts = {}) {
       if (active && K('form') && ids.form === 'conv') for (let x = fp.x0 + 1; x < fp.x1 && nsh < 120; x += Math.max(2, (fp.x1 - fp.x0) / 10)) for (let z = fp.z0 + 1; z < fp.z1 && nsh < 120; z += Math.max(2, (fp.z1 - fp.z0) / 10)) ibox(shoreI, nsh++, x - 0.06, x + 0.06, f.e0 + 0.2, f.e1 - 0.32, z - 0.06, z + 0.06);
       shoreI.count = nsh; shoreI.instanceMatrix.needsUpdate = true;
       rebarP.visible = active && stage >= 1 && stage < 3 && ids.form !== 'pcf';
-      if (rebarP.visible) { rebarP.position.set((fp.x0 + fp.x1) / 2, f.e1 + 0.05, (fp.z0 + fp.z1) / 2); rebarP.scale.set(fp.x1 - fp.x0, 1, fp.z1 - fp.z0); rebarTex.repeat.set((fp.x1 - fp.x0) / 1.2, (fp.z1 - fp.z0) / 1.2); }
-      pourBox.visible = active && stage >= 2;
-      if (pourBox.visible) { const pf = stage === 2 ? clamp((fr - 0.6) / 0.18, 0.02, 1) : 1; setBox(pourBox, fp.x0, fp.x0 + (fp.x1 - fp.x0) * pf, f.e1 - 0.32, f.e1 + 0.2, fp.z0, fp.z1); }
+      if (rebarP.visible) { const wr = Math.max(0.6, (fp.x1 - fp.x0) * rebarK); rebarP.position.set(fp.x0 + wr / 2, f.e1 + 0.05, (fp.z0 + fp.z1) / 2); rebarP.scale.set(wr, 1, fp.z1 - fp.z0); rebarTex.repeat.set(wr / 1.2, (fp.z1 - fp.z0) / 1.2); }
+      // 타설 면: 다 친 띠들(pourBox) + 지금 치는 띠(pourBox2, 호스가 지나간 데까지)
+      pourBox.visible = active && (stage === 3 || (pourPt && pourPt.k > 0));
+      if (pourBox.visible) setBox(pourBox, fp.x0, stage === 3 ? fp.x1 : fp.x0 + pourPt.k * pourPt.ws, f.e1 - 0.32, f.e1 + 0.2, fp.z0, fp.z1);
+      pourBox2.visible = !!pourPt && pourPt.u > 0 && pourPt.t > 0.004;
+      if (pourBox2.visible) { const a = fp.x0 + pourPt.k * pourPt.ws, dz = (fp.z1 - fp.z0) * pourPt.t; setBox(pourBox2, a, a + pourPt.ws, f.e1 - 0.32, f.e1 + 0.2, pourPt.fwd ? fp.z0 : fp.z1 - dz, pourPt.fwd ? fp.z0 + dz : fp.z1); }
       let ncg = 0; if (active && K('rebar') && ids.rebar === 'cage' && (wpId === 'rebar')) { const hx = fp.x0 + (fp.x1 - fp.x0) * 0.3, he = f.e1 + 2 + 2 * (0.5 + 0.5 * Math.sin(T * 0.8)); ibox(cageI, ncg++, hx - 0.4, hx + 0.4, he, he + 3.4, -0.4, 0.4); }
       cageI.count = ncg; cageI.instanceMatrix.needsUpdate = true;
       let nst2 = 0; if (active && stage >= 1 && stage < 3 && ids.form !== 'pcf' && !steelF && colPos[nF] && !['rcwall', 'modular', 'pc'].includes(ids.frame)) for (const [x, z] of colPos[nF]) { for (let q = 0; q < 8 && nst2 < 900; q++) { const a = q * Math.PI / 4 + Math.PI / 8, bx = x + Math.cos(a) * 0.3, bz = z + Math.sin(a) * 0.3; ibox(starterI, nst2++, bx - 0.016, bx + 0.016, f.e1 - 0.3, f.e1 + 1.05 + (q % 2) * 0.12, bz - 0.016, bz + 0.016); } }
@@ -742,12 +759,17 @@ export function createSim3D(host, opts = {}) {
         // 작업조 이름표 (멀리서도 무슨 일을 몇 명이 하는지): 사람이 셋 이상인 조만
         if (ws.length >= 3 && ARCH[kind]) crewTags.push({ t: `${ARCH[kind].n} · ${ws.length}명`, p: [ws.reduce((s, w) => s + w.x, 0) / ws.length, y + 2.6, ws.reduce((s, w) => s + w.z, 0) / ws.length], cls: 'eq crew', n: ws.length });
       };
-      const FRW = ['frame', 'form', 'rebar', 'conc', 'pour', 'steel', 'lift'];
       const cutNow = CUT_WPS.has(wpId);
       const stageKind = (sg) => (sg === 0 ? (steelF ? 'steel' : 'form') : sg === 1 ? 'rebar' : sg === 2 ? 'pour' : 'cure');
       if (active) {
-        const mine = FRW.includes(wpId), kind = mine && aNow ? aNow : stageKind(stage), y = f.e1 + 0.2;
-        if (kind === 'pour') { const front = fp.x0 + (fp.x1 - fp.x0) * clamp((fr - 0.6) / 0.18, 0.05, 1); team('pour', crewN('pour', mine ? 1.1 : 0.6), Math.max(fp.x0, front - 7), Math.min(fp.x1, front + 1.5), y, fp.z0, cutNow ? 0 : fp.z1, 0); }
+        // 골조 전체를 볼 때는 층 사이클의 단계(거푸집 → 철근 → 타설 → 양생)를 따라 작업조가 바뀐다
+        const mine = FRW.includes(wpId), kind = mine && aNow && !(wpId === 'frame' && st.lens && st.lens.lens) ? aNow : stageKind(stage), y = f.e1 + 0.2;
+        if (kind === 'pour') {
+          // 타설조는 호스 끝을 따라간다 (방금 친 띠 위에서 고르고 다진다)
+          const zc = cutNow ? 0 : fp.z1, q = pourPt || { x: fp.x0 + (fp.x1 - fp.x0) * 0.5, z: (fp.z0 + zc) / 2, ws: 6 };
+          const zz = clamp(q.z, fp.z0 + 3, Math.max(fp.z0 + 3, zc - 3));
+          team('pour', crewN('pour', mine ? 1.1 : 0.6), Math.max(fp.x0, q.x - q.ws * 0.5 - 3), Math.min(fp.x1, q.x + q.ws * 0.5 + 1), y, Math.max(fp.z0, zz - 7), Math.min(zc, zz + 7), 0);
+        }
         else team(kind, crewN(kind, mine ? 1.6 : 0.7), fp.x0, fp.x1, y, fp.z0, cutNow ? 0 : fp.z1, 0, { stock: [fp.x1 - 2.5, fp.z0 + 2.5] });
       }
       if (UNDER_WPS.has(wpId)) {
@@ -796,7 +818,7 @@ export function createSim3D(host, opts = {}) {
       if (crane.visible && crane2) { occ.add(0); if (lanes.length > 1) occ.add(1); }
       const io = { hot: [], tags: [], bays: {} };
       const htop = hOn ? sc.floors[Math.min(NF, Math.max(1, Math.floor(fl))) - 1].e1 + (ids.hoist === 'jump' ? 0 : 3) : 0;
-      const dyn = safe('공법 장면', () => meth.frame({ wpId, T, tau, K, P, dug, earthP, wallP, foundP, baseP, structP, skinP, topdown, underV, cutNow, nF, fl, fr, stage, active, f, fp, hasCore, ctop, cn, cx0, cx1, cz, top, Hc, nS, done, rtop, rfp, rp, matP, baseE, thick, plen, removeUpTo, pourNow, PX, MX, hOn, htop, io }), []);
+      const dyn = safe('공법 장면', () => meth.frame({ wpId, T, tau, K, P, dug, earthP, wallP, foundP, baseP, structP, skinP, topdown, underV, cutNow, nF, fl, fr, stage, active, f, fp, hasCore, ctop, cn, cx0, cx1, cz, top, Hc, nS, done, rtop, rfp, rp, matP, baseE, thick, plen, removeUpTo, pourNow, PX, MX, hOn, htop, formK, rebarK, pourK, cureK, pourPt, ffNow, sm, io }), []);
       if (io.bays.pump) occ.add(0); // 펌프카가 선 차로
       // 물류: 덤프(상차 자리) · 레미콘(펌프카 호퍼) · 자재 트레일러(하역 자리)
       // 땅속 공사 중에도 덤프가 게이트를 쓰지 않을 때는 흙막이 H형강·기초 철근·방수 자재가 들어온다 (도로 점용 하역)
@@ -943,13 +965,28 @@ export function createSim3D(host, opts = {}) {
     look.setSize(w, h, renderer.getPixelRatio());
     cam.aspect = w / h; cam.updateProjectionMatrix();
   }
+  // 시간 렌즈 표시: 지금 자세히 보는 층인지, 반복 층을 빨리 감는 중인지 (재생이 날짜에 고르지 않다는 것을 알린다)
+  let lensKey = '';
+  function paintLens(li, sc) {
+    const el = $('.s3-ff'), L = li && li.lens;
+    if (!L) { if (lensKey) { lensKey = ''; el.hidden = true; } return; }
+    const cur = Math.min(sc.NF, Math.floor(li.fl + 1e-6) + 1), k = `${li.kind}|${cur}`;
+    if (k === lensKey) return; lensKey = k;
+    const d = L.days >= 1.5 ? `${Math.round(L.days)}일` : `${Math.max(1, Math.round(L.days * 8))}시간`;
+    el.hidden = false; el.className = 's3-ff ' + (li.kind === 'detail' ? 'det' : 'ff');
+    el.innerHTML = li.kind === 'detail' ? `<b>자세히 보기</b><span>${L.floor + 1}층 한 층 · 실제 약 ${d}</span>`
+      : li.kind === 'ff' ? `<b>▶▶ 빨리 감기</b><span>같은 작업을 ${L.toFloor}층까지 반복 · 지금 ${cur}층</span>`
+        : li.kind === 'lead' ? `<b>▶▶ 빨리 감기</b><span>${L.floor + 1}층 앞 단계</span>` : `<b>▶▶ 빨리 감기</b><span>${L.floor + 1}층 마무리</span>`;
+  }
   function update(st) {
     if (disposed) return;
     resize();
     const { sc, wpId, p, T, marks = [], at } = st;
     if (!built || built.sc !== sc) { if (badSc === sc) return; const nb = safe('장면 만들기', () => build(sc), null); if (!nb) { badSc = sc; built = null; return; } built = nb; lastWp = null; fitSun(built.D, sc.G); shadowsOn(built.root); ensureContext(); if (window.__S3DEBUG) window.__s3dim = { pw: sc.G.pw, pd: built.D.pd, bd: built.D.bd, bx0: sc.G.bx0, bx1: sc.G.bx1, crX: sc.crX, H: sc.G.H, depth: sc.G.depth, lanes: sc.city && sc.city.lanes, yard: sc.city && sc.city.yard }; }
-    const win = winFor(sc, wpId), tau = win.s + clamp(p, 0, 1) * (win.e - win.s);
-    const fres = safe(`장면 진행 (${wpId})`, () => built.frameAt({ wpId, tau, T, step: st.step, life: viewMode === 'life' }), null);
+    const win = winFor(sc, wpId), lens = lensAt(sc, wpId, p), tau = lens.tau;
+    // 골조 전체를 자세히 볼 때 '지금 작업'은 층 사이클의 단계(거푸집 → 철근 → 타설 → 양생)를 따른다
+    if (wpId === 'frame' && lens.lens && st.step && lens.kind !== 'ff') { const sg = lens.fr < 0.35 ? 0 : lens.fr < 0.6 ? 1 : lens.fr < 0.78 ? 2 : 3, steelF = ['steel', 'hybrid', 'stick', 'truss', 'module'].includes(sc.ids.frame); st = { ...st, step: { ...st.step, a: sg === 0 ? (steelF ? 'steel' : 'form') : sg === 1 ? 'rebar' : sg === 2 ? 'pour' : 'cure', k: sg, n: 4 } }; }
+    const fres = safe(`장면 진행 (${wpId})`, () => built.frameAt({ wpId, tau, T, step: st.step, life: viewMode === 'life', lens }), null);
     curTau = tau; curWp = wpId; picks = fres && fres.picks ? fres.picks : [];
     if (window.__S3DEBUG) window.__s3picks = picks;
     // 대화 중인 사람 발밑 고리 · 머리 위 이름
@@ -1006,7 +1043,8 @@ export function createSim3D(host, opts = {}) {
     // 지금 작업: 단계의 작업 유형 · 작업조 · 투입 장비 (workstep.js 표준 작업 기준)
     const stp = st.step && st.step.wp === wpId ? st.step : null, nk = stp && !win.skip ? `${stp.a}|${stp.k}|${stp.n}` : '';
     if (nk !== nowKey) { nowKey = nk; const A = stp && ARCH[stp.a], el = $('.s3-now'); el.hidden = !A || !nk; if (A && nk) el.innerHTML = `<b>지금 작업 · ${String(stp.k + 1).padStart(2, '0')}/${String(stp.n).padStart(2, '0')}</b><span>${esc(A.n)}</span><em>작업조 약 ${A.crew}명 · ${A.eq.map(esc).join(' · ')}</em>`; }
-    $('.s3-d').textContent = `D+${Math.round(tau)} · ${ym(dateAt(sc.t0, tau))}`; $('.s3-day').textContent = win.skip ? '해당 공정 없음' : `${Math.round(win.e - win.s)}일 중 ${Math.round(clamp(p, 0, 1) * (win.e - win.s))}일째`;
+    $('.s3-d').textContent = `D+${Math.round(tau)} · ${ym(dateAt(sc.t0, tau))}`; $('.s3-day').textContent = win.skip ? '해당 공정 없음' : `${Math.round(win.e - win.s)}일 중 ${Math.round(tau - win.s)}일째`;
+    paintLens(lens, sc);
     // 판정 표식: 단면 좌표(x, e)를 단면(z=0) 위에 띄운다
     if (at) atCache = at;
     const box = $('.s3-mks'), w = size[0], h = size[1];

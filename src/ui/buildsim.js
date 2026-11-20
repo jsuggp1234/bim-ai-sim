@@ -32,8 +32,11 @@ export function makeScene(R, known) {
   const G = sectionGeom(R.gen, R.d);
   const W = wpWindows(R.S, G.main);
   const cond = R.cond, d = R.d, adj = cond.adj;
-  const urban = adj < 30;
-  const nb = { x1: -adj, x0: -adj - (urban ? 22 : 30), h: urban ? (cond.noise === 'high' ? 34 : 26) : 12, b: urban ? 7 : 1.2, urban };
+  // 지도에서 대지 둘레를 읽었으면 가장 가까운 건물의 실제 높이·도로 폭을 쓴다. 150m 안에 건물이 없으면(adjOpen) 낮은 먼 시설로 둔다
+  const open = cond.adjOpen === true, urban = !open && adj < 30;
+  const hMap = cond.fromMap && !open && cond.adjH > 2 ? Math.min(150, Math.max(4, cond.adjH)) : 0;
+  const nbH = hMap || (open ? 7 : urban ? (cond.noise === 'high' ? 34 : 26) : 12);
+  const nb = { x1: -adj, x0: -adj - (urban ? 22 : 30), h: nbH, b: hMap ? (hMap >= 20 ? 7 : hMap >= 10 ? 3.5 : 1.2) : urban ? 7 : 1.2, urban, real: !!hMap, open };
   const rock = cond.rockDepth, g = cond.ground;
   const dv = Math.max(G.depth * 1.7 + 6, 24, Math.min(rock + 5, G.depth * 2.4 + 10));
   const bot = dv + 90; // 화면 아래 여백까지 지층이 차도록 깊게
@@ -45,7 +48,7 @@ export function makeScene(R, known) {
   const strata = L.filter(([a, b]) => b > a);
   const softBot = strata.filter(s => s[2] === 'clay').reduce((m, s) => Math.max(m, s[1]), 0);
   const floors = G.floors.length ? G.floors : [{ e0: 0, e1: G.H }];
-  const city = streetModel({ pw: G.pw, adj, noise: cond.noise, ground: g, nb, seed: R.site.id });
+  const city = streetModel({ pw: G.pw, adj, noise: cond.noise, ground: g, nb, seed: R.site.id, roadW: cond.fromMap ? cond.roadW : 0, roadName: cond.fromMap ? cond.roadName : '' });
   return {
     city,
     R, G, W, cond, d, fx: R.fx, ids: { ...R.fx.ids }, qa: R.fx.qa || [], nb, strata, softBot, dv,
@@ -92,7 +95,7 @@ function frontAt(sc, wpId, t) {
 // 기준층 층고 (포디움 제외)
 const typFloorH = (sc) => { const G = sc.G, pod = G.podium ? G.podium.h : 0, up = sc.floors.filter(f => f.e0 >= pod - 0.1); return up.length ? Math.max(2.8, Math.min(6, (up[up.length - 1].e1 - up[0].e0) / up.length)) : 4; };
 function followRoi(sc, wpId, p, base) {
-  const win = winFor(sc, wpId), t = win.s + clamp(p, 0, 1) * (win.e - win.s);
+  const t = tauAt(sc, wpId, p);
   const top = frontAt(sc, wpId, t), G = sc.G;
   const Z = ZOOM[wpId];
   if (Z) {
@@ -172,6 +175,71 @@ export function winFor(sc, wpId) {
   return { s: w.s, e: Math.max(w.s + 1, w.e) };
 }
 export const progAt = (sc, k, t) => prog(sc, k, t);
+
+// ---------- 시간 렌즈 ----------
+// 층마다 되풀이되는 골조 공종은 재생 시간을 날짜에 고르게 나누지 않는다. 한 층에서 그 작업이 실제로 어떻게 진행되는지를
+// 자세히 보이고(재생의 약 2/3), 같은 일이 되풀이되는 나머지 층은 '빨리 감기'로 넘긴다.
+// 한 층 사이클: 거푸집 0~0.35 · 철근 0.35~0.6 · 타설 0.6~0.78 · 마감·양생 0.78~1 (2D·3D 공통)
+export const CYC = [0.35, 0.6, 0.78];
+export const stageOf = (fr) => (fr < CYC[0] ? 0 : fr < CYC[1] ? 1 : fr < CYC[2] ? 2 : 3);
+// 공종별로 자세히 볼 구간 [사이클 시작, 끝, 재생 비율]
+const LENS = {
+  frame: [[0, 0.35, 0.24], [0.35, 0.6, 0.16], [0.6, 0.78, 0.2], [0.78, 1, 0.12]],
+  lift: [[0, 1, 0.7]], steel: [[0, 0.6, 0.5], [0.6, 1, 0.2]],
+  form: [[0, 0.35, 0.64]], rebar: [[0.35, 0.6, 0.64]],
+  pour: [[0.6, 0.78, 0.54], [0.78, 1, 0.14]], conc: [[0.6, 0.78, 0.5], [0.78, 1, 0.18]],
+};
+const lensMem = new WeakMap();
+export function lensFor(sc, wpId) {
+  let m = lensMem.get(sc); if (!m) lensMem.set(sc, m = {});
+  if (!(wpId in m)) m[wpId] = makeLens(sc, wpId);
+  return m[wpId];
+}
+function makeLens(sc, wpId) {
+  const L = LENS[wpId], st = sc.W.frame, win = winFor(sc, wpId);
+  if (!L || win.skip || !st || !(st.e > st.s) || sc.NF < 3 || !sc.known.has('frame')) return null;
+  const NF = sc.NF, a = L[0][0], b = L[L.length - 1][1];
+  const flAt = (t) => clamp((t - st.s) / (st.e - st.s), 0, 1) * NF, tAt = (fl) => st.s + fl / NF * (st.e - st.s);
+  const f0 = flAt(win.s), f1 = flAt(win.e);
+  // 자세히 볼 층: 창 안에서 그 단계를 처음부터 끝까지 볼 수 있는 첫 층
+  const i = f0 - Math.floor(f0) <= a + 1e-6 ? Math.floor(f0) : Math.floor(f0) + 1;
+  if (i + b > f1 + 1e-6 || f1 - f0 < 1.8) return null; // 온전한 한 층이 없거나 층이 둘도 안 되면 고르게 재생
+  const one = (st.e - st.s) / NF;
+  const raw = [];
+  const lead = tAt(i + a) - win.s, rest = Math.min(win.e, tAt(i + 1)) - tAt(i + b), tail = win.e - Math.min(win.e, tAt(i + 1));
+  if (lead > 1e-6) raw.push({ kind: 'lead', t0: win.s, t1: tAt(i + a), w: clamp(0.03 + 0.05 * lead / one, 0.03, 0.08) });
+  L.forEach(([x0, x1, w]) => raw.push({ kind: 'detail', t0: tAt(i + x0), t1: tAt(i + x1), w }));
+  if (rest > 1e-6) raw.push({ kind: 'rest', t0: tAt(i + b), t1: tAt(i + b) + rest, w: 0.05 });
+  if (tail > 1e-6) raw.push({ kind: 'ff', t0: win.e - tail, t1: win.e, w: 0 });
+  const used = raw.reduce((s, r) => s + r.w, 0), ff = raw.find(r => r.kind === 'ff');
+  if (ff) ff.w = Math.max(0.12, 1 - used);
+  const sum = raw.reduce((s, r) => s + r.w, 0);
+  let p = 0; const segs = raw.map(r => { const p0 = p; p += r.w / sum; return { kind: r.kind, p0, p1: p, t0: r.t0, t1: r.t1 }; });
+  segs[segs.length - 1].p1 = 1;
+  const det = segs.filter(x => x.kind === 'detail');
+  return { segs, floor: i, toFloor: Math.min(NF, Math.max(i + 1, Math.ceil(f1 - 1e-6))), a, b, d0: det[0].p0, d1: det[det.length - 1].p1, days: det[det.length - 1].t1 - det[0].t0, one, flAt };
+}
+// 재생 위치 p(0..1) → 그날(τ)과 지금 구간. kind: lin(고르게) · lead(앞 단계 빨리) · detail(자세히) · rest(그 층 마무리) · ff(나머지 층 빨리 감기)
+// q: 자세히 구간 안의 진행률(0..1, 단계 표시에 쓴다), fr: 그 층 사이클 위치(0..1)
+export function lensAt(sc, wpId, p) {
+  const win = winFor(sc, wpId), L = lensFor(sc, wpId); p = clamp(p, 0, 1);
+  if (!L) return { tau: win.s + p * (win.e - win.s), kind: 'lin', q: p, lens: null };
+  const s = L.segs.find(x => p <= x.p1) || L.segs[L.segs.length - 1], u = clamp((p - s.p0) / Math.max(1e-9, s.p1 - s.p0), 0, 1);
+  const tau = s.t0 + u * (s.t1 - s.t0), fl = L.flAt(tau);
+  return { tau, kind: s.kind, q: clamp((p - L.d0) / Math.max(1e-9, L.d1 - L.d0), 0, 1), lens: L, fl, fr: fl - Math.floor(fl) };
+}
+export const tauAt = (sc, wpId, p) => lensAt(sc, wpId, p).tau;
+// 단계(작업 순서) 번호: 렌즈가 있으면 자세히 구간에만 단계를 나눈다. 반환 { k, q(단계 안 진행률) }
+export function stepAt(sc, wpId, p, n) {
+  const L = lensFor(sc, wpId), q = L ? clamp((p - L.d0) / Math.max(1e-9, L.d1 - L.d0), 0, 1) : clamp(p, 0, 1);
+  const k = Math.min(n - 1, Math.floor(q * n * 0.999));
+  return { k, q: clamp(q * n - k, 0, 1) };
+}
+// 단계 → 재생 위치 (단계 버튼을 눌렀을 때)
+export function stepToP(sc, wpId, k, n, at = 0.02) {
+  const L = lensFor(sc, wpId), q = (k + at) / n;
+  return Math.min(0.999, L ? L.d0 + q * (L.d1 - L.d0) : q);
+}
 // 3D 시점: 2D 카메라가 보는 범위(미터)를 그대로 쓴다
 export function focusOf(sc, wpId, p) {
   const base = roiFor(sc, wpId);
@@ -296,7 +364,7 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
   const g = pen(cam, wpId);
   const { G, nb, cond, ids, d } = sc;
   const win = winFor(sc, wpId);
-  const tau = win.s + clamp(p, 0, 1) * (win.e - win.s);
+  const tau = tauAt(sc, wpId, p);
   const K = (wp) => sc.known.has(wp);
   const F = (wp) => (wp === wpId ? ' acc' : '');
   const at = {}; // 표식 위치 (미터)
@@ -375,7 +443,7 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
   drawStreet(g, c);
   drawNeighbours(g, c, sdy);
   {
-    const x0 = nb.x0, x1 = nb.x1, h = nb.h, b = nb.b, nbName = city ? `인접 건물 · ${city.nb.name}` : nb.urban ? '인접 건물' : '인접 시설';
+    const x0 = nb.x0, x1 = nb.x1, h = nb.h, b = nb.b, nbName = (city ? `인접 건물 · ${city.nb.name}` : nb.urban ? '인접 건물' : '인접 시설') + (nb.real ? ` · 지도 높이 약 ${Math.round(nb.h)}m` : '');
     g.text(Math.min(x1 - 6, Math.max((x0 + x1) / 2, cam.xw(70))), Math.min(h + 3 - sdy, cam.ew(NARROW ? 66 : 48)), nbName, 'nb-t', 'middle', 0);
     if (g.X(x1) < 12) g.P(`<text class="nb-pt" x="20" y="${(g.Y(0) - 8).toFixed(1)}">← ${nb.urban ? '인접 건물' : '인접 시설'} ${Math.round(-x1)}m</text>`);
     if (settleNow > 0.3) {
@@ -645,7 +713,7 @@ export function frame(sc, wpId, p, T, roi, marks = [], opts = {}) {
   const wp = WP_BY_ID[wpId];
   const o = wp.multi ? (sc.qa.length ? `${sc.qa.length}개 기술` : '기술 없음') : (wp.opts.find(x => x.id === ids[wpId]) || { name: '' }).name;
   g.P(`<text class="hud-c" x="16" y="22">// SIM_${wp.code}${NARROW ? '' : ` · ${wp.en}`}</text><text class="hud-t" x="16" y="38">${esc(o)}</text>`);
-  const dayT = win.skip ? '해당 공정 없음' : `${Math.round(win.e - win.s)}일 중 ${Math.round(clamp(p, 0, 1) * (win.e - win.s))}일째`;
+  const dayT = win.skip ? '해당 공정 없음' : `${Math.round(win.e - win.s)}일 중 ${Math.round(tau - win.s)}일째`;
   g.P(`<text class="hud-c" x="${VW - 16}" y="22" text-anchor="end">D+${Math.round(tau)} · ${ym(dt)}</text>`);
   g.P(NARROW ? `<text class="hud-c" x="16" y="56">${dayT}</text>` : `<text class="hud-t" x="${VW - 16}" y="38" text-anchor="end">${dayT}</text>`);
   // 아래 시간 축: 전체 공기 중 이 공종의 창

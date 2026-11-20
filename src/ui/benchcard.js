@@ -6,7 +6,7 @@ const n1 = (v) => v.toFixed(1);
 const num = (v, d = 0) => Number(v).toLocaleString('ko-KR', { maximumFractionDigits: d, minimumFractionDigits: d });
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const ymd = (s) => s.replace(/-/g, '.');
-const sgn = (v, d = 1) => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(d);
+const sgn = (v, d = 1) => { const r = +v.toFixed(d); return (r > 0 ? '+' : r < 0 ? '−' : '±') + Math.abs(r).toFixed(d); };
 const SRC = `출처: ${BENCH_SRC.name} (${ymd(BENCH_SRC.date)} 조회)`;
 
 // 점 띠 그림: 점 하나가 실제 현장 하나, 마름모가 이 계획과 기준선

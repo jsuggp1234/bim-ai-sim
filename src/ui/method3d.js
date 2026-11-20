@@ -604,11 +604,27 @@ export function buildMethods(X) {
   const unitP = unitM ? pool(BOX, unitM, 260, 'skin') : null;
   const spandP = SK === 'unitcw' || SK === 'stickcw' ? pool(BOX, clipM(0x3b4048, { metal: 0.3 }), NF * 4 + 8, 'skin') : null;
   const mullP = pool(BOX, clipM(0xc0c6cc, { metal: 0.6 }), SK === 'stickcw' ? 520 : 60, 'skin');
-  const scafP = SK === 'wet' ? pool(BOX, clipM(0xb9bec5, { metal: 0.5 }), 900, 'skin') : null;
-  const meshNet = SK === 'wet' ? pool(BOX, clipM(0x3fae6a, { op: 0.32 }), 4, 'skin') : null;
+  // 비계 부재 수는 건물 높이에 비례한다 (31m 한 단에 약 1,300개)
+  const scafN = Math.max(1, Math.ceil((sc.G.H || 30) / 31));
+  const scafP = SK === 'wet' ? pool(BOX, clipM(0xb9bec5, { metal: 0.5 }), Math.min(14000, 2600 + scafN * 1400), 'skin') : null, scafPl = SK === 'wet' ? pool(BOX, clipM(0xd9a23a, { metal: 0.3, rough: 0.6 }), Math.min(3600, 700 + scafN * 260), 'skin') : null;
+  const meshNet = SK === 'wet' ? pool(BOX, clipM(0x3fae6a, { op: 0.32 }), Math.min(96, (scafN + 6) * 4), 'skin') : null;
   let gondola = null, mewp = null;
   if (SK === 'stickcw' || SK === 'unitcw') { gondola = grp(); pbox(gondola, WHITE, 'skin', -3, 3, 0, 0.25, -0.45, 0.45); pbox(gondola, EQ, 'skin', -3, 3, 1.0, 1.08, -0.47, 0.47); [-3, 3].forEach(x => pbox(gondola, EQ, 'skin', x - 0.05, x + 0.05, 0, 1.08, -0.47, 0.47)); gondola.userData.c = [0, 1].map(() => mesh(BOX, ROPE, null)); gondola.userData.c.forEach(c => { c.visible = false; }); }
-  if (SK === 'metal') { mewp = grp(); pbox(mewp, EQ, 'skin', -1.2, 1.2, 0.3, 1.4, -2.4, 2.4); [-1.6, 1.6].forEach(z => [-1.1, 1.1].forEach(x => pcyl(mewp, DARK, null, x, 0.35, z, 0.35, 0.3, 'x'))); mewp.userData.a = [0, 1].map(() => mesh(BOX, EQ, 'skin', mewp)); mewp.userData.bk = pbox(mewp, ORANGE, 'skin', -0.9, 0.9, 0, 1.1, -0.6, 0.6); }
+  // 굴절식 고소작업대 (붐 리프트): 차대 · 큰 바퀴 넷 · 선회체 · 카운터웨이트 · 주 붐(바깥 + 뽑혀 나오는 안쪽 단) · 지브 · 난간 달린 작업대
+  if (SK === 'metal') {
+    mewp = grp();
+    rb(mewp, EQ, 'skin', -1.1, 1.1, 0.5, 1.12, -2.5, 2.5, 0.12);
+    [-1.7, 1.7].forEach(z => [-1.18, 1.18].forEach(x => { pcyl(mewp, DARK, null, x, 0.52, z, 0.52, 0.42, 'x'); pcyl(mewp, HUB, null, x + Math.sign(x) * 0.215, 0.52, z, 0.22, 0.03, 'x'); }));
+    pcyl(mewp, DARK2, null, 0, 1.22, 0.4, 0.85, 0.2);
+    rb(mewp, EQ, 'skin', -0.95, 0.95, 1.32, 2.15, -0.5, 2.3, 0.12); pbox(mewp, DARK2, null, -1.0, 1.0, 1.32, 1.95, 2.3, 2.85); pbox(mewp, DARK, null, -0.96, -0.9, 1.5, 2.0, 0.2, 1.6);
+    mewp.userData.a = [mesh(BOX, EQ, 'skin', mewp), mesh(BOX, WHITE, 'skin', mewp), mesh(BOX, EQ, 'skin', mewp)];
+    mewp.userData.ram = [mesh(CYL, DARK2, null, mewp), mesh(CYL, CHROME, null, mewp)];
+    const bk = new THREE.Group(); mewp.add(bk); mewp.userData.bk = bk;
+    pbox(bk, DARK2, 'skin', -1.0, 1.0, 0, 0.06, -0.45, 0.45); pbox(bk, ORANGE, 'skin', -1.0, 1.0, 0.06, 0.2, -0.47, -0.45); pbox(bk, ORANGE, 'skin', -1.0, 1.0, 0.06, 0.2, 0.45, 0.47);
+    [[-1, -0.45], [1, -0.45], [-1, 0.45], [1, 0.45], [0, -0.45], [0, 0.45]].forEach(([x, z]) => pbox(bk, ORANGE, 'skin', x - 0.025, x + 0.025, 0, 1.1, z - 0.025, z + 0.025));
+    [0.58, 1.1].forEach(y => { [-0.45, 0.45].forEach(z => pbox(bk, ORANGE, 'skin', -1.0, 1.0, y - 0.025, y + 0.025, z - 0.025, z + 0.025)); [-1, 1].forEach(x => pbox(bk, ORANGE, 'skin', x - 0.025, x + 0.025, y - 0.025, y + 0.025, -0.45, 0.45)); });
+    pbox(bk, DARK, null, 0.45, 0.85, 0.85, 1.15, 0.3, 0.46); // 조작반
+  }
   const RF = ids.roof, rTex = roofTex(RF);
   if (rTex && R.roofL) { tex(rTex); const m = texM(rTex, { clip: true, metal: RF === 'metal' ? 0.5 : 0.05, rough: RF === 'urethane' ? 0.35 : 0.8 }); R.roofL.material = m; R.roofL.userData.base = m; }
   const roofX = pool(CYL, DARK2, 12, 'roof'), torch = pool(CONE, mat(0xff8a3d, { em: 1.2 }), 2, 'roof');
@@ -1051,15 +1067,18 @@ export function buildMethods(X) {
     const formOn = active && K('form');
     if (formOn) {
       const y0 = f.e0 + 0.18, ys = f.e1 - 0.32, xs = xsF[nF], zs = zsF[nF];
+      const fk = S.formK == null ? 1 : S.formK, Wf = fp.x1 - fp.x0, xS = fp.x0 + Wf * clamp(fk * 1.25, 0, 1), xD = fp.x0 + Wf * clamp(fk * 1.25 - 0.22, 0, 1);
       if (FM === 'conv') {
-        if (stage < 3) { woodP.box(fp.x0, fp.x1, ys - 0.05, ys, fp.z0, fp.z1); for (let z = fp.z0 + 0.6; z < fp.z1; z += 1.2) woodP.box(fp.x0, fp.x1, ys - 0.2, ys - 0.05, z - 0.05, z + 0.05); for (let x = fp.x0 + 0.6; x < fp.x1; x += 1.2) for (let z = fp.z0 + 0.6; z < fp.z1; z += 1.2) shoreP.box(x - 0.04, x + 0.04, y0, ys - 0.2, z - 0.04, z + 0.04); for (let z = fp.z0 + 0.6; z < fp.z1; z += 2.4) shoreP.box(fp.x0, fp.x1, (y0 + ys) / 2 - 0.03, (y0 + ys) / 2 + 0.03, z - 0.03, z + 0.03); if (stage < 2 && FT !== 'rcwall') xs.forEach(x => zs.forEach(z => woodP.box(x - 0.5, x + 0.5, y0, ys - 0.2, z - 0.5, z + 0.5))); }
+        // 한쪽 끝에서부터: 동바리·멍에가 먼저 서고(xS), 그 뒤를 장선·합판이 따라 깔린다(xD). 기둥 거푸집은 처음부터 선다
+        if (stage < 3) { if (xD > fp.x0 + 0.3) { woodP.box(fp.x0, xD, ys - 0.05, ys, fp.z0, fp.z1); for (let z = fp.z0 + 0.6; z < fp.z1; z += 1.2) woodP.box(fp.x0, xD, ys - 0.2, ys - 0.05, z - 0.05, z + 0.05); } for (let x = fp.x0 + 0.6; x < xS; x += 1.2) for (let z = fp.z0 + 0.6; z < fp.z1; z += 1.2) shoreP.box(x - 0.04, x + 0.04, y0, ys - 0.2, z - 0.04, z + 0.04); if (xS > fp.x0 + 0.3) for (let z = fp.z0 + 0.6; z < fp.z1; z += 2.4) shoreP.box(fp.x0, xS, (y0 + ys) / 2 - 0.03, (y0 + ys) / 2 + 0.03, z - 0.03, z + 0.03); if (stage < 2 && FT !== 'rcwall') xs.forEach(x => zs.forEach(z => woodP.box(x - 0.5, x + 0.5, y0, ys - 0.2, z - 0.5, z + 0.5))); }
         for (let k = 1; k <= 2; k++) { const i = nF - k; if (i < 0) break; const f2 = sc.floors[i], p2 = D.fp[i]; for (let x = p2.x0 + 1.2; x < p2.x1; x += 2.4) for (let z = p2.z0 + 1.2; z < p2.z1; z += 2.4) shoreP.box(x - 0.04, x + 0.04, f2.e0 + 0.18, f2.e1 - 0.32, z - 0.04, z + 0.04); }
       } else if (FM === 'alform') {
-        if (stage < 3) { alP.box(fp.x0, fp.x1, ys - 0.06, ys, fp.z0, fp.z1); for (let x = fp.x0 + 1.2; x < fp.x1; x += 1.2) alP.box(x - 0.03, x + 0.03, ys - 0.1, ys - 0.06, fp.z0, fp.z1); if (stage < 2) { if (FT === 'rcwall') { xs.forEach(x => alP.box(x - 0.24, x + 0.24, y0, ys - 0.06, fp.z0, fp.z1)); [fp.z0, fp.z1].forEach(z => alP.box(fp.x0, fp.x1, y0, ys - 0.06, z - 0.24, z + 0.24)); } else xs.forEach(x => zs.forEach(z => alP.box(x - 0.55, x + 0.55, y0, ys - 0.06, z - 0.55, z + 0.55))); } for (let x = fp.x0 + 0.9; x < fp.x1; x += 1.8) for (let z = fp.z0 + 0.9; z < fp.z1; z += 1.8) shoreP.box(x - 0.04, x + 0.04, y0, ys - 0.06, z - 0.04, z + 0.04); }
+        if (stage < 3) { if (xD > fp.x0 + 0.3) alP.box(fp.x0, xD, ys - 0.06, ys, fp.z0, fp.z1); for (let x = fp.x0 + 1.2; x < xD; x += 1.2) alP.box(x - 0.03, x + 0.03, ys - 0.1, ys - 0.06, fp.z0, fp.z1); if (stage < 2) { if (FT === 'rcwall') { xs.forEach(x => alP.box(x - 0.24, x + 0.24, y0, ys - 0.06, fp.z0, fp.z1)); [fp.z0, fp.z1].forEach(z => alP.box(fp.x0, fp.x1, y0, ys - 0.06, z - 0.24, z + 0.24)); } else xs.forEach(x => zs.forEach(z => alP.box(x - 0.55, x + 0.55, y0, ys - 0.06, z - 0.55, z + 0.55))); } for (let x = fp.x0 + 0.9; x < xS; x += 1.8) for (let z = fp.z0 + 0.9; z < fp.z1; z += 1.8) shoreP.box(x - 0.04, x + 0.04, y0, ys - 0.06, z - 0.04, z + 0.04); }
         if (nF > 0) { const f2 = sc.floors[nF - 1], p2 = D.fp[nF - 1]; for (let x = p2.x0 + 1.8; x < p2.x1; x += 3.6) for (let z = p2.z0 + 1.8; z < p2.z1; z += 3.6) shoreP.box(x - 0.04, x + 0.04, f2.e0 + 0.18, f2.e1 - 0.32, z - 0.04, z + 0.04); }
       } else if (FM === 'gang') {
-        const yA = f.e0 - 0.6, yB = f.e1 + 1.1, o = 0.42, gap = wpId === 'form' ? 1 : -1; let pi = 0;
-        const side = (a, b, fix, alongX, out) => { for (let u = a; u < b - 0.5; u += 6) { const u1 = Math.min(b, u + 5.9); if (pi++ === gap) continue; if (alongX) gangP.box(u, u1, yA, yB, fix - 0.11, fix + 0.11); else gangP.box(fix - 0.11, fix + 0.11, yA, yB, u, u1); for (let r = u + 0.5; r < u1; r += 1.0) alongX ? ribP.box(r - 0.05, r + 0.05, yA, yB, fix + out * 0.11, fix + out * 0.24) : ribP.box(fix + out * 0.11, fix + out * 0.24, yA, yB, r - 0.05, r + 0.05); } [f.e1 + 0.95, f.e0 + 0.25, f.e0 - 2.6].forEach(y => { if (alongX) { platP.box(a - 1.4, b + 1.4, y - 0.06, y, Math.min(fix + out * 0.24, fix + out * 1.4), Math.max(fix + out * 0.24, fix + out * 1.4)); platP.box(a - 1.4, b + 1.4, y + 1.0, y + 1.06, fix + out * 1.38, fix + out * 1.44); } else { platP.box(Math.min(fix + out * 0.24, fix + out * 1.4), Math.max(fix + out * 0.24, fix + out * 1.4), y - 0.06, y, a, b); platP.box(fix + out * 1.38, fix + out * 1.44, y + 1.0, y + 1.06, a, b); } }); };
+        // 갱폼은 아래층에서 크레인으로 한 층 끌어올린다 (단계 처음 30%)
+        const up = nF > 0 ? (f.e1 - f.e0) * (1 - S.sm(fk / 0.3)) : 0, yA = f.e0 - 0.6 - up, yB = f.e1 + 1.1 - up, o = 0.42, gap = wpId === 'form' ? 1 : -1; let pi = 0;
+        const side = (a, b, fix, alongX, out) => { for (let u = a; u < b - 0.5; u += 6) { const u1 = Math.min(b, u + 5.9); if (pi++ === gap) continue; if (alongX) gangP.box(u, u1, yA, yB, fix - 0.11, fix + 0.11); else gangP.box(fix - 0.11, fix + 0.11, yA, yB, u, u1); for (let r = u + 0.5; r < u1; r += 1.0) alongX ? ribP.box(r - 0.05, r + 0.05, yA, yB, fix + out * 0.11, fix + out * 0.24) : ribP.box(fix + out * 0.11, fix + out * 0.24, yA, yB, r - 0.05, r + 0.05); } [f.e1 + 0.95 - up, f.e0 + 0.25 - up, f.e0 - 2.6 - up].forEach(y => { if (alongX) { platP.box(a - 1.4, b + 1.4, y - 0.06, y, Math.min(fix + out * 0.24, fix + out * 1.4), Math.max(fix + out * 0.24, fix + out * 1.4)); platP.box(a - 1.4, b + 1.4, y + 1.0, y + 1.06, fix + out * 1.38, fix + out * 1.44); } else { platP.box(Math.min(fix + out * 0.24, fix + out * 1.4), Math.max(fix + out * 0.24, fix + out * 1.4), y - 0.06, y, a, b); platP.box(fix + out * 1.38, fix + out * 1.44, y + 1.0, y + 1.06, a, b); } }); };
         side(fp.x0, fp.x1, fp.z0 - o, true, -1); side(fp.x0, fp.x1, fp.z1 + o, true, 1); side(fp.z0, fp.z1, fp.x0 - o, false, -1); side(fp.z0, fp.z1, fp.x1 + o, false, 1);
       } else if (FM === 'slip' && !S.hasCore) {
         // 코어가 없는 골조(철골·트러스·플랜트): 양 끝 계단·승강기 샤프트를 슬립폼으로 밤낮 없이 쉬지 않고 올린다
@@ -1087,7 +1106,7 @@ export function buildMethods(X) {
           per.forEach(([x, z]) => { const nx2 = x === cx0 ? 1 : x === cx1 ? -1 : 0, nz2 = nx2 ? 0 : z < 0 ? 1 : -1, a = 0.55; yokeP.box(x - nx2 * a - 0.08, x - nx2 * a + 0.08, ct - 1.2, ct + 1.6, z - nz2 * a - 0.08, z - nz2 * a + 0.08); yokeP.box(x + nx2 * a - 0.08, x + nx2 * a + 0.08, ct - 1.2, ct + 1.6, z + nz2 * a - 0.08, z + nz2 * a + 0.08); yokeP.box(Math.min(x - nx2 * a, x + nx2 * a) - 0.1, Math.max(x - nx2 * a, x + nx2 * a) + 0.1, ct + 1.5, ct + 1.8, Math.min(z - nz2 * a, z + nz2 * a) - 0.1, Math.max(z - nz2 * a, z + nz2 * a) + 0.1); rodP.box(x - 0.03, x + 0.03, ct + 1.8, ct + 5.4, z - 0.03, z + 0.03); });
           if (wpId === 'form') lab('form', cx1 + 3, ct + 6, 0);
         }
-      } else if (FM === 'deck' && stage < 3) { deckP.box(fp.x0, fp.x1, ys - 0.06, ys, fp.z0, fp.z1); [[fp.x0, fp.x1, fp.z0 - 0.02, fp.z0], [fp.x0, fp.x1, fp.z1, fp.z1 + 0.02], [fp.x0 - 0.02, fp.x0, fp.z0, fp.z1], [fp.x1, fp.x1 + 0.02, fp.z0, fp.z1]].forEach(([a, b, c, d]) => shoreP.box(a, b, ys, ys + 0.5, c, d)); }
+      } else if (FM === 'deck' && stage < 3) { if (xD > fp.x0 + 0.3) deckP.box(fp.x0, Math.min(fp.x1, xD + Wf * 0.1), ys - 0.06, ys, fp.z0, fp.z1); [[fp.x0, fp.x1, fp.z0 - 0.02, fp.z0], [fp.x0, fp.x1, fp.z1, fp.z1 + 0.02], [fp.x0 - 0.02, fp.x0, fp.z0, fp.z1], [fp.x1, fp.x1 + 0.02, fp.z0, fp.z1]].forEach(([a, b, c, d]) => shoreP.box(a, b, ys, ys + 0.5, c, d)); }
       if (wpId === 'form' && FM !== 'acs' && FM !== 'slip') lab('form', (fp.x0 + fp.x1) / 2, f.e1 + (FM === 'gang' ? 3.5 : 3), fp.z0 - 1);
     }
 
@@ -1110,7 +1129,10 @@ export function buildMethods(X) {
     R.pump.visible = false; R.mixers.forEach(m => { m.visible = false; });
     const pourVis = S.pourNow || (wpId === 'pour' && active), PR = ids.pour;
     if (pourVis && active) {
-      const pf = stage === 2 ? clamp((fr - 0.6) / 0.18, 0.02, 1) : 0.5, tgt = new THREE.Vector3(fp.x0 + (fp.x1 - fp.x0) * pf, f.e1 + 0.3, (fp.z0 + fp.z1) / 2 + (fp.z1 - fp.z0) * 0.3 * Math.sin(T * 0.25));
+      // 호스 끝: 지금 치는 띠를 따라가며 좌우로 조금씩 흔든다. 처음에는 붐을 접은 자리(펌프 위)에서 펴 온다
+      const q = S.pourPt, pf = q ? clamp(q.u, 0.02, 1) : 0.5;
+      const tgt = q ? new THREE.Vector3(q.x + q.ws * 0.32 * Math.sin(T * 0.9), f.e1 + 0.3, clamp(q.z + 0.6 * Math.sin(T * 0.37), fp.z0 + 0.5, fp.z1 - 0.5)) : new THREE.Vector3(fp.x0 + (fp.x1 - fp.x0) * 0.5, f.e1 + 0.3, (fp.z0 + fp.z1) / 2);
+      if (q && q.setup < 1) tgt.lerpVectors(new THREE.Vector3(Math.min(S.PX - 4, fp.x1 - 1), Math.max(f.e1 + 7, 13), -bd / 4), tgt.clone(), q.setup);
       if (S.cutNow) tgt.z = Math.min(tgt.z, -1);
       if (PR === 'boom' || PR === 'winter' || PR === 'multi') {
         const np = PR === 'multi' ? 3 : 1; let far = false;
@@ -1131,7 +1153,7 @@ export function buildMethods(X) {
       if (PR === 'winter') { filmP.box(fp.x0 - 0.4, fp.x1 + 0.4, f.e1 + 0.2, f.e1 + 2.8, fp.z0 - 0.4, S.cutNow ? 0 : fp.z1 + 0.4); for (let x = fp.x0 + 3; x < fp.x1 - 1; x += 7) heatP.box(x - 0.4, x + 0.4, f.e0 + 0.18, f.e0 + 1.0, fp.z0 + 2, fp.z0 + 2.6); }
     }
     // 양생 막은 타설·콘크리트 공종을 볼 때만 (다른 공종에서는 층 전체를 덮어 골조를 가린다)
-    if (active && stage === 3 && (wpId === 'pour' || wpId === 'conc')) { if (PR === 'winter') filmP.box(fp.x0 - 0.4, fp.x1 + 0.4, f.e1 + 0.2, f.e1 + 2.8, fp.z0 - 0.4, S.cutNow ? 0 : fp.z1 + 0.4); else filmP.box(fp.x0, fp.x1, f.e1 + 0.19, f.e1 + 0.23, fp.z0, S.cutNow ? 0 : fp.z1); }
+    if (active && stage === 3 && (wpId === 'pour' || wpId === 'conc')) { if (PR === 'winter') filmP.box(fp.x0 - 0.4, fp.x1 + 0.4, f.e1 + 0.2, f.e1 + 2.8, fp.z0 - 0.4, S.cutNow ? 0 : fp.z1 + 0.4); else { const ck = clamp(((S.cureK == null ? 1 : S.cureK) - 0.3) / 0.35, 0, 1); if (ck > 0.01) filmP.box(fp.x0, fp.x0 + (fp.x1 - fp.x0) * ck, f.e1 + 0.19, f.e1 + 0.23, fp.z0, S.cutNow ? 0 : fp.z1); } }
 
     // ---------- 철골 접합 ----------
     if (K('steel') && steelSk && ids.steel !== 'none' && active) {
@@ -1227,14 +1249,57 @@ export function buildMethods(X) {
         if (SK === 'stickcw') { for (let k = 1; k <= 2; k++) { const j = i + k; if (j >= nF) break; const f3 = sc.floors[j], p3 = D.fp[j]; for (let x = p3.x0; x <= p3.x1 + 1e-6; x += 1.5) { mullP.box(x - 0.04, x + 0.04, f3.e0, f3.e1, p3.z1 + 0.02, p3.z1 + 0.17); mullP.box(x - 0.04, x + 0.04, f3.e0, f3.e1, p3.z0 - 0.17, p3.z0 - 0.02); } for (let z = p3.z0; z <= p3.z1 + 1e-6; z += 1.5) { mullP.box(p3.x1 + 0.02, p3.x1 + 0.17, f3.e0, f3.e1, z - 0.04, z + 0.04); mullP.box(p3.x0 - 0.17, p3.x0 - 0.02, f3.e0, f3.e1, z - 0.04, z + 0.04); } if (k === 1) { [f3.e0 + 0.9, f3.e1 - 0.5].forEach(y => { mullP.box(p3.x0, p3.x1, y - 0.04, y + 0.04, p3.z1 + 0.02, p3.z1 + 0.17); mullP.box(p3.x1 + 0.02, p3.x1 + 0.17, y - 0.04, y + 0.04, p3.z0, p3.z1); }); } }
           const gx = last && last[2] === 'z1' ? clamp((last[0] + last[1]) / 2, p2.x0 + 3, p2.x1 - 3) : (p2.x0 + p2.x1) / 2; place(gondola, gx, f2.e0 + 0.4, p2.z1 + 0.9, 0); gondola.userData.c.forEach((c, k) => { c.visible = true; segO(c, gx + (k ? 2.8 : -2.8), f2.e0 + 1.5, p2.z1 + 0.9, gx + (k ? 2.8 : -2.8), top + 1.5, p2.z1 + 0.9, 0.04); }); mullP.box(gx - 3.2, gx + 3.2, top + 1.2, top + 1.5, p2.z1 + 0.2, p2.z1 + 1.2); }
         else if (gondola) gondola.userData.c.forEach(c => { c.visible = false; });
-        if (SK === 'metal' && mewp) { const bx = last && last[2] === 'z1' ? (last[0] + last[1]) / 2 : p2.x0 + 3, bz = p2.z1 + 5.5, hy = f2.e0 + 0.5; place(mewp, bx, 0, bz, 0); const [a1, a2] = mewp.userData.a, kx = 0, ky = Math.max(3, hy * 0.55), kz = -2.0; segO(a1, 0, 1.4, 0.5, kx, ky, kz, 0.45); segO(a2, kx, ky, kz, 0, hy - 0.1, -(bz - p2.z1) + 1.0, 0.38); mewp.userData.bk.position.set(0, hy + 0.55, -(bz - p2.z1) + 1.0); mewp.userData.bk.scale.set(1.8, 1.1, 1.2); }
+        if (SK === 'metal' && mewp) {
+          // 작업대를 지금 붙이는 패널 앞에 댄다: 선회체 힌지 → 주 붐(안쪽 단이 뽑혀 나온다) → 지브 → 작업대
+          const bx = last && last[2] === 'z1' ? (last[0] + last[1]) / 2 : p2.x0 + 3, bz = p2.z1 + 6.5, hy = f2.e0 + 0.6; place(mewp, bx, 0, bz, 0);
+          const [a1, a2, a3] = mewp.userData.a, tz = -(bz - p2.z1) + 0.75, ty = hy + 0.6 * (0.5 + 0.5 * Math.sin(T * 0.35)), ey = Math.max(3.4, ty + 1.3), ez = tz + 2.1, hz = 1.5, hyy = 2.1;
+          segO(a1, 0, hyy, hz, 0, lerp(hyy, ey, 0.62), lerp(hz, ez, 0.62), 0.46); segO(a2, 0, lerp(hyy, ey, 0.5), lerp(hz, ez, 0.5), 0, ey, ez, 0.34); segO(a3, 0, ey, ez, 0, ty + 0.55, tz + 0.6, 0.2);
+          const [rb1, rb2] = mewp.userData.ram, mx = lerp(hyy, ey, 0.3), mz = lerp(hz, ez, 0.3); segO(rb1, 0, 1.9, 0.2, 0, lerp(1.9, mx, 0.55), lerp(0.2, mz, 0.55), 0.2); segO(rb2, 0, lerp(1.9, mx, 0.55), lerp(0.2, mz, 0.55), 0, mx, mz, 0.11);
+          mewp.userData.bk.position.set(0, ty, tz);
+        }
       } else if (gondola) gondola.userData.c.forEach(c => { c.visible = false; });
-      if (SK === 'wet' && scafP && S.skinP < 1 && skinOn) { // 시스템 비계 + 분진망 (건물 전체)
-        const o = 1.1, p2 = p0, a = p2.x0 - o, b = p2.x1 + o, c = p2.z0 - o, d = S.cutNow ? 0 : p2.z1 + o;
-        for (let x = a; x <= b + 1e-6; x += 1.8) { scafP.box(x - 0.03, x + 0.03, 0, top + 1.5, c - 0.03, c + 0.03); if (!S.cutNow) scafP.box(x - 0.03, x + 0.03, 0, top + 1.5, d - 0.03, d + 0.03); }
-        for (let z = c; z <= d + 1e-6; z += 1.8) { scafP.box(a - 0.03, a + 0.03, 0, top + 1.5, z - 0.03, z + 0.03); scafP.box(b - 0.03, b + 0.03, 0, top + 1.5, z - 0.03, z + 0.03); }
-        for (let y = 2; y < top + 1.5; y += 2) { scafP.box(a, b, y - 0.03, y + 0.03, c - 0.03, c + 0.03); if (!S.cutNow) scafP.box(a, b, y - 0.03, y + 0.03, d - 0.03, d + 0.03); scafP.box(a - 0.03, a + 0.03, y - 0.03, y + 0.03, c, d); scafP.box(b - 0.03, b + 0.03, y - 0.03, y + 0.03, c, d); }
-        const m2 = 0.25; meshNet.box(a - m2, b + m2, 0, top + 1.6, c - m2 - 0.02, c - m2); if (!S.cutNow) meshNet.box(a - m2, b + m2, 0, top + 1.6, d + m2, d + m2 + 0.02); meshNet.box(a - m2 - 0.02, a - m2, 0, top + 1.6, c - m2, d + m2); meshNet.box(b + m2, b + m2 + 0.02, 0, top + 1.6, c - m2, d + m2);
+      if (SK === 'wet' && scafP && S.skinP < 1 && skinOn) {
+        // 시스템 비계: 마감이 위층부터 내려오므로 끝난 위층은 이미 해체했고, 지금 마감하는 층 아래로만 서 있다.
+        // 한 단은 31m 이하(그보다 높으면 구조 검토 대상) → 위 단은 H형강 브래킷(까치발)으로 받치고, 평면이 줄어드는 곳은 아래층 지붕 위에 세운다.
+        // 단마다: 안·밖 두 줄 수직재 + 밑받침 + 층마다 띠장 · 작업 발판 · 발끝막이 · 2단 난간 + 벽 이음 + 가새 + 계단탑 + 분진망
+        const IN = 0.35, OUT = 1.25, t = 0.028, LIFT = 1.9, iW = Math.max(0, nF - 1 - nS);
+        const same = (a, b) => Math.abs(a.x0 - b.x0) + Math.abs(a.x1 - b.x1) + Math.abs(a.z0 - b.z0) + Math.abs(a.z1 - b.z1) < 0.2;
+        // 변 좌표 → 상자: u(변 방향) a~b, 벽에서 바깥으로 f0~f1, 높이 y0~y1
+        const Bx = (P, ax, v, sg, a, b, f0, f1, y0, y1) => { const q0 = v + sg * f0, q1 = v + sg * f1; return ax ? P.box(a, b, y0, y1, Math.min(q0, q1), Math.max(q0, q1)) : P.box(Math.min(q0, q1), Math.max(q0, q1), y0, y1, a, b); };
+        const stages = [];
+        for (let i1 = iW; i1 >= 0;) { let i0 = i1; while (i0 > 0 && same(D.fp[i0 - 1], D.fp[i1]) && sc.floors[i1].e1 - sc.floors[i0 - 1].e0 <= 31) i0--; stages.push({ y0: i0 === 0 ? 0 : sc.floors[i0].e0, y1: sc.floors[i1].e1 + (i1 === iW ? 1.5 : 0), p: D.fp[i1], hung: i0 > 0 && same(D.fp[i0 - 1], D.fp[i1]) }); i1 = i0 - 1; }
+        stages.forEach(({ y0: yB, y1: H, p: p2, hung }, sti) => {
+          const zEnd = S.cutNow ? 0 : p2.z1;
+          const sides = [[true, p2.z0, -1, p2.x0 - OUT, p2.x1 + OUT], [false, p2.x0, -1, p2.z0 - OUT, S.cutNow ? 0 : zEnd + OUT], [false, p2.x1, 1, p2.z0 - OUT, S.cutNow ? 0 : zEnd + OUT]]; if (!S.cutNow) sides.push([true, p2.z1, 1, p2.x0 - OUT, p2.x1 + OUT]);
+          const lifts = []; for (let y = yB + LIFT; y < H - 0.4; y += LIFT) lifts.push(y);
+          const bays = sides.map(([ax, v, sg, u0, u1]) => { const n = Math.max(1, Math.round((u1 - u0) / 1.83)); return { n, st: (u1 - u0) / n }; });
+          sides.forEach(([ax, v, sg, u0, u1], si) => {
+            const { n, st } = bays[si];
+            for (let k = 0; k <= n; k++) { const u = u0 + k * st; [IN, OUT].forEach(f => { Bx(scafP, ax, v, sg, u - t, u + t, f - t, f + t, yB + 0.1, H); if (!hung) Bx(scafP, ax, v, sg, u - 0.09, u + 0.09, f - 0.09, f + 0.09, yB, yB + 0.035); }); }
+            // 브래킷: 슬래브에 물린 H형강이 밖으로 내밀고 그 밑을 사재가 받친다 (두 칸마다)
+            if (hung) { Bx(scafP, ax, v, sg, u0, u1, IN - 0.05, IN + 0.05, yB - 0.02, yB + 0.1); Bx(scafP, ax, v, sg, u0, u1, OUT - 0.05, OUT + 0.05, yB - 0.02, yB + 0.1);
+              for (let k = 0; k <= n; k += 2) { const u = u0 + k * st, q0 = v + sg * 0.02, q1 = v + sg * (OUT + 0.12); Bx(scafP, ax, v, sg, u - 0.06, u + 0.06, -0.3, OUT + 0.15, yB - 0.2, yB - 0.02); if (ax) scafP.seg(u, yB - 1.5, q0, u, yB - 0.2, q1, 0.08); else scafP.seg(q0, yB - 1.5, u, q1, yB - 0.2, u, 0.08); } }
+            lifts.forEach(y => {
+              Bx(scafP, ax, v, sg, u0, u1, IN - t, IN + t, y - t, y + t); Bx(scafP, ax, v, sg, u0, u1, OUT - t, OUT + t, y - t, y + t);
+              [0.55, 1.05].forEach(h => Bx(scafP, ax, v, sg, u0, u1, OUT - t, OUT + t, y + h - 0.02, y + h + 0.02));
+              Bx(scafPl, ax, v, sg, u0, u1, IN + 0.03, OUT - 0.03, y + 0.03, y + 0.075); Bx(scafPl, ax, v, sg, u0, u1, OUT - 0.035, OUT - 0.01, y + 0.075, y + 0.22);
+            });
+          });
+          // 벽 이음 (두 층·세 칸마다) → 가새 (바깥면, 네 칸마다 지그재그). 수가 넘치면 아래 단의 것부터 생략된다
+          sides.forEach(([ax, v, sg, u0], si) => { const { n, st } = bays[si]; lifts.forEach((y, li) => { if (li % 2) return; for (let k = 1; k < n; k += 3) Bx(scafP, ax, v, sg, u0 + k * st - t, u0 + k * st + t, 0, IN, y - 0.3 - t, y - 0.3 + t); }); });
+          sides.forEach(([ax, v, sg, u0], si) => {
+            const { n, st } = bays[si], q = v + sg * (OUT + 0.035);
+            for (let li = 0; li < lifts.length; li++) for (let k = li % 4; k < n; k += 4) { const ua = u0 + k * st, ub = ua + st, ya = li ? lifts[li - 1] : yB + 0.1, yb = lifts[li], fl2 = li % 2 === 0; const a = fl2 ? ua : ub, b = fl2 ? ub : ua; if (ax) scafP.seg(a, ya, q, b, yb, q, 0.045); else scafP.seg(q, ya, a, q, yb, b, 0.045); }
+          });
+          // 계단탑: 뒤쪽 변 한쪽 끝 밖에 붙인다 (층마다 지그재그 계단 + 참)
+          { const sx0 = p2.x1 + OUT - 3.9, sx1 = p2.x1 + OUT - 0.3, zA = p2.z0 - OUT - 1.25, zB = p2.z0 - OUT - 0.1;
+            [sx0, sx1].forEach(x => scafP.box(x - t, x + t, yB + 0.1, H, zA - t, zA + t));
+            lifts.forEach((y, li) => { const y0 = li ? lifts[li - 1] : yB + 0.15, up = li % 2 === 0, a = up ? sx0 + 0.5 : sx1 - 0.5, b = up ? sx1 - 0.5 : sx0 + 0.5; scafPl.seg(a, y0 + 0.05, (zA + zB) / 2, b, y + 0.05, (zA + zB) / 2, 0.06, 0.75); scafPl.box(up ? sx1 - 0.6 : sx0, up ? sx1 : sx0 + 0.6, y + 0.03, y + 0.075, zA, zB); scafP.seg(a, y0 + 1.0, zA, b, y + 1.0, zA, 0.04); });
+          }
+          // 분진망: 단마다 네 면 (맨 위 단은 난간 위까지)
+          const o = OUT, a = p2.x0 - o, b = p2.x1 + o, c = p2.z0 - o, d = S.cutNow ? 0 : p2.z1 + o, nT = H + (sti === 0 ? 0.1 : 0);
+          const m2 = 0.12; meshNet.box(a - m2, b + m2, yB, nT, c - m2 - 0.02, c - m2); if (!S.cutNow) meshNet.box(a - m2, b + m2, yB, nT, d + m2, d + m2 + 0.02); meshNet.box(a - m2 - 0.02, a - m2, yB, nT, c - m2, d + m2); meshNet.box(b + m2, b + m2 + 0.02, yB, nT, c - m2, d + m2);
+        });
       }
       if (wpId === 'skin') { const i = Math.min(nS, nF - 1), f2 = sc.floors[Math.max(0, SK === 'wet' ? nF - 1 - nS : i)]; lab('skin', (p0.x0 + p0.x1) / 2, (f2 ? f2.e1 : top) + 4, p0.z1 + 2); }
     }

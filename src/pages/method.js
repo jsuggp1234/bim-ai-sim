@@ -10,7 +10,7 @@ import { pipeline, fmt, won, setMethodState, setOptState, tip, projKey } from '.
 import { store } from '../store.js';
 import { dot, hbar, escH } from '../ui/sys.js';
 import { wpImpact, delta, vsBaseline, sectionGeom, wpLabel, optName } from '../sim/impact.js';
-import { makeScene, frame, roiFor, lerpRoi, winFor } from '../ui/buildsim.js';
+import { makeScene, frame, roiFor, lerpRoi, winFor, lensFor, stepAt, stepToP } from '../ui/buildsim.js';
 import { workFig, workInfo, classify } from '../ui/workstep.js';
 
 // 받침 있으면 '이', 없으면 '가'
@@ -308,15 +308,18 @@ export function mount(root) {
       // 판정 표식 위치는 2D 장면이 계산한 단면 좌표를 그대로 쓴다 (2D 창이 닫혀 있으면 0.3초마다)
       const now = performance.now();
       if (!want2d && (!ui.at || now - ui.atT > 300)) { try { ui.at = frame(scene, L.wp.id, ui.p, ui.T, roi, [], { narrow: false }).at; } catch { ui.at = {}; } ui.atT = now; }
-      const S3 = stepsOf(), k3 = Math.min(S3.length - 1, Math.floor(ui.p * S3.length * 0.999)), s3 = S3[k3];
+      const S3 = stepsOf(), k3 = stepAt(scene, L.wp.id, ui.p, S3.length).k, s3 = S3[k3];
       const step = s3 && s3.opt !== '' ? { wp: L.wp.id, a: classify(L.wp.id, s3.opt, s3.w || s3.t), k: k3, n: S3.length } : null;
       try { v3.update({ sc: scene, wpId: L.wp.id, p: ui.p, T: ui.T, marks, at: ui.at, step }); }
       catch (e) { if (v3Err !== e.message) { v3Err = e.message; console.error(e); } } // 한 장면이 실패해도 3D를 끄지 않는다 (2D 단면은 아이콘으로 열 때만)
     }
-    const S = stepsOf(), k = Math.min(S.length - 1, Math.floor(ui.p * S.length * 0.999));
-    $('sim-cap').innerHTML = `<span class="sc-n">${String(k + 1).padStart(2, '0')} / ${String(S.length).padStart(2, '0')}</span><b>${escH(S[k].t)}</b>${S[k].d ? `<span>${escH(S[k].d)}</span>` : ''}`;
+    const S = stepsOf(), k = stepAt(scene, L.wp.id, ui.p, S.length).k;
+    // 반복 층을 빨리 감는 구간에서는 단계 대신 그 사실을 알린다
+    const LZ = lensFor(scene, L.wp.id), ffz = LZ && ui.p > LZ.d1 + 1e-6;
+    $('sim-cap').innerHTML = `<span class="sc-n">${String(k + 1).padStart(2, '0')} / ${String(S.length).padStart(2, '0')}</span><b>${escH(S[k].t)}</b>${ffz ? `<span class="sc-ff">▶▶ 나머지 층 빨리 감기 (${LZ.toFloor}층까지 같은 작업 반복)</span>` : S[k].d ? `<span>${escH(S[k].d)}</span>` : ''}`;
     $('sim-steps').querySelectorAll('li').forEach((li, i) => li.className = i === k ? 'on' : i < k ? 'done' : '');
     $('sim-ticks').querySelectorAll('i').forEach((t, i) => t.classList.toggle('on', i <= k));
+    const fz = $('sim-ticks').querySelector('em.ffz'); if (fz) fz.classList.toggle('on', !!ffz);
     if (ui.pop === 'work') drawWork(L, S, k);
     const sl = $('sim-p'); if (document.activeElement !== sl) sl.value = Math.round(ui.p * 1000);
   }
@@ -331,13 +334,17 @@ export function mount(root) {
       wArch = info.a; $('sw-info').innerHTML = info.html;
     }
     // 멈춘 첫 화면은 단계 중간 모습을, 재생 중에는 단계 안 진행률을 그린다
-    const q = !ui.playing && ui.p === 0 ? 0.55 : Math.min(1, Math.max(0, ui.p * n - k));
+    const q = !ui.playing && ui.p === 0 ? 0.55 : stepAt(scene, L.wp.id, ui.p, n).q;
     $('sw-fig').innerHTML = workFig(wArch, q, reduce ? 0 : ui.T, { text: s.w || s.t, wpId: L.wp.id, optId: s.opt });
   }
   function renderSteps() {
     const S = stepsOf();
     $('sim-steps').innerHTML = S.map((s, i) => `<li><button type="button" data-step="${i}"><span>${String(i + 1).padStart(2, '0')}</span>${escH(s.t)}</button></li>`).join('');
-    $('sim-ticks').innerHTML = S.map((s, i) => `<i style="left:${(i / S.length * 100).toFixed(2)}%;width:${(100 / S.length).toFixed(2)}%" title="${escH(s.t)}"></i>`).join('');
+    // 시간 렌즈가 있는 공종: 단계 눈금은 '자세히' 구간에만, 그 앞뒤는 빨리 감기 구간(빗금)으로 표시
+    const LZ = scene ? lensFor(scene, Lof(ui.cur).wp.id) : null, a0 = LZ ? LZ.d0 : 0, a1 = LZ ? LZ.d1 : 1;
+    $('sim-ticks').innerHTML = S.map((s, i) => `<i style="left:${((a0 + (a1 - a0) * i / S.length) * 100).toFixed(2)}%;width:${((a1 - a0) * 100 / S.length).toFixed(2)}%" title="${escH(s.t)}"></i>`).join('')
+      + (LZ && a0 > 0.005 ? `<em class="ffz" style="left:0;width:${(a0 * 100).toFixed(2)}%" title="앞 단계 빨리 감기"></em>` : '')
+      + (LZ && a1 < 0.995 ? `<em class="ffz" style="left:${(a1 * 100).toFixed(2)}%;width:${((1 - a1) * 100).toFixed(2)}%" title="나머지 층 빨리 감기"></em>` : '');
     wKey = '';
   }
   // 한 단계에 약 50초 (1× 기준) — 공종 하나가 2분 30초~5분에 걸쳐 천천히 재생된다 (8×면 20~40초)
@@ -521,7 +528,7 @@ export function mount(root) {
     const tg = e.target.closest('[data-tog]'); if (tg) { const k = tg.dataset.tog, cls = k === 'nav' ? 'no-nav' : 'no-side'; ws.classList.toggle(cls); try { localStorage.setItem(k === 'nav' ? 'bim.simNav' : 'bim.simSide', ws.classList.contains(cls) ? '0' : '1'); } catch { /* 저장소 없음 */ } return; }
     if (e.target.closest('#sws-fs')) { if (document.fullscreenElement) document.exitFullscreen?.(); else ws.requestFullscreen?.().catch(() => {}); return; }
     const spb = e.target.closest('[data-sp]'); if (spb) { ui.speed = +spb.dataset.sp; root.querySelectorAll('[data-sp]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.sp === ui.speed))); try { localStorage.setItem('bim.simSpeed2', String(ui.speed)); } catch { /* 저장소 없음 */ } return; }
-    const stp = e.target.closest('[data-step]'); if (stp) { const n = stepsOf().length; ui.p = Math.min(0.999, (+stp.dataset.step + 0.02) / n); ui.playing = false; paintPlay(); draw(); return; }
+    const stp = e.target.closest('[data-step]'); if (stp) { const n = stepsOf().length; ui.p = stepToP(scene, Lof(ui.cur).wp.id, +stp.dataset.step, n); ui.playing = false; paintPlay(); draw(); return; }
     const sd = e.target.closest('.stage-done.locked .sd-r'); if (sd) { e.preventDefault(); showWp(done); $('wz-sec').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
     const gn = e.target.closest('#go-next.locked'); if (gn) { e.preventDefault(); showWp(Math.min(done, N - 1)); $('wz-sec').scrollIntoView({ behavior: 'smooth', block: 'start' }); }
   });

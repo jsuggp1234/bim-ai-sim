@@ -7,7 +7,7 @@ import { sunWorld } from './analysis.js';
 import { buildContext } from './scene/context3d.js';
 import { createBim } from './scene/bim3d.js';
 import { FACADE_U } from './scene/facade.js';
-import { readPalette } from './scene/palette.js';
+import { readPalette, isDark } from './scene/palette.js';
 import { createLook } from './scene/look.js';
 import { fallbackFor, analysisBoxes } from './ctxload.js';
 import { OSM_ATTRIB } from './osm.js';
@@ -17,7 +17,8 @@ const SVGNS = 'http://www.w3.org/2000/svg';
 const SUN_I = 4.6, MOON_I = 0.45;
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
-export function createViewer(stage, { onPick, onView, hero = false, lite = false } = {}) {
+// dayToggle: 검정 화면에서도 낮 장면을 기본으로 보여 주고, 장면 위 단추로 밤 장면과 바꾼다 (매스 단계)
+export function createViewer(stage, { onPick, onView, hero = false, lite = false, dayToggle = false } = {}) {
   const canvas = document.createElement('canvas');
   canvas.setAttribute('aria-label', '사업지 3D 모델. 드래그로 회전, 오른쪽 드래그로 이동, 휠로 확대, 건물을 누르면 정보 표시');
   stage.prepend(canvas);
@@ -51,7 +52,12 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.8;
   scene.add(sun); scene.add(sun.target);
 
-  let P = readPalette();
+  const NIGHT_KEY = 'bim.sceneNight';
+  let dayScene = false;
+  if (dayToggle) { try { dayScene = localStorage.getItem(NIGHT_KEY) !== '1'; } catch (e) { dayScene = true; } }
+  // 낮 장면은 밝은 화면의 장면 색 그대로 (검정 화면일 때만 의미가 있다)
+  const palNow = () => (dayScene && isDark() ? readPalette({ light: true }) : readPalette());
+  let P = palNow();
   const site = new THREE.Group(); site.name = 'site'; scene.add(site);
   const bim = createBim(site, P, { lite: LITE });
   let plan = null, ctx = null, ctx3d = null, gen = null;
@@ -98,7 +104,18 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     mode = m; agg = a;
     if (!gen) return;
     const prog = !!(build && build.floor);
-    if (prog || m === 'real') bim.paint(null);
+    // 실사: 계획 건물만 재료 색을 입힌다 (주거 아이보리 패널 · 저층부 석재 · 업무 밝은 회청 · 기계실 짙은 회색). 주변은 흰 모형 그대로
+    let pjDef = null;
+    if (prog || m === 'real') bim.paint((bi, fi, e) => {
+      if (!e || !e.x) return null; // 탱크·탑·돔은 제 색 그대로
+      const b = gen.bldgs[bi], f = b && b.floors[fi]; if (!f) return null; if (e.x.roof || f.roof) return P.pjMech;
+      const u = f.use;
+      if (u === 'mech' || u === 'refuge') return P.pjMech;
+      if (u === 'retail' || u === 'lobby' || b.kind === 'podium' || (u === 'res' && fi < 2)) return P.pjBase;
+      if (u === 'res' || u === 'officetel') return P.pjRes;
+      if (u === 'office' || b.kind === 'landmark' || b.kind === 'office') return P.pjOffice;
+      return pjDef || (pjDef = P.wCom.clone().lerp(P.pjRes, 0.5)); // 그 밖의 용도: 주변보다 조금 따뜻한 패널
+    });
     else if (m === 'model' || m === 'ctx') bim.paint(() => P.model);
     else if (m === 'use' || !agg) {
       // 용도 색을 외벽 바탕색과 섞어 모형처럼 (창 무늬가 보이게)
@@ -256,6 +273,12 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
   const compass = document.createElement('div'); compass.className = 'compass'; compass.setAttribute('aria-hidden', 'true');
   compass.innerHTML = `<svg viewBox="-22 -22 44 44"><circle r="17" class="cr"></circle><g><path d="M0 -15 L4 3 L0 0 L-4 3 Z" class="nd"></path><text y="-19" text-anchor="middle">N</text></g></svg>`;
   const compassG = compass.querySelector('g');
+  let sceneBtn = null;
+  if (dayToggle) {
+    sceneBtn = document.createElement('button'); sceneBtn.type = 'button'; sceneBtn.className = 'scene-tgl'; sceneBtn.title = '3D 장면을 낮·밤으로 바꿉니다';
+    sceneBtn.addEventListener('click', () => { dayScene = !dayScene; try { if (dayScene) localStorage.removeItem(NIGHT_KEY); else localStorage.setItem(NIGHT_KEY, '1'); } catch (e) { /* 무시 */ } applyTheme(); dirty = true; });
+    stage.appendChild(sceneBtn);
+  }
   const scaleBar = document.createElement('div'); scaleBar.className = 'scalebar'; scaleBar.setAttribute('aria-hidden', 'true');
   const attrib = document.createElement('a'); attrib.className = 'map-attrib'; attrib.href = 'https://www.openstreetmap.org/copyright'; attrib.target = '_blank'; attrib.rel = 'noopener'; attrib.textContent = OSM_ATTRIB; attrib.hidden = true;
   stage.appendChild(attrib);
@@ -305,11 +328,14 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     skyT = setTimeout(() => { look.applyTheme(P, sunDir, sunUp); dirty = true; }, 90);
   }
   function applyTheme() {
-    P = readPalette();
+    P = palNow();
+    const dayIn = dayScene && isDark();
+    stage.classList.toggle('day', dayIn); if (stage.parentElement) stage.parentElement.classList.toggle('scene-day', dayIn);
+    if (sceneBtn) { sceneBtn.hidden = !isDark(); sceneBtn.textContent = dayScene ? '☾ 밤 장면으로' : '☀ 낮 장면으로'; sceneBtn.setAttribute('aria-pressed', String(!dayScene)); }
     scene.background = null;
     look.applyTheme(P, sunDir, sunUp);
     lightLevels();
-    FACADE_U.uGlass.value.copy(P.glass); FACADE_U.uFilm.value.copy(P.film); FACADE_U.uInterior.value.copy(P.interior);
+    FACADE_U.uGlass.value.copy(P.glass); FACADE_U.uGlassP.value.copy(P.pjGlass); FACADE_U.uFilm.value.copy(P.film); FACADE_U.uInterior.value.copy(P.interior);
     FACADE_U.uLit.value.copy(P.lit); FACADE_U.uFrame.value.copy(P.frame); FACADE_U.uNight.value = P.dark ? 1 : 0;
     hemi.color.set(P.dark ? 0x6f7f99 : 0xdfe9f2); hemi.groundColor.set(P.dark ? 0x1a1d22 : 0xcfcac2);
     lineMat.color.copy(P.accent);
@@ -400,7 +426,8 @@ export function createViewer(stage, { onPick, onView, hero = false, lite = false
     stale.forEach(o => o.dispose()); stale.length = 0;
     bim.dispose();
     renderer.dispose(); renderer.forceContextLoss();
-    labelBox.remove(); compass.remove(); scaleBar.remove(); attrib.remove(); canvas.remove();
+    labelBox.remove(); compass.remove(); scaleBar.remove(); attrib.remove(); canvas.remove(); if (sceneBtn) sceneBtn.remove();
+    stage.classList.remove('day'); if (stage.parentElement) stage.parentElement.classList.remove('scene-day');
   }
   return {
     setPlan, setContext, setModel, paint, setSun, setView, focusBlock, focusBuilding, select, applyTheme, setProgress, setBuild, setXray, dispose,

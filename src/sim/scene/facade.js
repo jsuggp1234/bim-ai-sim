@@ -9,6 +9,7 @@ export const PAT = { none: 0, res: 1, curtain: 2, store: 3, punched: 4, louvre: 
 // 모든 파사드 재질이 함께 쓰는 값 (테마가 바뀌면 여기만 고친다)
 export const FACADE_U = {
   uGlass: { value: new THREE.Color(0x8fa3ae) },
+  uGlassP: { value: new THREE.Color(0x4f7088) }, // 계획 건물 유리 (주변보다 짙고 푸르게)
   uFilm: { value: new THREE.Color(0x8fc7c0) },
   uInterior: { value: new THREE.Color(0xf1ead9) },
   uLit: { value: new THREE.Color(0xffcf8a) },
@@ -17,7 +18,7 @@ export const FACADE_U = {
 };
 
 const GLSL = /* glsl */`
-uniform vec3 uGlass; uniform vec3 uFilm; uniform vec3 uInterior; uniform vec3 uLit; uniform float uNight; uniform vec3 uFrame;
+uniform vec3 uGlass; uniform vec3 uGlassP; uniform vec3 uFilm; uniform vec3 uInterior; uniform vec3 uLit; uniform float uNight; uniform vec3 uFrame;
 float fbox(float x, float a, float b, float w) { return smoothstep(a - w, a + w, x) * (1.0 - smoothstep(b - w, b + w, x)); }
 float fh21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 // m: 파사드 좌표(m, x 가로 · y 높이), pat 무늬, fh 층고, sd 건물 난수, fw 화소당 m
@@ -75,8 +76,14 @@ const MIX = /* glsl */`
     float st = vFac.z;                         // 상태: 4 필름 · 5 내부 마감 · 6 준공
     vec3 base = diffuseColor.rgb;
     float rnd = fh21(floor(vFm.xy / vec2(2.9, max(vFac.y, 2.5))) + vFac.w * 3.7);
+    #ifdef FAC_PROJECT
+    // 계획 건물: 유리가 벽보다 어둡고 푸르다 (칸마다 조금씩 다른 반사 · 커튼 친 방은 밝게)
+    vec3 glass = uGlassP * (0.78 + 0.4 * rnd);
+    glass = mix(glass, uInterior * 0.8, step(0.86, fh21(floor(vFm.xy / vec2(2.9, max(vFac.y, 2.5))) + vFac.w * 9.1)) * 0.5);
+    #else
     vec3 glass = uGlass * (0.86 + 0.26 * rnd);
     glass = mix(glass, base * 0.75 + uGlass * 0.25, 0.28);
+    #endif
     if (st > 3.5 && st < 4.5) glass = uFilm * (0.9 + 0.15 * rnd);
     if (st > 4.5 && st < 5.5) glass = mix(glass, uInterior, 0.45);
     vec3 wall = mix(base, base * 0.8 + uFrame * 0.08, FM.z);
@@ -99,7 +106,7 @@ const MIX = /* glsl */`
 // instanced=true: 상자(가로·세로·깊이 = 인스턴스 크기) 한 개가 한 층. iFac = (무늬, 상태, 창 있는 면 비트, 난수)
 //                  면 비트: 남(+z)=1, 북(-z)=2, 동(+x)=4, 서(-x)=8. 위·아래 면은 무늬 없음
 // instanced=false: 정점 속성 aFm = (가로 m, 높이 m, 무늬 켬 0/1), aFac = (무늬, 층고, 상태, 난수)
-export function facadeMaterial(params = {}, { instanced = true } = {}) {
+export function facadeMaterial(params = {}, { instanced = true, project = false } = {}) {
   const mat = new THREE.MeshStandardMaterial({ roughness: 0.86, metalness: 0, ...params });
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, FACADE_U);
@@ -123,10 +130,14 @@ export function facadeMaterial(params = {}, { instanced = true } = {}) {
     sh.vertexShader = vDecl + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + vBody);
     sh.fragmentShader = 'varying vec3 vFm;\nvarying vec4 vFac;\n' + GLSL + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n' + MIX)
       // 유리는 하늘 반사를 더 강하게 (환경광 전체를 키우면 벽까지 밝아지므로 유리 반사만)
-      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#if defined( RE_IndirectSpecular )\nradiance *= mix(1.0, 2.6, facGlass);\n#endif');
+      // 계획 건물 유리는 비스듬히 볼수록 하늘이 더 비친다 (정면은 어둡게 안이 들여다보이는 느낌)
+      .replace('#include <lights_fragment_maps>', '#include <lights_fragment_maps>\n#if defined( RE_IndirectSpecular )\n' + (project
+        ? 'radiance *= mix(1.0, mix(0.9, 3.2, pow(1.0 - clamp(dot(geometryNormal, geometryViewDir), 0.0, 1.0), 2.0)), facGlass);'
+        : 'radiance *= mix(1.0, 2.6, facGlass);') + '\n#endif');
+    if (project) sh.fragmentShader = '#define FAC_PROJECT\n' + sh.fragmentShader;
   };
   mat.extensions = { derivatives: true };
-  mat.customProgramCacheKey = () => 'facade-' + (instanced ? 'i' : 'v');
+  mat.customProgramCacheKey = () => 'facade-' + (instanced ? 'i' : 'v') + (project ? 'p' : '');
   return mat;
 }
 

@@ -5,13 +5,12 @@
 import * as THREE from 'three';
 import { buildPeople, crewAt, PED_LOOK } from './crew3d.js';
 import { waterSurface } from '../sim/scene/water.js';
+import { buildTraffic } from './traffic3d.js';
 import { speciesGeometries, pickSpecies, STREET_SP } from '../sim/scene/context3d.js';
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const UT_C = { comm: 0x9b7be0, power: 0xe5484d, gas: 0xf2c94c, water: 0x3d8fd6, storm: 0x5aa6ec, sewer: 0x8b6f3a, heat: 0xe08a3a };
-const CAR_C = [0xe7e7ea, 0x2b2d33, 0x9aa3ad, 0x3f5f8f, 0xa33a3a, 0xd9d4c8, 0x5a6b5a];
-const VEH = [{ k: 'car', w: 1.8, h: 1.45, L: 4.6, p: 0.44 }, { k: 'suv', w: 1.9, h: 1.75, L: 4.8, p: 0.2 }, { k: 'bus', w: 2.5, h: 3.2, L: 11, p: 0.1 }, { k: 'truck', w: 2.5, h: 3.0, L: 8, p: 0.12 }, { k: 'van', w: 1.9, h: 2.1, L: 5.2, p: 0.14 }];
 
 // 입면 무늬 (4×4칸 한 장, 칸 = 3.2m × 3.4m). map(색)과 rm(초록 = 거칠기, 파랑 = 금속성)을 같은 배치로 그려
 // 유리는 매끈하게(하늘이 비친다), 벽은 거칠게. 칸마다 커튼·블라인드·실내 밝기를 조금씩 다르게
@@ -61,13 +60,6 @@ function facadeTex(kind, seed, vr = 0) {
   return { map: mk(ca, true), rm: mk(cb, false) };
 }
 // 승용차 옆모습 (z 길이 −0.5~0.5, y 높이 0~1)을 폭 방향(x −0.5~0.5)으로 밀어낸 형상
-function profileGeo(pts) {
-  const sh = new THREE.Shape(pts.map(([z, y]) => new THREE.Vector2(z, y)));
-  const g = new THREE.ExtrudeGeometry(sh, { depth: 1, bevelEnabled: true, bevelThickness: 0.06, bevelSize: 0.03, bevelSegments: 2, steps: 1 });
-  g.translate(0, 0, -0.5); g.rotateY(-Math.PI / 2); g.computeVertexNormals(); return g;
-}
-const CAR_BODY = [[-0.5, 0.2], [-0.5, 0.5], [-0.44, 0.56], [-0.27, 0.58], [-0.16, 0.9], [0.12, 0.92], [0.27, 0.6], [0.46, 0.55], [0.5, 0.46], [0.5, 0.2]];
-const CAR_GLASS = [[-0.255, 0.6], [-0.155, 0.865], [0.115, 0.885], [0.255, 0.62]];
 // 상자 형상: 벽면 UV를 m 단위(칸 4개 = 텍스처 한 장)로
 function bldGeo(w, h, d, cw = 3.2, ch = 3.4) {
   const g = new THREE.BoxGeometry(w, h, d), p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv;
@@ -126,7 +118,7 @@ export function buildCity(X) {
   // ---------- 가로수 · 가로등 · 신호등 · 버스 정류장 · 볼라드 ----------
   // 가로수: 줄마다 한 수종 (은행나무·느티나무·벚나무·버즘나무), 그루마다 키·폭·잎 색을 조금씩
   const SPG = speciesGeometries({ trunk: new THREE.Color(0x6a5847), crown: new THREE.Color(0x5c7a45) }); Object.values(SPG).forEach(g => geos.push(g));
-  const treeM = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 0.92, metalness: 0 }); mats2.push(treeM);
+  const treeM = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 }); mats2.push(treeM);
   const NT = 160, spI = {}, spN = {}, pitM = inst(BOX, mat(0x5b4a36, { tex: 'soil' }), NT, null); let nt = 0;
   const tcol = new THREE.Color();
   const tree = (x, z, h, r, sp) => {
@@ -238,7 +230,7 @@ export function buildCity(X) {
     const bs = inst(BOX, mat(0xbdbdc2), (N.nbB || 1) + 1, null); let n = 0; (N.bfl || []).forEach(f => ibox(bs, n++, nb.x0 + 0.3, nb.x1 - 0.3, f.e0 - 0.15, f.e0 + 0.15, nbZ0 + 0.3, nbZ1 - 0.3)); bs.count = Math.min(n, bs.instanceMatrix.count);
     if (N.found === 'pile') { const pI = inst(CYL, mat(0xb8b8bc), 8, null); let k = 0; for (let x = nb.x0 + 2; x < nb.x1 - 1; x += Math.max(3, (nb.x1 - nb.x0) / 6)) ibox(pI, k++, x - 0.3, x + 0.3, -nb.b - 12, -nb.b, 0.05, 0.6); pI.count = Math.min(k, pI.instanceMatrix.count); }
   }
-  labels.push({ t: `인접 건물 · ${N.name}`, p: [(nb.x0 + nb.x1) / 2, nb.h + 3, nbZ1 - 4] });
+  labels.push({ t: `인접 건물 · ${N.name}${nb.real ? ` · 지도 높이 약 ${Math.round(nb.h)}m` : ''}`, p: [(nb.x0 + nb.x1) / 2, nb.h + 3, nbZ1 - 4] });
   if (C.nb2) bld(C.nb2.x0, C.nb2.x1, nbZ0 - 4, nbZ1 + 2, C.nb2.h, 'office', 'z+', {});
   // 인접 건물 줄 (z 방향 앞뒤로 이어짐)
   { const rx1 = nb.x1, items = C.rowL; let z = nbZ1, i = 0; while (z < ZC - 6 && i < 12) { const it = items[i % items.length]; z += it.gap; const z1 = Math.min(ZC, z + it.d); bld(rx1 - Math.min(26, nb.x1 - nb.x0 + 4 * (it.t - 0.5)), rx1, z, z1, it.h, it.k, 'x+', { shop: C.kind === 'urban' && it.t > 0.4 }); z = z1; i++; }
@@ -257,7 +249,7 @@ export function buildCity(X) {
     let x = xa, i = 0; while (x < xb - 6 && i < 12) { const it = C.rowB[i % C.rowB.length]; x += it.gap; const x1 = Math.min(xb - 1, x + it.w); bld(x, x1, zb0 - 2.6 - it.d, zb0 - 2.6, it.h, it.k, 'z+', { shop: it.shop }); x = x1; i++; } }
   roofTop.count = Math.min(nr, roofTop.instanceMatrix.count); tankI.count = Math.min(ntk, tankI.instanceMatrix.count); oduI.count = Math.min(nod, oduI.instanceMatrix.count); shopG.count = awn.count = sign.count = Math.min(nsh, sign.instanceMatrix.count); balI.count = Math.min(nbal, balI.instanceMatrix.count);
   [awn, sign].forEach(o => { if (o.instanceColor) o.instanceColor.needsUpdate = true; });
-  labels.push({ t: `대로 · 왕복 ${lanes.length}차로`, p: [(C.road[0] + C.road[1]) / 2, 0.6, ZC - 18] });
+  labels.push({ t: `${C.roadName || (lanes.length >= 4 ? '대로' : '도로')} · 왕복 ${lanes.length}차로`, p: [(C.road[0] + C.road[1]) / 2, 0.6, ZC - 18] });
 
   // ---------- 현장 출입구: 게이트 · 세륜 · 경비실 · 사무실 컨테이너 ----------
   const gz1 = pd / 2 + 3, gz0 = gz1 - 10, gx = C.fence;
@@ -289,23 +281,14 @@ export function buildCity(X) {
   // 가설 사무실 (야드 안, 2단 적층)
   const ofc = inst(BOX, mat(0xe7e7ea), 4, null), ofcW = inst(BOX, mat(0x6f9fd0, { em: 0.2 }), 8, null), stair = inst(BOX, mat(0xf2c94c), 2, null);
 
-  // ---------- 통행 차량 ----------
-  const nV = lanes.length * 4;
-  // 승용차·SUV·승합: 옆모습을 밀어낸 차체 + 유리. 버스·트럭: 상자 차체 + 창 띠
-  const CARG = profileGeo(CAR_BODY), CARW = profileGeo(CAR_GLASS); CARW.scale(1.03, 1, 1); geos.push(CARG, CARW);
-  CARG.computeBoundingBox(); const cb = CARG.boundingBox;
-  const WHEEL = new THREE.CylinderGeometry(0.5, 0.5, 1, 14).rotateZ(Math.PI / 2); geos.push(WHEEL);
-  const bodyI = inst(BOX, mat(0xffffff, { metal: 0.35, rough: 0.45 }), nV, null), cabI = inst(BOX, mat(0x1d2730, { metal: 0.7, rough: 0.12 }), nV, null), whI = inst(WHEEL, mat(0x1b1b1e, { rough: 0.7 }), nV * 2, null);
-  const carI = inst(CARG, mat(0xffffff, { metal: 0.55, rough: 0.3 }), nV, null), carW = inst(CARW, mat(0x1a232c, { metal: 0.8, rough: 0.06 }), nV, null);
-  const BUS_C = new THREE.Color(0x2f7a52), TRUCK_C = new THREE.Color(0xdcdcdf);
-  const putCar = (im, i, x, z, w, h, L, dir) => { const sx = w / (cb.max.x - cb.min.x), sy = (h - 0.28) / (cb.max.y - cb.min.y), sz = L / (cb.max.z - cb.min.z); X._s.set(sx, sy, sz); X._q.setFromEuler(X._e.set(0, dir > 0 ? 0 : Math.PI, 0)); X._p.set(x, 0.28 - cb.min.y * sy, z); X._m.compose(X._p, X._q, X._s); im.setMatrixAt(i, X._m); };
-  const headL = inst(BOX, mat(0xfff6d8, { em: 1.2 }), nV, null), tailL = inst(BOX, mat(0xff3b30, { em: 1.2 }), nV, null);
-  const vehs = [];
-  lanes.forEach((L, li) => { for (let j = 0; j < 4; j++) { let r = R(), v = VEH[0]; for (const x of VEH) { r -= x.p; if (r <= 0) { v = x; break; } } vehs.push({ li, v, ph: (j + R() * 0.6) / 4, sp: 7 + R() * 5, c: CAR_C[Math.floor(R() * CAR_C.length)] }); } });
-  vehs.forEach((V, i) => { const c = new THREE.Color(V.v.k === 'bus' ? 0x2f7a52 : V.v.k === 'truck' ? 0xdcdcdf : V.c); bodyI.setColorAt(i, c); carI.setColorAt(i, c); });
-  if (bodyI.instanceColor) bodyI.instanceColor.needsUpdate = true; if (carI.instanceColor) carI.instanceColor.needsUpdate = true;
+  // ---------- 통행 차량 (traffic3d.js: 앞차·신호를 보고 가감속하는 차량) ----------
+  const traffic = buildTraffic({ inst, mat, lanes, ZC, zx, seed: 91 + Math.round(pw * 7) });
+  traffic.geos.forEach(g => geos.push(g));
   // 사람 (작업자 · 보행자): 관절 있는 모형 (crew3d.js)
   const people = buildPeople({ root }, 160);
+  // 보행자 상태 (위치·속도·걸음 위상)
+  const peds = Array.from({ length: 16 }, (_, i) => { const sp = 1.12 + ((i * 0.618) % 1) * 0.45; return { dir: i % 4 < 2 ? 1 : -1, sp, v: sp, s: ((i * 0.137) % 1) * 2 * ZC, ph: i * 3.1, lat: (i * 0.37) % 1, mv: true, chg: -9 }; });
+  let pedT = null;
   // 차로 점용 콘 · 안내판
   const coneI = inst(CONE, mat(0xff7a1a, { em: 0.2 }), 80, null), barI = inst(BOX, mat(0xffffff, { em: 0.3 }), 6, null);
 
@@ -316,35 +299,28 @@ export function buildCity(X) {
     // 신호: 30초 주기 (차량 녹색 18초)
     const ph = (T % 30) / 30, carGo = ph < 0.6;
     sig.forEach((L) => { L[0].material = carGo ? sigOff : sigR; L[1].material = !carGo && ph < 0.66 ? mat(0xffc23a, { em: 1.4 }) : sigOff; L[2].material = carGo ? sigG : sigOff; });
-    // 차량: 점용 차로는 비운다. 횡단보도 앞 정지선에서 빨간불이면 선다
-    let nv = 0, nw = 0, nb3 = 0, nc3 = 0;
-    vehs.forEach((V) => {
-      if (occ.has(V.li) || busy.has(V.li)) return;
-      const L = lanes[V.li], dir = L.dir, span = 2 * ZC;
-      let s = ((T * V.sp / span + V.ph) % 1) * span; // 진행 거리
-      let z = dir > 0 ? -ZC + s : ZC - s;
-      const stopZ = dir > 0 ? zx - 4.6 - V.v.L / 2 : zx + 4.6 + V.v.L / 2;
-      if (!carGo && (dir > 0 ? z > stopZ - 14 && z < stopZ : z < stopZ + 14 && z > stopZ)) z = stopZ - dir * ((V.ph * 7) % 1) * 9;
-      const x = (L.x0 + L.x1) / 2, w = V.v.w, h = V.v.h, Lh = V.v.L / 2, big = V.v.k === 'bus' || V.v.k === 'truck';
-      const fade = clamp((ZC - Math.abs(z)) / 6, 0, 1); if (fade <= 0.05) return;
-      if (big) { ibox(bodyI, nb3, x - w / 2, x + w / 2, 0.35, h, z - Lh, z + Lh); bodyI.setColorAt(nb3, V.v.k === 'bus' ? BUS_C : TRUCK_C); ibox(cabI, nb3, x - w / 2 - 0.01, x + w / 2 + 0.01, h * 0.55, h * 0.85, z - Lh + 0.4, z + Lh - 0.4); nb3++; }
-      else { putCar(carI, nc3, x, z, w, h, V.v.L, dir); putCar(carW, nc3, x, z, w, h, V.v.L, dir); carI.setColorAt(nc3, new THREE.Color(V.c)); nc3++; }
-      const fz = z + dir * Lh, bz = z - dir * Lh;
-      ibox(headL, nv, x - w / 2 + 0.1, x + w / 2 - 0.1, 0.6, 0.8, fz - 0.03, fz + 0.03); ibox(tailL, nv, x - w / 2 + 0.1, x + w / 2 - 0.1, 0.65, 0.85, bz - 0.03, bz + 0.03);
-      const wf = big ? 1.6 : 0.95, wd = big ? 0.9 : 0.64; ibox(whI, nw++, x - w / 2 + 0.02, x + w / 2 - 0.02, 0, wd, z - Lh + wf - wd / 2, z - Lh + wf + wd / 2); ibox(whI, nw++, x - w / 2 + 0.02, x + w / 2 - 0.02, 0, wd, z + Lh - wf - wd / 2, z + Lh - wf + wd / 2);
-      nv++;
-    });
-    headL.count = tailL.count = Math.min(nv, tailL.instanceMatrix.count); whI.count = Math.min(nw, whI.instanceMatrix.count);
-    bodyI.count = cabI.count = Math.min(nb3, bodyI.instanceMatrix.count); carI.count = carW.count = Math.min(nc3, carI.instanceMatrix.count);
-    [bodyI, cabI, headL, tailL, whI, carI, carW].forEach(o => { o.instanceMatrix.needsUpdate = true; });
-    if (bodyI.instanceColor) bodyI.instanceColor.needsUpdate = true; if (carI.instanceColor) carI.instanceColor.needsUpdate = true;
+    // 차량: 점용 차로는 비운다. 빨간불이면 정지선 앞에서 차례로 줄여 서고 초록불에 앞차부터 출발한다
+    traffic.frame({ T, occ, busy, carGo });
     // 세륜: 차가 드나드는 동안 분사 (지나가는 몇 초씩)
     washSpray(gateBusy && (T % 22) < 9, T);
     // 사람
     people.begin();
     // 보행자 (보도 양쪽, 오가며)
     const extra = []; // 누르면 대화할 수 있는 사람 (보행자 = 주민, 게이트 신호수 = 경비, 차로 신호수)
-    for (let i = 0; i < 16; i++) { const sw = i % 2 ? C.sw2 : C.sw, dir = i % 4 < 2 ? 1 : -1, sp = 1.2 + (i % 3) * 0.2, s = ((T * sp / (2 * ZC) + i * 0.137) % 1) * 2 * ZC; let z = dir > 0 ? -ZC + s : ZC - s; if (i % 2 === 0 && z > gz0 - 1 && z < gz1 + 1) continue; const x = sw[0] + 0.8 + ((i * 0.37) % 1) * (sw[1] - sw[0] - 1.6); people.add(x, 0.18, z, dir > 0 ? 0 : Math.PI, 'walk', T, (T * sp + i * 3.1) * 4.6, PED_LOOK(i)); extra.push({ id: 'ped' + i, x, y: 1.3, z, role: 'resident', seed: 300 + i }); }
+    // 걸음은 실제로 간 거리만큼만 나아간다. 현장 쪽 보도에서는 차가 출입구를 드나드는 동안 그 앞에 멈춰 기다렸다가 건넌다 (사라지지 않는다)
+    const dtP = pedT == null ? 0 : clamp(T - pedT, 0, 0.5); pedT = T;
+    const gateNow = gateBusy && (T % 22) < 9;
+    peds.forEach((q, i) => {
+      const sw = i % 2 ? C.sw2 : C.sw, z0 = q.dir > 0 ? -ZC + q.s : ZC - q.s;
+      const ahead = q.dir > 0 ? gz0 - 1.4 - z0 : z0 - (gz1 + 1.4);
+      const hold = i % 2 === 0 && gateNow && ahead > -0.1 && ahead < 1.1;
+      q.v += clamp((hold ? 0 : q.sp) - q.v, -2.4 * dtP, 1.5 * dtP);
+      q.s = (q.s + q.v * dtP) % (2 * ZC); q.ph += q.v * dtP * 4.6;
+      const z = q.dir > 0 ? -ZC + q.s : ZC - q.s, x = sw[0] + 0.8 + q.lat * (sw[1] - sw[0] - 1.6);
+      const mv = q.v > 0.1; if (mv !== q.mv) { q.mv = mv; q.chg = T; }
+      people.add(x, 0.18, z, q.dir > 0 ? 0 : Math.PI, mv ? 'walk' : 'stand', T + i * 1.7, q.ph, { ...PED_LOOK(i), prev: mv ? 'stand' : 'walk', bl: (T - q.chg) / 0.45, pph: q.ph });
+      extra.push({ id: 'ped' + i, x, y: 1.3, z, role: 'resident', seed: 300 + i });
+    });
     // 신호수 (게이트 · 점용 차로)
     const g1 = crewAt(gateBusy ? 'signal' : 'stand', gx + 1.2, 0.18, gz1 + 1.2, [gx + 8, gz1 + 1.2], T, 1); people.add(g1.x, g1.y, g1.z, g1.yaw, g1.act, g1.t, 0, g1.lk); extra.push({ id: 'guard', x: g1.x, y: 1.3, z: g1.z, role: 'guard', seed: 11 });
     if (occ.size) { const xo = Math.min((lanes[Math.max(...occ)].x1) + 0.6, C.road[1] - 0.6); [pd / 2 + 8, -pd / 2 - 8].forEach((zz, k) => { const s2 = crewAt('signal', xo, 0.1, zz, [xo, zz + (k ? -10 : 10)], T, 2 + k); people.add(s2.x, s2.y, s2.z, s2.yaw, s2.act, s2.t, 0, s2.lk); extra.push({ id: 'traffic' + k, x: s2.x, y: 1.2, z: s2.z, role: 'traffic', seed: 21 + k }); }); }

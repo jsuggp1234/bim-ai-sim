@@ -38,6 +38,7 @@
   --s-ground: #e9eaeb; --s-asphalt: #b9bcc0; --s-walk: #dcdddf; --s-curb: #c3c5c8; --s-mark: #ffffff; --s-mark-y: #e2b23c;
   --s-water: #8fb0c2; --s-bank: #d2d3d4; --s-park: #c5d3b3; --s-forest: #a9bd97; --s-grass: #d3ddc4; --s-pitch: #b9d09e; --s-sand: #e3dccb;
   --s-w-res: #f2f2f1; --s-w-com: #e7e8e9; --s-w-house: #e6e2dc; --s-w-tower: #dfe4e8; --s-w-ind: #e0e0df; --s-w-civic: #eae5dc; --s-roof: #f2f2f2;
+  --s-pj-res: #ece2d2; --s-pj-base: #b8a792; --s-pj-office: #d3dce3; --s-pj-mech: #8b9197; --s-pj-glass: #4f7088;
   --s-glass: #7f97a6; --s-film: #84c1b9; --s-interior: #efe8d6; --s-lit: #ffcf8a; --s-frame: #45484c;
   --s-crown: #8fae79; --s-trunk: #7a6a59; --s-concrete: #c6c5c1; --s-form: #e9853a; --s-ply: #d8b27a; --s-duct: #b3b9be; --s-pipe-r: #cf4637; --s-pipe-b: #3d7bc4; --s-tray: #ddb03a;
   --s-soil: #ad9273; --s-pit-wall: #a3a29e; --s-steel: #4f5b67; --s-crane: #f0b323; --s-fence: #f3f3f2; --s-fence-band: #2f6f5e; --s-container: #dde4ea;
@@ -88,6 +89,7 @@
   --s-ground: #0f1012; --s-asphalt: #1c1d20; --s-walk: #17181a; --s-curb: #26272a; --s-mark: #6f7074; --s-mark-y: #8a7333;
   --s-water: #0a161c; --s-bank: #202124; --s-park: #121c15; --s-forest: #0f1912; --s-grass: #151d16; --s-pitch: #172616; --s-sand: #24221c;
   --s-w-res: #2b2c2e; --s-w-com: #27282a; --s-w-house: #2a2826; --s-w-tower: #23272b; --s-w-ind: #2c2d30; --s-w-civic: #2d2a26; --s-roof: #2e2f31;
+  --s-pj-res: #403a31; --s-pj-base: #54483a; --s-pj-office: #2c353c; --s-pj-mech: #1b1d1f; --s-pj-glass: #132531;
   --s-glass: #0f151a; --s-film: #1f4b47; --s-interior: #4a4436; --s-lit: #ffc879; --s-frame: #8a8d90;
   --s-crown: #1d3124; --s-trunk: #3b342d; --s-concrete: #5a5a5c; --s-form: #c4652a; --s-ply: #6e5636; --s-duct: #6c7276; --s-pipe-r: #c43a4c; --s-pipe-b: #3d74b8; --s-tray: #b18a2a;
   --s-soil: #4b3e31; --s-pit-wall: #3d3d3f; --s-steel: #7b8794; --s-crane: #d8a020; --s-fence: #38393b; --s-fence-band: #2a6a58; --s-container: #4a5058;
@@ -617,6 +619,17 @@ button.mx-row:hover { background: var(--panel); }
 .ws .f-sun .muted { color: var(--muted); font-size: 10.5px; }
 .ws .pickcard { left: 324px; top: 62px; }
 .ws .compass { right: 344px; bottom: 60px; }
+/* 3D 장면 낮·밤 단추 (검정 화면에서만 보인다) */
+.scene-tgl { z-index: 2; position: absolute; right: 14px; bottom: 62px; font: inherit; font-size: 11px; line-height: 1; padding: 7px 11px; border-radius: 999px; border: 1px solid var(--line); background: color-mix(in srgb, var(--card) 90%, transparent); color: var(--ink); cursor: pointer; }
+.scene-tgl:hover { border-color: var(--ink); }
+.scene-tgl:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scene-tgl[hidden] { display: none; }
+.ws .scene-tgl { right: 396px; bottom: 66px; }
+.ws.r-off .scene-tgl { right: 64px; }
+/* 검정 화면 안의 낮 장면: 장면 위 글자·나침반·축척·단추는 밝은 화면 색, 범례의 장면 색도 밝은 화면 값 */
+:root:not([data-theme="light"]) .stage.day { --ink: #0b0b0c; --ink-2: #3c3c40; --muted: #6a6a70; --card: #ffffff; --paper: #ffffff; --line: #d9d9dd; --water: #8fb0c2; background: #f4f5f6; }
+:root:not([data-theme="light"]) .scene-day { --s-pj-res: #ece2d2; --s-pj-base: #b8a792; --s-pj-office: #d3dce3; --s-pj-mech: #8b9197; --s-pj-glass: #4f7088; --s-park: #c5d3b3; --s-w-com: #e7e8e9; --s-w-res: #f2f2f1;
+  --s-glass: #7f97a6; --s-frame: #45484c; --model: #ffffff; --model-na: #e8e8ea; --heat-lo: #f0f0f1; --heat-hi: #0c6f68; }
 .ws .scalebar { left: 324px; bottom: auto; top: 62px; }
 .ws.l-off .f-top, .ws.l-off .f-leg, .ws.l-off .f-sun, .ws.l-off .pickcard, .ws.l-off .scalebar { left: 12px; }
 .ws.r-off .f-top, .ws.r-off .f-sun { right: 12px; }
@@ -637,6 +650,8 @@ details.grp[open] > summary { margin-bottom: 8px; }
 .typo button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .typo button[aria-pressed="true"] svg * { stroke: var(--paper); }
 .typo button[aria-pressed="true"] svg .s { fill: var(--accent); stroke: var(--accent); }
+.lay-fs { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 11.5px; color: var(--ink-2); }
+.lay-fs select { font: inherit; padding: 4px 6px; border: 1px solid var(--hair); border-radius: 8px; background: var(--paper); color: var(--ink); max-width: 58%; }
 .typo button svg .s { fill: var(--ink); stroke: none; }
 .src-banner { display: grid; gap: 6px; padding: 12px 16px; border-bottom: 1px solid var(--hair); font-size: 11.5px; background: var(--panel); }
 .src-banner b { font-weight: 550; }
@@ -662,6 +677,7 @@ details.grp[open] > summary { margin-bottom: 8px; }
   .ws .f-sun { position: relative !important; max-width: none !important; border-radius: var(--r) !important; }
   .ws .pickcard { left: 10px; top: 56px; }
   .ws .compass { right: 10px; bottom: auto; top: calc(72svh - 54px); }
+  .ws .scene-tgl, .ws.r-off .scene-tgl { right: 60px; bottom: auto; top: calc(72svh - 48px); }
   .ws .scalebar { left: auto; right: 62px; top: calc(72svh - 28px); }
   .ws .f-head button { display: none; }
 }

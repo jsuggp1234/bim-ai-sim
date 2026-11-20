@@ -513,6 +513,13 @@ th.r, td.r { text-align: right; }
 .s3-lb.eq.crew { border-left-color: #ff7a1a; }
 .s3-now { position: absolute; top: 52px; left: 14px; max-width: min(360px, 46%); display: grid; gap: 2px; padding: 7px 10px 8px 9px; border-left: 2px solid #f0b429; background: color-mix(in srgb, var(--paper) 84%, transparent); border-radius: 0 6px 6px 0; pointer-events: none; }
 .s3-now[hidden] { display: none; }
+.s3-ff { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: baseline; gap: 8px; padding: 5px 11px 6px; border-radius: 999px; background: color-mix(in srgb, var(--paper) 86%, transparent); border: 1px solid var(--hair); pointer-events: none; white-space: nowrap; max-width: calc(100% - 28px); overflow: hidden; }
+.s3-ff[hidden] { display: none; }
+.s3-ff b { font: 600 10.5px var(--f-mono); letter-spacing: .03em; color: var(--ink); }
+.s3-ff span { font-size: 11.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+.s3-ff.ff { border-color: color-mix(in srgb, #f0b429 60%, var(--hair)); }
+.s3-ff.ff b { color: #b97a00; }
+:root[data-theme="dark"] .s3-ff.ff b { color: #f0b429; }
 .s3-now b { font: 500 9.5px var(--f-mono); color: var(--muted); letter-spacing: .04em; }
 .s3-now span { font-size: 12.5px; font-weight: 650; color: var(--ink); }
 .s3-now em { font-style: normal; font-size: 11px; color: var(--ink-2); line-height: 1.45; }
@@ -1607,6 +1614,10 @@ th.r, td.r { text-align: right; }
 .sws-ticks { position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: 7px; pointer-events: none; }
 .sws-ticks i { position: absolute; top: 0; height: 3px; border-left: 2px solid var(--paper); background: var(--hair); }
 .sws-ticks i.on { background: color-mix(in srgb, var(--accent) 55%, var(--hair)); }
+.sws-ticks em.ffz { position: absolute; top: 0; height: 3px; border-left: 2px solid var(--paper); background: repeating-linear-gradient(90deg, var(--hair) 0 3px, transparent 3px 6px); }
+.sws-ticks em.ffz.on { background: repeating-linear-gradient(90deg, #f0b429 0 3px, transparent 3px 6px); }
+.sim-cap .sc-ff { color: #b97a00; font-weight: 600; }
+:root[data-theme="dark"] .sim-cap .sc-ff { color: #f0b429; }
 .sws-sp button { padding: 5px 9px; font-family: var(--f-mono); font-size: 11px; }
 @media (max-width: 1180px) { .sws { --nav-w: 208px; --side-w: 320px; } .sws-k span { display: none; } .sws-k { gap: 12px; } }
 @media (max-width: 900px) {

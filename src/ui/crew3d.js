@@ -33,14 +33,36 @@ function vestTex() {
 
 // ---------- 동작 (관절 각도) ----------
 // o: { hip 엉덩이 높이, tp 상체 숙임(+앞), ty 상체 비틀기, hp 머리 숙임(+아래), L/R 팔 [어깨 앞으로 들기, 벌리기, 팔꿈치 굽힘], lL/rL 다리 [엉덩관절 앞으로, 무릎 굽힘] }
-function base() { return { hip: HIP, tp: 0.02, ty: 0, hp: 0, L: [0.05, 0.06, 0.15], R: [0.05, 0.06, 0.15], lL: [0, 0.04], rL: [0, 0.04], tool: null, sw: 0 }; }
-function gait(o, ph, amp = 1) {
-  const s = Math.sin(ph), c = Math.cos(ph);
-  o.lL = [0.42 * s * amp, 0.08 + 0.85 * Math.max(0, c) ** 1.4 * amp];
-  o.rL = [-0.42 * s * amp, 0.08 + 0.85 * Math.max(0, -c) ** 1.4 * amp];
-  o.hip = HIP - 0.03 * Math.abs(s) * amp;
-  o.L = [-0.38 * s * amp + 0.05, 0.08, 0.25]; o.R = [0.38 * s * amp + 0.05, 0.08, 0.25];
+function base() { return { hip: HIP, tp: 0.02, ty: 0, hp: 0, L: [0.05, 0.06, 0.15], R: [0.05, 0.06, 0.15], lL: [0, 0.04], rL: [0, 0.04], tool: null, sw: 0, sx: 0, roll: 0 }; }
+// 걸음 (한 주기 ph 0..2π에 두 걸음). 다리마다 디딤 60% · 내딛음 40%로 나눠, 딛고 있는 발은 땅에 붙은 채 몸이 그 위를 지나가고
+// (엉덩관절이 일정하게 뒤로 → 발이 미끄러지지 않는다), 뗀 발은 무릎을 접어 앞으로 내딛다가 닿기 직전에 살짝 당긴다.
+// 디딜 때 무릎이 살짝 굽으며 무게를 받고, 골반은 딛는 다리 길이만큼 오르내리며 디딘 쪽으로 조금 쏠린다. 팔은 반대쪽 다리와 함께 흔들고 앞으로 갈 때 팔꿈치가 굽는다.
+const A_F = 0.46, A_B = -0.37, ST = 0.6, wrap1 = (v) => v - Math.floor(v);
+const bump = (u, c, w) => { let d = Math.abs(u - c); if (d > 0.5) d = 1 - d; return Math.exp(-0.5 * (d / w) * (d / w)); };
+function legAt(u, amp) {
+  let h;
+  if (u < ST) h = A_F + (A_B - A_F) * (u / ST);
+  else { const k = (u - ST) / (1 - ST), m = (A_B - A_F) / ST * (1 - ST), k2 = k * k, k3 = k2 * k; h = (2 * k3 - 3 * k2 + 1) * A_B + (k3 - 2 * k2 + k) * m + (-2 * k3 + 3 * k2) * A_F + (k3 - k2) * m; }
+  const mid = (A_F + A_B) / 2; h = mid + (h - mid) * amp;
+  const knee = 0.05 + (1.08 * bump(u, 0.74, 0.105) + 0.14 * bump(u, 0.13, 0.07)) * Math.pow(amp, 0.7);
+  // 발목: 뒤꿈치부터 닿고(발끝 들림) 발끝으로 밀며 뗀다(발끝 내림)
+  const foot = (0.3 * bump(u, 0.99, 0.05) - 0.5 * bump(u, 0.62, 0.06) - 0.2 * bump(u, 0.78, 0.08)) * amp;
+  return [h, knee, foot];
 }
+const reach = (lg) => THIGH * Math.cos(lg[0]) + SHIN * Math.cos(lg[0] - lg[1]);
+function gait(o, ph, amp = 1) {
+  const uL = wrap1(ph / 6.283185307 + 0.3), uR = wrap1(uL + 0.5);
+  o.lL = legAt(uL, amp); o.rL = legAt(uR, amp);
+  // 골반 높이: 더 길게 뻗은(딛고 있는) 다리가 땅에 닿도록
+  o.hip = Math.max(reach(o.lL), reach(o.rL)) + 0.04;
+  // 딛는 다리 쪽으로 몸이 조금 쏠리고(sx), 골반이 반대쪽으로 살짝 처진다(roll)
+  const sw = Math.sin(6.283185307 * (uL - 0.3)); // +: 왼발 디딤 한가운데
+  o.sx = 0.022 * sw * amp; o.roll = -0.035 * sw * amp;
+  const aL = (o.rL[0] - 0.045) / 0.42, aR = (o.lL[0] - 0.045) / 0.42; // 팔은 반대쪽 다리를 따라
+  o.L = [0.04 + (aL > 0 ? 0.36 : 0.27) * aL * amp, 0.07, 0.22 + 0.34 * Math.max(0, aL) * amp];
+  o.R = [0.04 + (aR > 0 ? 0.36 : 0.27) * aR * amp, 0.07, 0.22 + 0.34 * Math.max(0, aR) * amp];
+}
+export const _gait = (ph, amp = 1) => { const o = base(); gait(o, ph, amp); return o; };
 function crouch(o, h) { const a = Math.acos(clamp((h - 0.06) / (THIGH + SHIN), 0, 1)); o.lL = [a, 2 * a]; o.rL = [a * 0.9, 1.9 * a]; o.hip = h; }
 function kneel(o) { o.lL = [1.45, 1.5]; o.rL = [0.12, 1.6]; o.hip = 0.52; }
 const sq = (t, f) => 0.5 + 0.5 * Math.sin(t * f);
@@ -48,19 +70,19 @@ const ease = (k) => (k <= 0 ? 0 : k >= 1 ? 1 : k * k * (3 - 2 * k));
 // o ← o2(앞 동작)와 o(지금 동작) 사이, k: 0 = 앞 동작, 1 = 지금 동작
 function blendPose(o, o2, k) {
   const e = ease(k), L = (a, b) => b + (a - b) * e;
-  ['hip', 'tp', 'ty', 'hp', 'sw'].forEach(n => { o[n] = L(o[n], o2[n]); });
-  ['L', 'R', 'lL', 'rL'].forEach(n => { o[n] = o[n].map((v, i) => L(v, o2[n][i])); });
+  ['hip', 'tp', 'ty', 'hp', 'sw', 'sx', 'roll'].forEach(n => { o[n] = L(o[n], o2[n]); });
+  ['L', 'R', 'lL', 'rL'].forEach(n => { o[n] = [0, 1, 2].map(i => L(o[n][i] || 0, o2[n][i] || 0)); });
   if (e < 0.5) o.tool = o2.tool;
 }
 
 const ACT = {
   stand(o, t) { const w = Math.sin(t * 0.23); o.ty = 0.12 * Math.sin(t * 0.3); o.tp = 0.02 + 0.012 * Math.sin(t * 1.3); o.lL = [0.04 * w, 0.05 + 0.04 * Math.max(0, -w)]; o.rL = [-0.04 * w, 0.05 + 0.04 * Math.max(0, w)]; o.L = [0.06, 0.08, 0.2]; o.R = [0.06, 0.08, 0.2]; },
-  walk(o, t, ph) { gait(o, ph); o.ty = 0.07 * Math.sin(ph); o.tp = 0.05; o.hp = -0.04 + 0.02 * Math.cos(2 * ph); },
+  walk(o, t, ph) { gait(o, ph); o.ty = -0.09 * (o.lL[0] - o.rL[0]); o.tp = 0.055; o.hp = -0.05; },
   // 숨 돌리기: 허리를 펴고 손을 허리에 얹은 채 둘러본다 (일하다 잠깐씩)
   breathe(o, t) { o.tp = -0.07; o.hp = -0.12 + 0.06 * Math.sin(t * 0.7); o.ty = 0.32 * Math.sin(t * 0.45); o.L = [0.28, 0.62, 1.75]; o.R = [0.28, 0.62, 1.75]; o.lL = [0.05, 0.06]; o.rL = [-0.04, 0.05]; },
-  carry_sh(o, t, ph) { gait(o, ph, 0.85); o.R = [1.05, 0.12, 2.35]; o.L[0] *= 0.6; o.tool = 'bar'; },
-  carry_fr(o, t, ph) { gait(o, ph, 0.7); o.L = [0.95, 0.05, 0.75]; o.R = [0.95, 0.05, 0.75]; o.tp = 0.06; o.tool = 'box'; },
-  carry_pn(o, t, ph) { gait(o, ph, 0.7); o.L = [0.5, 0.25, 0.9]; o.R = [0.5, 0.25, 0.9]; o.tool = 'panel'; },
+  carry_sh(o, t, ph) { gait(o, ph / 0.85, 0.85); o.R = [1.05, 0.12, 2.35]; o.L[0] *= 0.6; o.tool = 'bar'; },
+  carry_fr(o, t, ph) { gait(o, ph / 0.7, 0.7); o.L = [0.95, 0.05, 0.75]; o.R = [0.95, 0.05, 0.75]; o.tp = 0.06; o.tool = 'box'; },
+  carry_pn(o, t, ph) { gait(o, ph / 0.7, 0.7); o.L = [0.5, 0.25, 0.9]; o.R = [0.5, 0.25, 0.9]; o.tool = 'panel'; },
   pick(o, t) { crouch(o, 0.62); o.tp = 0.85; o.hp = -0.4; o.L = [1.55, 0.1, 0.2]; o.R = [1.5, 0.1, 0.25]; },
   tie(o, t) { crouch(o, 0.6); o.tp = 0.95; o.hp = -0.45; const w = Math.sin(t * 9); o.L = [1.3, 0.12, 0.35]; o.R = [1.25 + 0.06 * w, 0.05, 0.45 + 0.25 * w]; o.tool = 'pliers'; },
   hammer(o, t) { o.tp = 0.32; o.hp = 0.1; const k = sq(t, 7); o.L = [1.15, 0.05, 0.55]; o.R = [0.95 + 1.05 * k, 0.02, 1.0 - 0.4 * k]; o.lL = [0.18, 0.12]; o.rL = [-0.1, 0.06]; o.tool = 'hammer'; },
@@ -88,7 +110,7 @@ const ACT = {
   arms(o, t) { o.tp = -0.03; o.hp = 0.04 * Math.sin(t * 0.6); o.L = [0.62, -0.05, 1.75]; o.R = [0.55, -0.05, 1.8]; o.lL = [0.06, 0.04]; o.rL = [-0.06, 0.04]; },
   point(o, t) { const k = Math.sin(t * 0.9); o.ty = 0.25 + 0.1 * k; o.R = [1.45 + 0.1 * k, 0.25, 0.08]; o.L = [0.85, 0.05, 1.3]; o.tool = 'board'; },
   phone(o, t) { o.hp = 0.12 + 0.05 * Math.sin(t * 0.7); o.ty = 0.15 * Math.sin(t * 0.35); o.R = [0.42, 0.42, 2.45]; o.L = [0.2, 0.08, 0.5 + 0.2 * Math.sin(t * 1.7)]; o.tool = 'phone'; },
-  phone_w(o, t, ph) { gait(o, ph, 0.6); o.R = [0.42, 0.42, 2.45]; o.hp = 0.1; o.tool = 'phone'; },
+  phone_w(o, t, ph) { gait(o, ph / 0.6, 0.6); o.R = [0.42, 0.42, 2.45]; o.hp = 0.1; o.tool = 'phone'; },
   // TBM: 체조(팔 올리기 → 옆으로 벌리기 → 허리 돌리기 → 무릎 굽히기, 2초씩) · 안전 구호(주먹 들기)
   stretch(o, t) {
     const st = Math.floor(t / 2) % 4, k = 0.5 - 0.5 * Math.cos((t % 2) / 2 * Math.PI * 2);
@@ -168,15 +190,15 @@ export function buildPeople(X, cap = 140) {
     const ped = !!lk.ped;
     const pants = lk.pants ?? (ped ? 0x2b2d33 : 0x2a3346), shirt = lk.shirt ?? (ped ? lk.cloth : 0x2c3a55), vest = ped ? lk.cloth : (lk.vest ?? 0xff7a1a);
     // 엉덩이 · 다리
-    joint(hl, rootM, 0, o.hip, 0);
+    joint(hl, rootM, o.sx || 0, o.hip, 0, 0, 0, o.roll || 0);
     joint(mA, hl, 0, -0.1, 0); put(W.hips, 'hips', mA, 0.34, 0.17, 0.23, pants);
     [[o.lL, HIP_X], [o.rL, -HIP_X]].forEach(([lg, sx]) => {
       joint(mA, hl, sx, 0, 0, -lg[0]); put(W.pants, 'pants', mA, 0.17, THIGH, 0.19, pants);
       joint(kn, mA, 0, -THIGH, 0, lg[1]); put(W.pants, 'pants', kn, 0.135, SHIN, 0.15, pants);
-      joint(mB, kn, 0, -SHIN, 0.045, lg[1] - lg[0] > 1.2 ? 0 : -(lg[1] - lg[0])); put(W.boot, 'boot', mB, 0.13, 0.11, 0.28);
+      joint(mB, kn, 0, -SHIN, 0.045, lg[1] - lg[0] > 1.2 ? 0 : -(lg[1] - lg[0]) - (lg[2] || 0)); put(W.boot, 'boot', mB, 0.13, 0.11, 0.28);
     });
     // 상체 · 머리
-    joint(torsoM, hl, 0, 0.04, 0, o.tp, o.ty, 0, 'YXZ');
+    joint(torsoM, hl, 0, 0.04, 0, o.tp, o.ty, -(o.roll || 0) * 0.7, 'YXZ');
     put(W.torso, 'torso', torsoM, 0.4, 0.56, 0.25, vest);
     if (!ped) { joint(mA, torsoM, 0, 0.0, 0); put(W.belt, 'belt', mA, 0.41, 0.07, 0.26); } // 공구 벨트
     joint(mA, torsoM, SH_X - 0.02, SH_Y - 0.01, 0); put(W.cap2, 'cap2', mA, 0.15, 0.13, 0.17, ped ? shirt : vest); // 둥근 어깨

@@ -41,15 +41,15 @@ export function createBim(site, P0, { lite = false } = {}) {
   // ---------- 재질 ----------
   const STENCIL_TEST = { stencilWrite: true, stencilFunc: THREE.NotEqualStencilFunc, stencilRef: 1, stencilWriteMask: 0, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp };
   const M = {
-    env: facadeMaterial({ color: 0xffffff }, { instanced: true }),
-    envX: facadeMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, depthWrite: false }, { instanced: true }),
+    env: facadeMaterial({ color: 0xffffff }, { instanced: true, project: true }),
+    envX: facadeMaterial({ color: 0xffffff, transparent: true, opacity: 0.1, depthWrite: false }, { instanced: true, project: true }),
     solid: surf({ color: 0xffffff }, 0.78),
     form: surf({ color: 0xffffff, transparent: true, opacity: 0.92, side: THREE.DoubleSide }, 0.62),
     glass: surf({ color: 0xffffff, transparent: true, opacity: 0.45, depthWrite: false }, 0.08, 0.3),
     pit: surf({ vertexColors: true, side: THREE.BackSide }, 1),
     mask: new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc, stencilZPass: THREE.ReplaceStencilOp, stencilFail: THREE.ReplaceStencilOp, stencilZFail: THREE.ReplaceStencilOp }),
     lot: surf({ color: 0xffffff, ...STENCIL_TEST, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }, 0.95),
-    tree: surf({ vertexColors: true, flatShading: true }, 0.95),
+    tree: surf({ vertexColors: true }, 0.95),
     crane: new THREE.LineBasicMaterial({ color: 0xffffff }),
     ghost: new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 }),
     edge: new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.32 }),

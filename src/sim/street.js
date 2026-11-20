@@ -15,15 +15,18 @@ export const UTIL = {
 };
 
 // sc 일부만 받는다 (node 테스트에서도 계산)
-export function streetModel({ pw, adj, noise, ground, nb, seed = 'site' }) {
+export function streetModel({ pw, adj, noise, ground, nb, seed = 'site', roadW = 0, roadName = '' }) {
   const R = rng(hashStr(String(seed) + ':' + Math.round(pw) + ':' + adj));
   const kind = adj <= 15 ? 'urban' : adj >= 60 ? 'ind' : 'suburb';
   const soft = ground === 'C' || ground === 'M';
   const pl = -Math.min(3, adj / 2);
 
   // ---- 인접 건물 (단면을 자른다) ----
-  const nbk = kind === 'urban' ? (noise === 'high' ? ['office', 'officetel', 'mixed'][Math.floor(R() * 3)] : ['officetel', 'mixed'][Math.floor(R() * 2)])
+  // 실제 높이를 지도에서 읽었으면(nb.real) 높이에 맞는 건물 종류를 고른다: 20m 넘으면 업무·오피스텔, 9m 아래면 주택
+  const nbk0 = kind === 'urban' ? (noise === 'high' ? ['office', 'officetel', 'mixed'][Math.floor(R() * 3)] : ['officetel', 'mixed'][Math.floor(R() * 2)])
     : kind === 'ind' ? 'factory' : ['school', 'house'][Math.floor(R() * 2)];
+  const nbk = !nb.real ? nbk0 : nb.h > 20 ? (['office', 'officetel', 'mixed'].includes(nbk0) ? nbk0 : 'office')
+    : nb.h < 9 ? (nbk0 === 'factory' ? 'factory' : 'house') : nbk0 === 'house' ? 'mixed' : nbk0;
   const NBK = {
     office: { name: '업무 시설', g: 4.5, f: 3.6 }, officetel: { name: '오피스텔 · 근린 상가', g: 4.2, f: 3.0 }, mixed: { name: '근린 상가 · 사무실', g: 4.2, f: 3.3 },
     school: { name: '학교', g: 3.8, f: 3.6 }, house: { name: '다세대 주택', g: 3.0, f: 2.8 }, factory: { name: '공장 · 창고', g: nb.h - 0.5, f: nb.h },
@@ -61,7 +64,8 @@ export function streetModel({ pw, adj, noise, ground, nb, seed = 'site' }) {
 
   // ---- 오른쪽: 대지 → 보도 → 대로 → 건너편 ----
   const sw = [pw + 5.15, pw + 8.6], curb = sw[1];
-  const nL = kind === 'suburb' ? 2 : 4, lw = kind === 'ind' ? 3.5 : 3.25, med = nL >= 4 ? 0.5 : 0.3;
+  // 차로 수: 지도에서 앞 도로 폭을 읽었으면 폭으로 정한다 (10m 미만 2차로 · 26m 이상 6차로), 아니면 가로 유형으로
+  const nL = roadW > 0 ? (roadW < 10 ? 2 : roadW >= 26 ? 6 : 4) : kind === 'suburb' ? 2 : 4, lw = kind === 'ind' ? 3.5 : 3.25, med = nL >= 4 ? 0.5 : 0.3;
   const lanes = []; let x = curb;
   for (let i = 0; i < nL; i++) { if (i === nL / 2) x += med; lanes.push({ x0: x, x1: x + lw, dir: i < nL / 2 ? -1 : 1 }); x += lw; }
   const road = [curb, x], center = [curb + lw * nL / 2, curb + lw * nL / 2 + med];
@@ -115,7 +119,7 @@ export function streetModel({ pw, adj, noise, ground, nb, seed = 'site' }) {
   for (let i = 0; i < 5; i++) rowL.push({ d: 14 + R() * 12, h: kind === 'urban' ? 16 + Math.pow(R(), 1.4) * 40 : kind === 'suburb' ? 7 + R() * 8 : 8 + R() * 6, gap: 2 + R() * 4, t: R(), k: kind === 'urban' ? 'officetel' : kind === 'suburb' ? 'house' : 'factory' });
 
   return {
-    kind, pl, gap, nb: nb0, nb2, left,
+    kind, pl, gap, nb: nb0, nb2, left, roadName: roadName || '', roadReal: roadW > 0,
     yard: [pw, pw + 4.85], fence: pw + 4.85, gate: pw + 5, sw, curb, road, lanes, lw, center, med, sw2, far,
     trees, lights, signal, busStop, utils, manhole, overhead, bg, rowF, rowB, rowL,
   };
