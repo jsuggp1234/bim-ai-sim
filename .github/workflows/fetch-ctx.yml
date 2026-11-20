@@ -1,0 +1,42 @@
+# 후보지 주변 실제 지도(OpenStreetMap)를 뽑아 ctx-data 브랜치의 public/ctx 에 올린다.
+# 한국 전체 지도 파일(Geofabrik)에서 후보지 주변만 골라 줄여 담는다. 확인한 뒤 main 의 public/ctx 로 가져온다.
+name: Fetch site context maps
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: fetch-ctx
+  cancel-in-progress: true
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tools
+        run: pip install -q osmium
+      - name: Download map of Korea
+        run: curl -L --fail --retry 3 -o kr.osm.pbf https://download.geofabrik.de/asia/south-korea-latest.osm.pbf && ls -l kr.osm.pbf
+      - name: Extract around each site
+        run: |
+          node scripts/fetch-ctx.mjs --list > sites.json
+          python3 scripts/ctx_from_pbf.py kr.osm.pbf sites.json raw
+      - name: Pack
+        run: |
+          rm -rf public/ctx
+          node scripts/fetch-ctx.mjs --from raw --out public/ctx
+          du -sh public/ctx
+      - name: Push to ctx-data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f public/ctx
+          git commit -q -m "후보지 주변 실제 지도 (OpenStreetMap, $(date -u +%F))"
+          git push -f origin HEAD:refs/heads/ctx-data

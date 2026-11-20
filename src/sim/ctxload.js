@@ -1,7 +1,7 @@
-// 택지 주변 맥락 고르기: 먼저 바로 쓸 수 있는 맥락(용산은 손으로 정리한 지형, 그 밖은 자동 생성)을 쓰고,
-// 실제 지도(OpenStreetMap)를 받으면 바꾼다. 분석에 쓰는 주변 건물 상자도 여기서 한 번만 만든다.
+// 택지 주변 맥락 고르기: 실제 지도(OpenStreetMap)를 쓴다. 후보지는 사이트에 담아 둔 지도(public/ctx)가 먼저고, 없으면 지도 서버에서 받는다.
+// 지도가 오기 전이나 끝내 못 받았을 때는 주변을 지어내지 않고 비워 둔다(용산만 손으로 정리한 지형). 분석에 쓰는 주변 건물 상자도 여기서 한 번만 만든다.
 // 지도는 두 번에 나눠 온다: ① 대지 둘레(약 450m, 몇 초) ② 넓은 주변(1~2.7km). ①이 오면 바로 그 지도로 대지를 맞추고(sitefit.js) 주변을 그린다.
-import { proceduralContext, yongsanPreset, clearSite, nearBoxes } from './ctxmodel.js';
+import { emptyCtx, yongsanPreset, clearSite, nearBoxes } from './ctxmodel.js';
 import { loadOSM } from './osm.js';
 
 const mem = new Map();      // 계획(대지 자리)별로 대지를 비운 맥락
@@ -14,7 +14,7 @@ const planKey = (plan) => [plan.SITE.u0, plan.SITE.u1, plan.SITE.v0, plan.SITE.v
 
 export function fallbackFor(plan) {
   const k = 'fb:' + plan.key + ':' + planKey(plan);
-  if (!mem.has(k)) mem.set(k, clearSite(plan.key === 'yongsan' ? yongsanPreset(plan) : proceduralContext(plan.site, plan), plan));
+  if (!mem.has(k)) mem.set(k, clearSite(plan.key === 'yongsan' ? yongsanPreset(plan) : emptyCtx('none'), plan));
   return mem.get(k);
 }
 

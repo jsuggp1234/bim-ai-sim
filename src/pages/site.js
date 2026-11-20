@@ -62,7 +62,7 @@ const BODY = `<section class="atlas" id="atlas" aria-label="후보지 지도">
           <div class="ov bl" id="warn3d"></div>
         </div>
         <div class="sun">
-          <label for="season" class="label-sm">shadow</label>
+          <label for="season" class="label-sm">그림자</label>
           <select id="season">
             <option value="-23.44">동지 12.22</option>
             <option value="0">춘분 3.20</option>

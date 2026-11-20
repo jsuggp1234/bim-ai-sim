@@ -47,7 +47,7 @@ export function mount(root) {
         <button type="button" class="chipbtn" id="p-xray" aria-pressed="false" title="외피를 투명하게 해 골조·설비를 봅니다">투시</button></div></div>
     <div class="ov f-phase"><div class="phases" id="p-phases" role="group" aria-label="세부 공정 단계"></div><div class="ph-note" id="p-phnote"></div></div>
     <aside class="float f-r" id="p-fr" aria-label="블록별 진행">
-      <div class="f-head"><span class="label-sm">Blocks · 블록별 진행</span><button type="button" data-fold="p-fr" aria-expanded="true" aria-label="블록 패널 접기">−</button></div>
+      <div class="f-head"><span class="label-sm">블록별 진행</span><button type="button" data-fold="p-fr" aria-expanded="true" aria-label="블록 패널 접기">−</button></div>
       <div class="f-body"><div class="bl-list" id="p-blocks"></div></div>
     </aside>
     <div class="float f-leg" id="p-leg">
@@ -398,8 +398,8 @@ export function mount(root) {
     $('cl-month').innerHTML = `<svg viewBox="0 0 ${lw + NM * cw} ${keys.length * rh + 16}" class="cl-heat" role="img" aria-label="월별 간섭 수">${svg}</svg>`;
     $('cl-mhint').textContent = `칸 = 한 달 · 진할수록 그 달 진행 중인 간섭이 많음`;
     // 목록
-    const top = C.list.slice(0, 16);
-    $('cl-list').innerHTML = `<thead><tr><th></th><th class="l">유형</th><th class="l">내용</th><th>기간</th><th>일수</th><th class="l">대책</th></tr></thead><tbody>${top.map((c, i) => `<tr data-ci="${i}" class="${c.mit ? 'mit' : ''}"><td><span class="sev s${c.sev}" title="${SEV[c.sev]}"></span></td><td class="l"><b>${CLASH_TYPES[c.type].name}</b><small>${c.mit ? '해소 (AI 계획)' : SEV[c.sev]}</small></td><td class="l">${escH(c.msg)}</td><td class="mono">${D(c.start)}–${D(c.end)}</td><td>${fmt(c.days)}</td><td class="l note">${escH(c.fix)}</td></tr>`).join('') || '<tr><td colspan="6" class="l note">간섭이 없습니다.</td></tr>'}</tbody>${C.list.length > top.length ? `<tfoot><tr><td colspan="6" class="l note">외 ${C.list.length - top.length}건</td></tr></tfoot>` : ''}`;
+    const top = C.list.slice(0, ui.clAll ? 40 : 6); // 처음엔 큰 것 6건만, '더 보기'로 40건까지
+    $('cl-list').innerHTML = `<thead><tr><th></th><th class="l">유형</th><th class="l">내용</th><th>기간</th><th>일수</th><th class="l">대책</th></tr></thead><tbody>${top.map((c, i) => `<tr data-ci="${i}" class="${c.mit ? 'mit' : ''}"><td><span class="sev s${c.sev}" title="${SEV[c.sev]}"></span></td><td class="l"><b>${CLASH_TYPES[c.type].name}</b><small>${c.mit ? '해소 (AI 계획)' : SEV[c.sev]}</small></td><td class="l">${escH(c.msg)}</td><td class="mono">${D(c.start)}–${D(c.end)}</td><td>${fmt(c.days)}</td><td class="l note">${escH(c.fix)}</td></tr>`).join('') || '<tr><td colspan="6" class="l note">간섭이 없습니다.</td></tr>'}</tbody>${C.list.length > top.length || ui.clAll ? `<tfoot><tr><td colspan="6" class="l note">${C.list.length > top.length ? `외 ${fmt(C.list.length - top.length)}건 · ` : ''}<button type="button" class="chipbtn" data-clmore>${ui.clAll ? '6건만 보기' : '더 보기'}</button></td></tr></tfoot>` : ''}`;
     renderOpt();
   }
   function convSVG(h, w = 420, hh = 120) {
@@ -462,6 +462,7 @@ export function mount(root) {
     if (e.target.closest('#opt-run')) { runOpt(); return; }
     if (e.target.closest('#opt-apply')) { applyOpt(); return; }
     if (e.target.closest('#opt-undo')) { setOptState(null); optRun = null; refreshAll(); return; }
+    if (e.target.closest('[data-clmore]')) { ui.clAll = !ui.clAll; renderClash(); return; }
     const tr = e.target.closest('tr[data-ci]');
     if (tr) {
       const c = R.C.list[+tr.dataset.ci]; setPlaying(false); setT((c.start + c.end) / 2, true);

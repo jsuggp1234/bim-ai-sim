@@ -183,7 +183,7 @@ export function createSim3D(host, opts = {}) {
   const seenErr = new Set(); let badSc = null;
   const report = (where, e) => { const k = where + '|' + (e && e.message); if (seenErr.has(k)) return; seenErr.add(k); console.error(`[3D] ${where}:`, e); if (window.__S3DEBUG) (window.__s3errs || (window.__s3errs = [])).push({ where, msg: String(e && e.message), stack: String(e && e.stack).split('\n').slice(0, 6).join(' | ') }); };
   const safe = (where, fn, fb) => { try { return fn(); } catch (e) { report(where, e); return fb; } };
-  // 넓은 주변 맥락: 먼저 자동 생성(바로), 실제 지도(OpenStreetMap)를 받으면 바꾼다
+  // 넓은 주변 맥락: 실제 지도(사이트에 담아 둔 지도 또는 OpenStreetMap)를 받으면 그린다. 그 전이나 지도가 없으면 주변을 지어내지 않고 비워 둔다
   const plan = opts.plan || (opts.gen && opts.gen.plan) || null, gen = opts.gen || null;
   let ctxSrc = null, ctxObj = null, ctxKey = '', ctxN = 0;
   const ctxId = new WeakMap(), idOf = (c) => { if (!ctxId.has(c)) ctxId.set(c, ++ctxN); return ctxId.get(c); };
@@ -191,11 +191,14 @@ export function createSim3D(host, opts = {}) {
   const ctxAbort = typeof AbortController !== 'undefined' ? new AbortController() : null;
   if (plan && opts.useMap !== false) {
     const ready = osmReady(plan);
-    (ready ? Promise.resolve(ready) : osmFor(plan, { signal: ctxAbort && ctxAbort.signal })).then(c => { if (disposed || !c) return; ctxSrc = c; ensureContext(); }).catch(() => { /* 지도 실패: 자동 생성 맥락 그대로 */ });
+    (ready ? Promise.resolve(ready) : osmFor(plan, { signal: ctxAbort && ctxAbort.signal })).then(c => { if (disposed || !c) return; ctxSrc = c; ensureContext(); }).catch(() => { /* 지도 실패: 주변은 비워 둔다 */ });
   }
   function ensureContext() {
     if (!built || !ctxSrc || !plan || disposed) return;
-    const { sc, D } = built, G = sc.G, zone = built.city.zone, C = sc.city;
+    const { sc, D } = built, G = sc.G, C = sc.city;
+    // 실제 지도(또는 정리한 지형)면 건너편 단면 건물을 숨기고 지도 건물이 길 건너까지 들어오게 한다
+    built.city.setReal(ctxSrc.source !== 'none');
+    const zone = built.city.zoneReal;
     const roadX = C && C.road ? (C.road[0] + C.road[1]) / 2 : null;
     const key = [idOf(ctxSrc), G.pw, G.bx0, G.bx1, D.xl, D.xr, D.Z, zone.x0, zone.x1, zone.z0, zone.z1, roadX, G.main && G.main.id].join('|');
     if (key === ctxKey && ctxObj) { built.city.ground.forEach(o => { o.visible = false; }); return; }
@@ -1052,7 +1055,7 @@ export function createSim3D(host, opts = {}) {
     if (mkHtml !== html) { box.innerHTML = html; mkHtml = html; }
     const selL = selP ? [{ t: `💬 ${esc(talk.tk.name)}`, p: [selP.p[0], selP.g + 2.35, selP.p[2]], cls: 'eq sel' }] : [];
     lbPicks = new Map();
-    const lh = built.labels.concat(fres && fres.dyn ? fres.dyn : [], selL, ctxObj && !UNDER_WPS.has(wpId) ? ctxObj.labels : []).filter(l => (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId)) && !(l.near && cam.position.distanceTo(_pv.set(l.p[0], l.p[1], l.p[2])) > l.near)).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; if (l.pick) lbPicks.set(l.pick, { id: l.pick, role: l.role, seed: l.seed ?? 7 }); return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}"${l.pick ? ` data-pick="${esc(l.pick)}" title="눌러서 이야기 듣기"` : ''} style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
+    const lh = built.labels.concat(fres && fres.dyn ? fres.dyn : [], selL, ctxObj && !UNDER_WPS.has(wpId) ? ctxObj.labels : []).filter(l => !(l.far && built.city.real) && (!l.under || UNDER_WPS.has(wpId)) && !(l.over && UNDER_WPS.has(wpId)) && !(l.near && cam.position.distanceTo(_pv.set(l.p[0], l.p[1], l.p[2])) > l.near)).map(l => { const v = new THREE.Vector3(...l.p).project(cam); if (v.z > 1 || v.x < -0.98 || v.x > 0.98 || v.y < -0.95 || v.y > 0.9) return ''; if (l.pick) lbPicks.set(l.pick, { id: l.pick, role: l.role, seed: l.seed ?? 7 }); return `<i class="s3-lb${l.cls ? ' ' + l.cls : ''}"${l.pick ? ` data-pick="${esc(l.pick)}" title="눌러서 이야기 듣기"` : ''} style="left:${((v.x + 1) / 2 * w).toFixed(0)}px;top:${((1 - v.y) / 2 * h).toFixed(0)}px">${l.t}</i>`; }).join('');
     if (lbHtml !== lh) { $('.s3-lbs').innerHTML = lh; lbHtml = lh; }
   }
   function dispose() {

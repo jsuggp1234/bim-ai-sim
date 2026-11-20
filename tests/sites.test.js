@@ -26,7 +26,9 @@ for (const id of [...SITE_IDS, 'custom']) {
     assert.ok(gen.bldgs.length > 0 && gen.totals.units > 0, `${gen.bldgs.length}동 ${gen.totals.units}호`);
     assert.ok(S.end > 0 && E.total > 0);
     const ctx = fallbackFor(gen.plan);
-    assert.ok(ctx.buildings.length > 50, `주변 건물 ${ctx.buildings.length}`);
+    // 실제 지도가 없을 때는 주변을 지어내지 않는다 (용산만 손으로 정리한 지형)
+    if (site.id === 'yongsan') assert.ok(ctx.source === 'preset' && ctx.buildings.length > 50, `주변 건물 ${ctx.buildings.length}`);
+    else assert.ok(ctx.source === 'none' && ctx.buildings.length === 0 && ctx.roads.length === 0, `지어낸 주변 ${ctx.buildings.length}동`);
     // 대지 경계 안에는 주변 건물이 남지 않는다 (네 모서리 안쪽 점으로 확인)
     const P = gen.plan, c = P.toWorld((P.SITE.u0 + P.SITE.u1) / 2, (P.SITE.v0 + P.SITE.v1) / 2);
     assert.ok(!ctx.buildings.some(b => inPoly(c[0], c[1], b.ring)), '대지 한가운데에 주변 건물');

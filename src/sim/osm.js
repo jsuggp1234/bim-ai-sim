@@ -3,6 +3,7 @@
 // 지도 데이터 © OpenStreetMap contributors (ODbL)
 import { emptyCtx, ROAD_CLASS, rng, hashStr, centroid, ringArea, inPoly } from './ctxmodel.js';
 import { llToXZ } from './sites.js';
+import { unpackBundle } from './ctxpack.js';
 
 export const OSM_ATTRIB = '지도 © OpenStreetMap contributors';
 const ENDPOINTS = [
@@ -96,7 +97,31 @@ async function overpass(q, signal, { race = false, ms = 95000 } = {}) {
   throw lastErr || new Error('지도 서버에 연결하지 못했습니다');
 }
 
+// ---------- 사이트에 담아 둔 지도 (public/ctx/<id>.json) ----------
+// 후보지 주변 지도를 미리 받아 사이트와 같이 올려 둔다(scripts/fetch-ctx.mjs). 보는 사람의 브라우저가 지도 서버에 못 붙어도 실제 주변이 보인다.
+let bundleIndex = null;
+const ctxUrl = (name) => new URL('ctx/' + name, document.baseURI).href;
+function bundleIds() {
+  if (!bundleIndex) bundleIndex = (typeof document === 'undefined' || typeof fetch !== 'function') ? Promise.resolve(null)
+    : fetch(ctxUrl('index.json')).then(r => (r.ok ? r.json() : null)).then(j => (j && Array.isArray(j.ids) ? new Set(j.ids) : null)).catch(() => null);
+  return bundleIndex;
+}
+export async function loadBundle(site, signal) {
+  if (!site || !site.id) return null;
+  const ids = await bundleIds();
+  if (!ids || !ids.has(site.id)) return null;
+  try {
+    const r = await fetch(ctxUrl(encodeURIComponent(site.id) + '.json'), { signal });
+    if (!r.ok) return null;
+    const b = unpackBundle(await r.json());
+    // 좌표가 바뀐 택지의 옛 지도는 쓰지 않는다
+    if (!b || Math.abs(b.lat - site.lat) > 2e-4 || Math.abs(b.lng - site.lng) > 2e-4) return null;
+    return b;
+  } catch (e) { if (signal && signal.aborted) throw e; return null; }
+}
+
 // 지도 받기: onStep(단계 문구)로 진행 표시. 실패하면 예외
+// 순서: 브라우저에 저장된 넓은 지도 → 사이트에 담아 둔 지도 → 지도 서버(대지 둘레 먼저, 그다음 넓은 주변)
 // onNear(ctx): 넓은 지도를 받기 전에 대지 둘레(약 450m)만 담은 지도를 먼저 넘긴다. 넓은 지도를 못 받으면 그 둘레 지도를 그대로 돌려준다(ctx.partial)
 export async function loadOSM(site, { onStep, signal, cacheOnly = false, onNear } = {}) {
   const { feat, bldg } = queries(site.lat, site.lng);
@@ -104,6 +129,8 @@ export async function loadOSM(site, { onStep, signal, cacheOnly = false, onNear 
   let jf = await cacheGet(key('feat')), jb = await cacheGet(key('bldg'));
   const cached = !!(jf && jb);
   if (cached) { onStep && onStep('3D로 바꾸는 중'); const ctx = parseOSM([...(jf.elements || []), ...(jb.elements || [])], site); ctx.cached = true; return ctx; }
+  const bun = await loadBundle(site, signal);
+  if (bun) { onStep && onStep('3D로 바꾸는 중'); const ctx = parseOSM([...bun.feat.elements, ...bun.bldg.elements], site); ctx.bundled = true; ctx.at = bun.at; return ctx; }
   let jn = await cacheGet(key('near'));
   if (cacheOnly && !jn) throw new Error('저장된 지도 없음');
   let near = null;

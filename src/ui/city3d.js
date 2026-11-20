@@ -192,32 +192,34 @@ export function buildCity(X) {
   const wallMats = new Map();
   const wallMat = (k, tint, v = 0) => { const key = k + tint + '#' + v; if (!wallMats.has(key)) { const T = texOf(k, v); const m = new THREE.MeshStandardMaterial({ map: T.map, roughnessMap: T.rm, metalnessMap: T.rm, color: tint, roughness: 1, metalness: 1, envMapIntensity: 1.1 }); mats2.push(m); wallMats.set(key, m); } return wallMats.get(key); };
   const TINT = [0xffffff, 0xf2eee8, 0xe6eaf0, 0xf7f1e8, 0xe9e6df, 0xf3e3cf, 0xdfe5e8, 0xe9dccb, 0xd9d9d6, 0xf5e9de];
-  const roofTop = inst(BOX, mat(0xb5b5ba), 120, null), tankI = inst(CYL, mat(0xc9ccd3, { metal: 0.3 }), 60, null), oduI = inst(BOX, mat(0xd9d9de, { metal: 0.3 }), 160, null);
-  const shopG = inst(BOX, mat(0xffe2a8, { em: 0.45, op: 0.85 }), 60, null), awn = inst(BOX, mat(0xffffff), 60, null), sign = inst(BOX, mat(0xffffff, { em: 0.6 }), 60, null);
-  const balI = inst(BOX, mat(0xd2d0cb), 400, null);
-  let nr = 0, ntk = 0, nod = 0, nsh = 0, nbal = 0;
+  // 옥상·상가 부속 묶음: 인접 건물용(늘 보임) · 건너편 단면 건물용(실제 지도가 오면 그 건물과 함께 숨긴다)
+  const mkKit = (c) => ({ roofTop: inst(BOX, mat(0xb5b5ba), c.r, null), tankI: inst(CYL, mat(0xc9ccd3, { metal: 0.3 }), c.tk, null), oduI: inst(BOX, mat(0xd9d9de, { metal: 0.3 }), c.od, null),
+    shopG: inst(BOX, mat(0xffe2a8, { em: 0.45, op: 0.85 }), c.sh, null), awn: inst(BOX, mat(0xffffff), c.sh, null), sign: inst(BOX, mat(0xffffff, { em: 0.6 }), c.sh, null), balI: inst(BOX, mat(0xd2d0cb), c.bal, null),
+    cap: c, n: { r: 0, tk: 0, od: 0, sh: 0, bal: 0 }, walls: [] });
+  const kitA = mkKit({ r: 24, tk: 6, od: 16, sh: 4, bal: 400 }), kitF = mkKit({ r: 24, tk: 6, od: 16, sh: 4, bal: 2 });
   const SIGN_C = [0xd0103a, 0x2f7fd0, 0x0f7f61, 0xe0a043, 0x7b5ea6];
   // face: 'x-' | 'x+' | 'z+' (길을 보는 면)
   function bld(x0, x1, z0, z1, h, k, face, o = {}) {
     if (!(x1 - x0 > 1 && z1 - z0 > 1 && h > 2)) return;
+    const K = o.kit || kitA, n = K.n, { roofTop, tankI, oduI, shopG, awn, sign, balI } = K;
     const w = x1 - x0, d = z1 - z0, g = bldGeo(w, h, d); geos.push(g);
     const wm = wallMat(k === 'school' ? 'school' : k, TINT[Math.floor(R() * TINT.length)], Math.floor(R() * 3));
-    const m = new THREE.Mesh(g, [wm, wm, roofM, roofM, wm, wm]); m.position.set((x0 + x1) / 2, h / 2, (z0 + z1) / 2); root.add(m);
+    const m = new THREE.Mesh(g, [wm, wm, roofM, roofM, wm, wm]); m.position.set((x0 + x1) / 2, h / 2, (z0 + z1) / 2); root.add(m); K.walls.push(m);
     // 옥상: 파라펫 · 계단탑 · 물탱크 · 실외기
-    if (k !== 'house') { ibox(roofTop, nr++, x0, x1, h, h + 1.0, z0, z0 + 0.25); ibox(roofTop, nr++, x0, x1, h, h + 1.0, z1 - 0.25, z1); ibox(roofTop, nr++, x0, x0 + 0.25, h, h + 1.0, z0, z1); ibox(roofTop, nr++, x1 - 0.25, x1, h, h + 1.0, z0, z1); }
-    if (k !== 'factory' && k !== 'house' && w > 6 && d > 6) { const px = x0 + w * 0.3, pz = z0 + d * 0.35; ibox(roofTop, nr++, px, px + Math.min(6, w * 0.3), h, h + 3.2, pz, pz + Math.min(5, d * 0.3)); ibox(tankI, ntk++, x0 + w * 0.68 - 1.2, x0 + w * 0.68 + 1.2, h, h + 2.4, z0 + d * 0.6 - 1.2, z0 + d * 0.6 + 1.2); const no = k === 'office' ? 6 : 3; for (let j = 0; j < no && nod < 160; j++) ibox(oduI, nod++, x0 + w * 0.55 + (j % 3) * 1.3, x0 + w * 0.55 + (j % 3) * 1.3 + 1, h, h + 1.1, z0 + d * 0.22 + Math.floor(j / 3) * 1.4, z0 + d * 0.22 + Math.floor(j / 3) * 1.4 + 0.8); }
-    if (k === 'factory') { const sx = x0 + w * 0.8; ibox(tankI, ntk++, sx - 0.5, sx + 0.5, h, h + 9, z0 + d * 0.5 - 0.5, z0 + d * 0.5 + 0.5); }
-    if (k === 'house') { ibox(roofTop, nr++, x0 - 0.3, x1 + 0.3, h, h + 0.35, z0 - 0.3, z1 + 0.3); }
+    if (k !== 'house') { ibox(roofTop, n.r++, x0, x1, h, h + 1.0, z0, z0 + 0.25); ibox(roofTop, n.r++, x0, x1, h, h + 1.0, z1 - 0.25, z1); ibox(roofTop, n.r++, x0, x0 + 0.25, h, h + 1.0, z0, z1); ibox(roofTop, n.r++, x1 - 0.25, x1, h, h + 1.0, z0, z1); }
+    if (k !== 'factory' && k !== 'house' && w > 6 && d > 6) { const px = x0 + w * 0.3, pz = z0 + d * 0.35; ibox(roofTop, n.r++, px, px + Math.min(6, w * 0.3), h, h + 3.2, pz, pz + Math.min(5, d * 0.3)); ibox(tankI, n.tk++, x0 + w * 0.68 - 1.2, x0 + w * 0.68 + 1.2, h, h + 2.4, z0 + d * 0.6 - 1.2, z0 + d * 0.6 + 1.2); const no = k === 'office' ? 6 : 3; for (let j = 0; j < no && n.od < K.cap.od; j++) ibox(oduI, n.od++, x0 + w * 0.55 + (j % 3) * 1.3, x0 + w * 0.55 + (j % 3) * 1.3 + 1, h, h + 1.1, z0 + d * 0.22 + Math.floor(j / 3) * 1.4, z0 + d * 0.22 + Math.floor(j / 3) * 1.4 + 0.8); }
+    if (k === 'factory') { const sx = x0 + w * 0.8; ibox(tankI, n.tk++, sx - 0.5, sx + 0.5, h, h + 9, z0 + d * 0.5 - 0.5, z0 + d * 0.5 + 0.5); }
+    if (k === 'house') { ibox(roofTop, n.r++, x0 - 0.3, x1 + 0.3, h, h + 0.35, z0 - 0.3, z1 + 0.3); }
     // 1층 상가: 유리 · 차양 · 간판 (길 쪽 면)
     if (o.shop) {
       const e = 0.04, gH = 3.6;
-      if (face === 'x-') { ibox(shopG, nsh, x0 - e - 0.05, x0 - e, 0.25, gH, z0 + 0.6, z1 - 0.6); ibox(awn, nsh, x0 - 1.4, x0, gH + 0.1, gH + 0.25, z0 + 0.6, z1 - 0.6, 0, -0.18); ibox(sign, nsh, x0 - 0.18, x0 - 0.05, gH + 0.5, gH + 1.3, z0 + 1, Math.min(z1 - 1, z0 + 1 + 7)); }
-      else if (face === 'x+') { ibox(shopG, nsh, x1 + e, x1 + e + 0.05, 0.25, gH, z0 + 0.6, z1 - 0.6); ibox(awn, nsh, x1, x1 + 1.4, gH + 0.1, gH + 0.25, z0 + 0.6, z1 - 0.6, 0, 0.18); ibox(sign, nsh, x1 + 0.05, x1 + 0.18, gH + 0.5, gH + 1.3, z0 + 1, Math.min(z1 - 1, z0 + 8)); }
-      else { ibox(shopG, nsh, x0 + 0.6, x1 - 0.6, 0.25, gH, z1 + e, z1 + e + 0.05); ibox(awn, nsh, x0 + 0.6, x1 - 0.6, gH + 0.1, gH + 0.25, z1, z1 + 1.4, -0.18, 0); ibox(sign, nsh, x0 + 1, Math.min(x1 - 1, x0 + 8), gH + 0.5, gH + 1.3, z1 + 0.05, z1 + 0.18); }
-      const c = new THREE.Color(SIGN_C[Math.floor(R() * SIGN_C.length)]); awn.setColorAt(nsh, c); sign.setColorAt(nsh, c); nsh++;
+      if (face === 'x-') { ibox(shopG, n.sh, x0 - e - 0.05, x0 - e, 0.25, gH, z0 + 0.6, z1 - 0.6); ibox(awn, n.sh, x0 - 1.4, x0, gH + 0.1, gH + 0.25, z0 + 0.6, z1 - 0.6, 0, -0.18); ibox(sign, n.sh, x0 - 0.18, x0 - 0.05, gH + 0.5, gH + 1.3, z0 + 1, Math.min(z1 - 1, z0 + 1 + 7)); }
+      else if (face === 'x+') { ibox(shopG, n.sh, x1 + e, x1 + e + 0.05, 0.25, gH, z0 + 0.6, z1 - 0.6); ibox(awn, n.sh, x1, x1 + 1.4, gH + 0.1, gH + 0.25, z0 + 0.6, z1 - 0.6, 0, 0.18); ibox(sign, n.sh, x1 + 0.05, x1 + 0.18, gH + 0.5, gH + 1.3, z0 + 1, Math.min(z1 - 1, z0 + 8)); }
+      else { ibox(shopG, n.sh, x0 + 0.6, x1 - 0.6, 0.25, gH, z1 + e, z1 + e + 0.05); ibox(awn, n.sh, x0 + 0.6, x1 - 0.6, gH + 0.1, gH + 0.25, z1, z1 + 1.4, -0.18, 0); ibox(sign, n.sh, x0 + 1, Math.min(x1 - 1, x0 + 8), gH + 0.5, gH + 1.3, z1 + 0.05, z1 + 0.18); }
+      const c = new THREE.Color(SIGN_C[Math.floor(R() * SIGN_C.length)]); awn.setColorAt(n.sh, c); sign.setColorAt(n.sh, c); n.sh++;
     }
     // 오피스텔 발코니 (길 쪽 면, 층마다)
-    if (o.balcony && face === 'x+') for (let e = 7.6; e < h - 2 && nbal < 400; e += 3) for (let zz = z0 + 1.5; zz < z1 - 3 && nbal < 400; zz += 6.4) { ibox(balI, nbal++, x1, x1 + 1.3, e, e + 0.15, zz, zz + 4.2); ibox(balI, nbal++, x1 + 1.2, x1 + 1.3, e, e + 1.1, zz, zz + 4.2); }
+    if (o.balcony && face === 'x+') for (let e = 7.6; e < h - 2 && n.bal < K.cap.bal; e += 3) for (let zz = z0 + 1.5; zz < z1 - 3 && n.bal < K.cap.bal; zz += 6.4) { ibox(balI, n.bal++, x1, x1 + 1.3, e, e + 0.15, zz, zz + 4.2); ibox(balI, n.bal++, x1 + 1.2, x1 + 1.3, e, e + 1.1, zz, zz + 4.2); }
     return m;
   }
   // 인접 건물 (단면을 자르는 건물): 지하층은 박스로 따로
@@ -231,24 +233,21 @@ export function buildCity(X) {
     if (N.found === 'pile') { const pI = inst(CYL, mat(0xb8b8bc), 8, null); let k = 0; for (let x = nb.x0 + 2; x < nb.x1 - 1; x += Math.max(3, (nb.x1 - nb.x0) / 6)) ibox(pI, k++, x - 0.3, x + 0.3, -nb.b - 12, -nb.b, 0.05, 0.6); pI.count = Math.min(k, pI.instanceMatrix.count); }
   }
   labels.push({ t: `인접 건물 · ${N.name}${nb.real ? ` · 지도 높이 약 ${Math.round(nb.h)}m` : ''}`, p: [(nb.x0 + nb.x1) / 2, nb.h + 3, nbZ1 - 4] });
-  if (C.nb2) bld(C.nb2.x0, C.nb2.x1, nbZ0 - 4, nbZ1 + 2, C.nb2.h, 'office', 'z+', {});
-  // 인접 건물 줄 (z 방향 앞뒤로 이어짐)
-  { const rx1 = nb.x1, items = C.rowL; let z = nbZ1, i = 0; while (z < ZC - 6 && i < 12) { const it = items[i % items.length]; z += it.gap; const z1 = Math.min(ZC, z + it.d); bld(rx1 - Math.min(26, nb.x1 - nb.x0 + 4 * (it.t - 0.5)), rx1, z, z1, it.h, it.k, 'x+', { shop: C.kind === 'urban' && it.t > 0.4 }); z = z1; i++; }
-    z = nbZ0; i = 2; while (z > -ZC + 6 && i < 14) { const it = items[i % items.length]; z -= it.gap; const z0 = Math.max(-ZC, z - it.d); bld(rx1 - Math.min(26, nb.x1 - nb.x0 + 4 * (0.5 - it.t)), rx1, z0, z, it.h, it.k, 'x+', { shop: C.kind === 'urban' && it.t < 0.6 }); z = z0; i++; } }
-  // 건너편 (대로 너머): 단면 위치(z≈0)에는 2D와 같은 건물
-  { const fx0 = C.far.length ? C.far[0].x0 : C.sw2[1] + 1; const f0 = C.far[0];
-    const zA = -12, zB = 12;
-    if (f0) { bld(f0.x0, f0.x1, zA, zB, f0.h, f0.kind === 'office' ? 'office' : f0.kind, 'x-', { shop: f0.shop }); labels.push({ t: f0.name, p: [(f0.x0 + f0.x1) / 2, f0.h + 3, 0] }); }
-    let z = zB, i = 0; while (z < ZC - 4 && i < 12) { const it = C.rowF[i % C.rowF.length]; z += it.gap; const z1 = Math.min(ZC, z + it.w); bld(fx0, fx0 + it.d, z, z1, it.h, it.k, 'x-', { shop: it.shop }); z = z1; i++; }
-    z = zA; i = 3; while (z > -ZC + 4 && i < 15) { const it = C.rowF[i % C.rowF.length]; z -= it.gap; const z0 = Math.max(-ZC, z - it.w); bld(fx0, fx0 + it.d, z0, z, it.h, it.k, 'x-', { shop: it.shop }); z = z0; i++; } }
-  // 뒤쪽: 대지 뒤 이면도로 + 건너 블록
+  // 둘레에 지어낸 건물 줄(옆·건너편·뒤 블록)은 두지 않는다: 주변은 실제 지도(simctx.js)가 채우고, 지도가 없으면 비워 둔다.
+  // 건너편 (대로 너머): 단면 위치(z≈0)의 건물 하나만 2D 단면과 맞춰 둔다. 실제 지도가 오면 숨긴다(setReal)
+  const f0 = C.far[0];
+  if (f0) { bld(f0.x0, f0.x1, -12, 12, f0.h, f0.kind === 'office' ? 'office' : f0.kind, 'x-', { shop: f0.shop, kit: kitF }); labels.push({ t: f0.name, p: [(f0.x0 + f0.x1) / 2, f0.h + 3, 0], far: true }); }
+  // 뒤쪽: 대지 뒤 이면도로
   { const zb1 = -pd / 2 - 3.6, zb0 = zb1 - 7, xa = (Lf.road ? Lf.road[0] : nb.x1) , xb = C.sw[0];
     box(asp, null, xa, C.road[0], 0, 0.1, zb0, zb1);
     box(swM, null, xa, xb, 0, 0.18, zb0 - 2.4, zb0);
-    const d3 = inst(BOX, white, 60, null); let n = 0; for (let x = xa + 1; x < C.road[0] - 3; x += 6) ibox(d3, n++, x, x + 3, 0.1, 0.12, (zb0 + zb1) / 2 - 0.07, (zb0 + zb1) / 2 + 0.07); d3.count = Math.min(n, d3.instanceMatrix.count);
-    let x = xa, i = 0; while (x < xb - 6 && i < 12) { const it = C.rowB[i % C.rowB.length]; x += it.gap; const x1 = Math.min(xb - 1, x + it.w); bld(x, x1, zb0 - 2.6 - it.d, zb0 - 2.6, it.h, it.k, 'z+', { shop: it.shop }); x = x1; i++; } }
-  roofTop.count = Math.min(nr, roofTop.instanceMatrix.count); tankI.count = Math.min(ntk, tankI.instanceMatrix.count); oduI.count = Math.min(nod, oduI.instanceMatrix.count); shopG.count = awn.count = sign.count = Math.min(nsh, sign.instanceMatrix.count); balI.count = Math.min(nbal, balI.instanceMatrix.count);
-  [awn, sign].forEach(o => { if (o.instanceColor) o.instanceColor.needsUpdate = true; });
+    const d3 = inst(BOX, white, 60, null); let n = 0; for (let x = xa + 1; x < C.road[0] - 3; x += 6) ibox(d3, n++, x, x + 3, 0.1, 0.12, (zb0 + zb1) / 2 - 0.07, (zb0 + zb1) / 2 + 0.07); d3.count = Math.min(n, d3.instanceMatrix.count); }
+  [kitA, kitF].forEach(K => { const n = K.n; K.roofTop.count = Math.min(n.r, K.cap.r); K.tankI.count = Math.min(n.tk, K.cap.tk); K.oduI.count = Math.min(n.od, K.cap.od); K.shopG.count = K.awn.count = K.sign.count = Math.min(n.sh, K.cap.sh); K.balI.count = Math.min(n.bal, K.cap.bal);
+    [K.awn, K.sign].forEach(o => { if (o.instanceColor) o.instanceColor.needsUpdate = true; }); });
+  // 실제 지도가 왔을 때: 건너편 단면 건물을 숨기고, 지도 건물이 길 건너까지 들어오게 가로 모형 자리를 좁힌다
+  const zoneReal = { x0: Math.min(nb.x0, D.xl) - 3, x1: C.sw2[1] + 0.6, z0: -ZC, z1: ZC };
+  let realOn = false;
+  function setReal(on) { realOn = !!on; [...kitF.walls, kitF.roofTop, kitF.tankI, kitF.oduI, kitF.shopG, kitF.awn, kitF.sign, kitF.balI].forEach(o => { o.visible = !realOn; }); }
   labels.push({ t: `${C.roadName || (lanes.length >= 4 ? '대로' : '도로')} · 왕복 ${lanes.length}차로`, p: [(C.road[0] + C.road[1]) / 2, 0.6, ZC - 18] });
 
   // ---------- 현장 출입구: 게이트 · 세륜 · 경비실 · 사무실 컨테이너 ----------
@@ -351,7 +350,7 @@ export function buildCity(X) {
     ofc.count = Math.min(n, ofc.instanceMatrix.count); ofcW.count = Math.min(nw, ofcW.instanceMatrix.count); stair.count = Math.min(ns, stair.instanceMatrix.count); [ofc, ofcW, stair].forEach(o => { o.instanceMatrix.needsUpdate = true; });
   }
   return {
-    frame, offices, labels, laneX, ZC, zx, surfs, ground, zone, gate: { x: gx, z0: gz0, z1: gz1 },
+    frame, offices, labels, laneX, ZC, zx, surfs, ground, zone, zoneReal, setReal, get real() { return realOn; }, gate: { x: gx, z0: gz0, z1: gz1 },
     dispose() { people.dispose(); geos.forEach(g => g.dispose()); texs.forEach(t => t.dispose()); mats2.forEach(m => m.dispose()); },
   };
 }

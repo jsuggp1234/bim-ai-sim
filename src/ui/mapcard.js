@@ -1,7 +1,6 @@
 // 맥락 지도 카드 (매스 단계 공통): 지도 상태 · 대지 자리(지도에 맞춘 내용) · 대지 네 변 바깥에서 실제로 잰 값.
-// 자동 생성 맥락일 때는 그것이 실제가 아니라는 것을 분명히 적는다.
+// 실제 지도가 없을 때는 주변을 지어내지 않고 비워 두며, 그 사실을 적는다.
 import { sideText } from '../sim/sitefit.js';
-import { FABRICS } from '../sim/sites.js';
 import { fmt } from '../pipeline.js';
 
 const COMPASS = ['동', '남동', '남', '남서', '서', '북서', '북', '북동'];
@@ -11,11 +10,11 @@ const cmp = (dx, dz) => COMPASS[((Math.round(Math.atan2(dz, dx) * 180 / Math.PI 
 export function mapCardHTML(o) {
   const { state, msg, ctx, site, facts: F, stats: st, useFit } = o;
   const preset = ctx.source === 'preset', real = ctx.source === 'osm';
-  const fbName = preset ? '정리한 지형(용산)' : '임시 주변 (자동 생성)';
+  const fbName = preset ? '정리한 지형(용산)' : '주변 비움';
   const t = {
     loading: `<span class="dot busy"></span>실제 지도 받는 중${msg ? ' · ' + msg : ''}`,
-    osm: `<span class="dot on"></span>실제 지도 (OpenStreetMap)${ctx.cached ? ' · 저장본' : ''}${ctx.partial ? ' · 대지 둘레 450m' : ''}`,
-    fallback: `<span class="dot"></span>${fbName}`,
+    osm: `<span class="dot on"></span>실제 지도 (OpenStreetMap)${ctx.bundled ? ` · 사이트에 담아 둔 지도${ctx.at ? ' ' + ctx.at : ''}` : ctx.cached ? ' · 저장본' : ''}${ctx.partial ? ' · 대지 둘레 450m' : ''}`,
+    fallback: `<span class="dot"></span>${preset ? fbName : '주변 지도 없음 · 대지만 표시'}`,
     failed: `<span class="dot off"></span>지도 서버에 연결하지 못했습니다 · ${fbName}`,
     off: `<span class="dot"></span>지도 끔 · ${fbName}`,
   }[state] || '';
@@ -24,9 +23,9 @@ export function mapCardHTML(o) {
     : (real && useFit === false && !preset) ? `<div class="mf-fit"><b>대지 자리</b> 후보지 좌표 그대로(방향은 임의)입니다. <button type="button" class="chipbtn" data-map="fit-on">지도에 맞추기</button></div>` : '';
   const factsHtml = real && F ? `<div class="mf"><div class="mf-h">대지 둘레 · 실제 지도에서 잰 값</div>${F.rows.map(r => `<div class="mf-r"><span class="mf-d">${r.dirKo}</span><span>${sideText(r)}${r.bld && r.first && r.first.kind !== 'bld' ? ` · 건물 ${Math.round(r.bld.d)}m` : ''}</span></div>`).join('')}
       <div class="mf-s">120m 안 건물 ${fmt(F.nB)}동${F.maxH ? ` · 최고 약 ${fmt(F.maxH)}m` : ''} · 트인 변 ${F.openSides}/4${F.adj != null ? ` · 가장 가까운 건물 ${F.adjSide}쪽 ${fmt(F.adj)}m` : ' · 150m 안에 건물 없음'}</div></div>`
-    : !real && !preset ? `<div class="mf warn">지금 보이는 주변 건물·도로는 <b>실제가 아닙니다</b>. 택지 성격(${FABRICS[site.fabric] || '중층'})에 맞춰 자동으로 만든 임시 모형이라 대지를 빙 둘러싼 것처럼 보입니다. 실제 지도를 받으면 실제 건물·도로로 바뀌고 대지 방향도 도로망에 맞춥니다.</div>` : '';
+    : !real && !preset && state !== 'loading' ? `<div class="mf warn">주변 지도를 받지 못해 대지만 그렸습니다. 주변 건물·도로는 지어내지 않고 비워 두었고, 주변 일조 영향도 계산하지 않습니다. ‘실제 지도 받기’를 누르면 다시 시도합니다.</div>` : '';
   return `<span class="ms">${t}</span>${st ? `<span class="note">건물 ${fmt(st.buildings)} · 도로 ${fmt(st.roads)} · 수목 ${fmt(st.trees)}</span>` : ''}
-    <span class="ma">${state === 'osm' ? `<button type="button" class="chipbtn" data-map="off">지도 끄기</button>` : state === 'loading' ? '' : `<button type="button" class="chipbtn" data-map="retry">실제 지도 받기</button>`}</span>${fitLine}${factsHtml}`;
+    <span class="ma">${state === 'osm' ? `<button type="button" class="chipbtn" data-map="off">지도 끄기</button>` : state === 'loading' ? '' : `<button type="button" class="chipbtn" data-map="retry">실제 지도 받기</button>`}</span>${real && (fitLine || factsHtml) ? `<details class="mf-more"><summary>대지 자리 · 둘레 실측</summary>${fitLine}${factsHtml}</details>` : fitLine + factsHtml}`;
 }
 // 3D 화면 위 배지 글 (실제 지도면 빈 글)
-export const ctxBadge = (state, ctx) => ctx.source === 'osm' || ctx.source === 'preset' ? '' : state === 'loading' ? '임시 주변 · 실제 지도 받는 중' : '임시 주변 · 실제 지도 아님';
+export const ctxBadge = (state, ctx) => ctx.source === 'osm' || ctx.source === 'preset' ? '' : state === 'loading' ? '주변 지도 받는 중' : '주변 지도 없음 · 대지만 표시';

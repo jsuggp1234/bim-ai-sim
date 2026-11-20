@@ -151,7 +151,9 @@ export function mount(root) {
   function renderRegister() {
     const n = (k) => K.reg.filter(r => r.cat === k).length;
     $('rk-tabs').innerHTML = tabs([{ k: 'all', name: '전체', n: K.reg.length }, ...RISK_CAT_KEYS.filter(n).map(k => ({ k, name: RISK_CATS[k].name, n: n(k) }))], ui.cat, 'data-cat', '위험 분류');
-    const rk = rank(), list = K.reg.filter(r => ui.cat === 'all' || r.cat === ui.cat);
+    const rk = rank(), all = K.reg.filter(r => ui.cat === 'all' || r.cat === ui.cat);
+    // 처음엔 위험 점수가 큰 8건만 (고른 위험은 늘 보이게), '전체 보기'로 모두
+    const list = ui.regAll ? all : all.filter((r, i) => i < 8 || r.id === ui.sel);
     const bar = (v, cls) => `<span class="rk-sb ${cls}"><i style="width:${(v / 25 * 100).toFixed(1)}%"></i></span>`;
     $('reg').innerHTML = `<thead><tr><th>#</th><th>ID</th><th>위험</th><th>분류</th><th>시기</th><th class="r">발생 확률</th><th>고유 → 잔여 (P×I)</th><th>등급</th><th>대응</th></tr></thead>
       <tbody>${list.map(r => { const lv = LEVEL(r.s); return `<tr data-rid="${r.id}" class="${ui.sel === r.id ? 'on' : ''}" tabindex="0">
@@ -161,7 +163,7 @@ export function mount(root) {
         <td class="r num">${pc(r.prob)}</td>
         <td class="rk-sc"><span class="num">${r.s0.toFixed(1)} → <b>${r.s.toFixed(1)}</b></span>${bar(r.s0, 'g')}${bar(r.s, 'a')}</td>
         <td><span class="lv-chip ${lv.k}">${lv.name}</span></td>
-        <td class="rk-mit">${r.mit.length ? escH(r.mit.slice(0, 2).join(' · ')) + (r.mit.length > 2 ? ` 외 ${r.mit.length - 2}` : '') : '<span class="note">—</span>'}</td></tr>`; }).join('')}</tbody>`;
+        <td class="rk-mit">${r.mit.length ? escH(r.mit.slice(0, 2).join(' · ')) + (r.mit.length > 2 ? ` 외 ${r.mit.length - 2}` : '') : '<span class="note">—</span>'}</td></tr>`; }).join('')}</tbody>${all.length > 8 ? `<tfoot><tr><td colspan="9" class="note">${ui.regAll ? '' : `외 ${all.length - list.length}건 · `}<button type="button" class="chipbtn" data-regmore>${ui.regAll ? '8건만 보기' : '전체 보기'}</button></td></tr></tfoot>` : ''}`;
   }
 
   // ---------- 확률 곡선 (CDF) + 분포 ----------
@@ -331,6 +333,7 @@ export function mount(root) {
         ...K.reg.map(r => [rk[r.id], r.id, r.name, RISK_CATS[r.cat].name, r.when.map(c => CAT_NAME[c] || c).join('/'), r.p0.toFixed(2), r.i0.toFixed(2), r.s0.toFixed(2), r.p.toFixed(2), r.i.toFixed(2), r.s.toFixed(2), (r.prob * 100).toFixed(1), ...r.days.map(v => v.toFixed(0)), ...r.cost.map(v => v.toFixed(2)), r.why.join(' / '), r.mit.join(' / ')])]), 'text/csv');
       return;
     }
+    if (e.target.closest('[data-regmore]')) { ui.regAll = !ui.regAll; renderRegister(); return; }
     const tb = e.target.closest('[data-cat]'); if (tb) { ui.cat = tb.dataset.cat; renderRegister(); renderMatrix(); return; }
     const rr = e.target.closest('[data-rid]'); if (rr) { select(rr.dataset.rid); if (!rr.closest('#mx') && !rr.closest('#det')) $('det').scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
   });

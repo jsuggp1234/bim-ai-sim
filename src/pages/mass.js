@@ -1,5 +1,5 @@
 // 2단계: 매스 배치 (택지 선택 → 블록·주동 형식·높이 계획·인동간격 + 일조·조망·주변 영향)
-// 택지는 1단계 후보지 8곳 또는 직접 입력. 주변 맥락은 실제 지도(OpenStreetMap)를 받으면 그것으로, 아니면 자동 생성
+// 택지는 1단계 후보지 8곳 또는 직접 입력. 주변 맥락은 실제 지도(OpenStreetMap). 지도가 없으면 주변을 비워 둔다
 import { DEFAULTS, META, generate, USE_LABEL, TYPOLOGIES, FORMS, RULES, LAYOUTS } from '../sim/massing.js';
 import { gestureHTML, bindGesture } from '../ui/gesture-ui.js';
 import { mainBuilding } from '../sim/impact.js';
@@ -12,7 +12,8 @@ import { mapCardHTML, ctxBadge } from '../ui/mapcard.js';
 import { createViewer } from '../sim/viewer.js';
 import { store, massParamsFromStage1, currentSite, paramsForSite, fitFromMap, saveFacts, fitKey } from '../store.js';
 import { fmt, onThemeChange } from '../pipeline.js';
-import { code, dot } from '../ui/sys.js';
+import { moreDesc } from '../ui/sys.js';
+import { foldGroups } from '../ui/fold.js';
 
 export const title = '03 매스 배치';
 
@@ -91,10 +92,10 @@ export function mount(root) {
   root.innerHTML = `
   <header class="sx-head">
     <div class="sx-head-l">
-      <div class="sx-meta">${code(3, 'MASS')}${dot('GENERATIVE MASSING · 공동주택')}</div>
+      <div class="sx-guide" data-guide hidden></div>
       <h1 class="sx-title" id="m-title"></h1>
       <p class="sx-dim" id="m-dim"></p>
-      <p class="sx-desc" id="m-intro"></p>
+      ${moreDesc('', 'm-intro')}
       <div class="sx-act"><a class="btn ghost" href="#/site">← 02 입지</a><a class="btn ghost" href="#/schedule">층별 일람표</a><a class="btn acc" href="#/method">04 공법·재료 <span class="ar">→</span></a></div>
     </div>
   </header>
@@ -104,35 +105,35 @@ export function mount(root) {
       <div class="seg" id="m-views" role="group" aria-label="시점"></div>
       <span class="busy" id="m-busy" hidden>Ray casting</span><span class="ctxb" id="m-ctxb" hidden></span></div>
     <aside class="float f-l" id="m-fl" aria-label="배치 변수">
-      <div class="f-head"><span class="label-sm">Parameters · 배치 변수</span><button type="button" data-fold="m-fl" aria-expanded="true" aria-label="변수 패널 접기">−</button></div>
+      <div class="f-head"><span class="label-sm">배치 변수</span><button type="button" data-fold="m-fl" aria-expanded="true" aria-label="변수 패널 접기">−</button></div>
       <div class="f-body m-ctl">
         <div class="grp site-pick">
-          <label class="label-sm" for="m-site">택지 · site</label>
+          <label class="label-sm" for="m-site">택지</label>
           <select id="m-site"></select>
           <div class="custom-site" id="m-custom" hidden></div>
           <div class="map-state" id="m-map" role="status"></div>
         </div>
         <div class="src-banner" id="m-src"></div>
-        <div class="grp"><div class="sec-h" style="margin-bottom:8px"><span class="label-sm">Scenario</span><button class="chipbtn" id="m-reset" type="button">기본값</button></div><div class="presets" id="m-presets"></div></div>
+        <div class="grp"><div class="sec-h" style="margin-bottom:8px"><span class="label-sm">시나리오</span><button class="chipbtn" id="m-reset" type="button">기본값</button></div><div class="presets" id="m-presets"></div></div>
         <div class="grp"><span class="label-sm">주동 형식</span><div class="typo" id="m-typo" role="group" aria-label="주동 형식"></div><div class="note" id="m-typo-note" style="margin-top:8px"></div></div>
         <div class="grp"><span class="label-sm">배치 방식</span><div class="typo" id="m-lay" role="group" aria-label="배치 방식"></div><div class="note" id="m-lay-note" style="margin-top:8px"></div>
           <label class="lay-fs"><span>남측 열 주동 형식</span><select id="m-forms" aria-label="남측 열 주동 형식"></select></label></div>
-        <div class="grp gx" id="m-gx"><div class="sec-h" style="margin-bottom:6px"><span class="label-sm">형태 제스처 · Form</span></div><div id="m-gxb"></div></div>
-        <div class="grp"><span class="label-sm" style="display:block">용도지역 · 적용 법규</span>
+        <div class="grp gx" id="m-gx" data-foldgrp="gx"><div class="sec-h fold-k" style="margin-bottom:6px"><span class="label-sm">형태 제스처</span></div><div id="m-gxb"></div></div>
+        <div class="grp" data-foldgrp="zone"><span class="label-sm fold-k" style="display:block">용도지역 · 적용 법규</span>
           <div class="seg" id="m-zone" role="group" aria-label="업무지원존 용도지역" style="margin-top:6px"></div>
           <div class="note" id="m-zone-note" style="margin-top:6px"></div>
           <span class="label-sm" style="display:block;margin-top:10px">탑상·Y자 측면 창</span>
           <div class="seg" id="m-side-win" role="group" aria-label="측면 채광창" style="margin-top:6px"></div>
           <div class="note" id="m-sidewin-note" style="margin-top:6px"></div></div>
-        ${GROUPS.map(([g, nm, open]) => `<details class="grp" ${open ? 'open' : ''}><summary><span class="label-sm">${nm}</span></summary><div id="m-g-${g}"></div></details>`).join('')}
+        ${GROUPS.map(([g, nm]) => `<details class="grp"><summary><span class="label-sm">${nm}</span></summary><div id="m-g-${g}"></div></details>`).join('')}
       </div>
     </aside>
     <aside class="float f-r side" id="m-fr" aria-label="배치 결과">
-      <div class="f-head"><span class="label-sm">Results · 검토 결과</span><button type="button" data-fold="m-fr" aria-expanded="true" aria-label="결과 패널 접기">−</button></div>
+      <div class="f-head"><span class="label-sm">검토 결과</span><button type="button" data-fold="m-fr" aria-expanded="true" aria-label="결과 패널 접기">−</button></div>
       <div class="f-body" id="m-side"></div>
     </aside>
     <div class="float f-leg" id="m-legend"></div>
-    <div class="float f-sun"><label for="m-season" class="label-sm">Shadow</label>
+    <div class="float f-sun"><label for="m-season" class="label-sm">그림자</label>
       <select id="m-season"><option value="-23.44">동지 12.22</option><option value="0">춘분 3.20</option><option value="23.44">하지 6.21</option></select>
       <input id="m-hour" type="range" min="7" max="17" step="0.25" value="${ui.hour}" aria-label="시각 (진태양시)">
       <span class="mono" id="m-hourOut"></span><span class="muted" id="m-sunOut"></span></div>
@@ -208,9 +209,9 @@ export function mount(root) {
         <span class="note">${edited ? `넘겨받은 뒤 변수 ${edited}개를 바꿨습니다.` : '넘겨받은 값 그대로입니다.'}</span>
         ${edited ? `<span><button class="chipbtn" type="button" id="m-reapply">1단계 값 다시 적용</button></span>` : ''}`;
     } else {
-      html = site.id === 'yongsan' ? `<span class="label-sm">start</span><span>1단계를 거치지 않아 서울시 발표안(주거 6,000호)으로 시작했습니다.</span>
+      html = site.id === 'yongsan' ? `<span class="label-sm">시작값</span><span>1단계를 거치지 않아 서울시 발표안(주거 6,000호)으로 시작했습니다.</span>
         <span><a class="chipbtn" href="#/site">01 택지에서 시나리오 고르기</a></span>`
-        : `<span class="label-sm">start</span><span>${site.name} 기본값으로 시작했습니다: 주거 <b>${fmt(site.units)}</b>호, 최고 ${site.maxFloors}층, 순주거용지 ${site.netRatio}%.</span>
+        : `<span class="label-sm">시작값</span><span>${site.name} 기본값으로 시작했습니다: 주거 <b>${fmt(site.units)}</b>호, 최고 ${site.maxFloors}층, 순주거용지 ${site.netRatio}%.</span>
         <span><a class="chipbtn" href="#/site">01 택지에서 사업성 시나리오 고르기</a></span>`;
     }
     $('m-src').innerHTML = html;
@@ -360,8 +361,9 @@ export function mount(root) {
         <div class="rulelist">${rows.map(x => `<div><span class="r">${x.id}</span><span><span class="hstack" style="display:inline-flex;width:100%;max-width:140px"><i style="width:${x.r.toFixed(1)}%;background:var(--ink)"></i></span></span><span class="c ${x.r >= 99.95 ? 'pos' : ''}">${x.r >= 99.95 ? '단서 가능' : fmt(x.r, 0) + '%'}</span></div>`).join('')}</div></div>`;
     }
     // 주변 영향
-    html += `<div class="blk"><h3><span>주변 주거 일조 영향</span><span>${ctx.source === 'osm' ? '실제 지도' : ctx.source === 'preset' ? '정리한 지형' : '자동 생성 맥락'}</span></h3>`;
-    if (agg) {
+    html += `<div class="blk"><h3><span>주변 주거 일조 영향</span><span>${ctx.source === 'osm' ? '실제 지도' : ctx.source === 'preset' ? '정리한 지형' : '주변 지도 없음'}</span></h3>`;
+    if (ctx.source === 'none') html += `<div class="note">주변 지도가 없어 주변 건물에 주는 일조 영향은 계산하지 않았습니다.</div>`;
+    else if (agg) {
       const c = agg.ct;
       const byName = new Map();
       const near = analysisBoxes(ctx, plan);
@@ -382,16 +384,20 @@ export function mount(root) {
     if (gen.warnings.some(w => w.includes('세대만 배치'))) notes.push(`<div class="note">주거 최고 층수나 수변 앞열 층수를 올리거나, 세대가 많은 형식(탑상·ㄷ자)을 고르면 더 담을 수 있습니다.${site.id === 'yongsan' ? ' 서울시는 이 대지의 주거 한계를 약 8,000호로 봅니다.' : ''}</div>`);
     html += `<div class="blk"><h3><span>검토 사항</span></h3><div class="warnlist">${notes.length ? notes.join('') : '<div class="okbox">목표 물량을 모두 배치했습니다.</div>'}</div></div>`;
     $('m-side').innerHTML = html;
+    // 결과 패널: 처음 두 묶음만 펼쳐 두고 나머지는 제목을 눌러 펼친다
+    $('m-side').querySelectorAll(':scope > .blk').forEach((b, i) => { const h = b.querySelector(':scope > h3'); if (!h || !h.firstElementChild) return; h.classList.add('fold-k'); b.dataset.foldgrp = 'side-' + h.firstElementChild.textContent.trim(); if (i < 2) b.setAttribute('data-open', ''); });
+    foldGroups($('m-side'), 'mass');
   }
 
   // ---------- 범례 ----------
+  const ctxLg = () => (ctx.source === 'none' ? [] : [['--s-w-com', ctx.source === 'osm' ? '주변 건물 (실제 지도)' : '주변 건물 (정리한 지형)']]);
   function renderLegend() {
     let html;
     if (ui.mode === 'real') {
-      html = [['--s-pj-glass', '유리 커튼월·창'], ['--s-pj-res', '외벽 패널'], ['--s-pj-base', '저층부 석재·상가'], ['--s-pj-mech', '기계실·옥탑'], ['--s-park', '조경·녹지'], ['--s-w-com', ctx.source === 'osm' ? '주변 건물 (실제 지도)' : '주변 건물 (근사)']]
+      html = [['--s-pj-glass', '유리 커튼월·창'], ['--s-pj-res', '외벽 패널'], ['--s-pj-base', '저층부 석재·상가'], ['--s-pj-mech', '기계실·옥탑'], ['--s-park', '조경·녹지'], ...ctxLg()]
         .map(([c, n]) => `<span class="lg"><i style="background:var(${c})"></i>${n}</span>`).join('') + '<span class="note">준공 후 모습 · 계획 건물만 재료 색 · 용도별 색은 \'용도\'</span>';
     } else if (ui.mode === 'use') {
-      html = [['--res', '아파트'], ['--officetel', '오피스텔'], ['--office', '업무'], ['--retail', '상업·로비·근생'], ['--refuge', '피난안전층'], ['--mech', '옥탑·기계'], ['--s-w-com', ctx.source === 'osm' ? '주변 건물 (실제 지도)' : '주변 건물 (근사)']]
+      html = [['--res', '아파트'], ['--officetel', '오피스텔'], ['--office', '업무'], ['--retail', '상업·로비·근생'], ['--refuge', '피난안전층'], ['--mech', '옥탑·기계'], ...ctxLg()]
         .map(([c, n]) => `<span class="lg"><i style="background:var(${c})"></i>${n}</span>`).join('');
     } else if (ui.mode === 'model') {
       html = `<span class="lg"><i style="background:var(--model)"></i>모든 건물 흰 모형</span><span class="note">선택한 동은 주황으로 표시</span>`;
@@ -490,7 +496,7 @@ export function mount(root) {
       `획지 사이 도로는 20m, 대지 둘레는 12m 띠로 비웁니다. 블록 번호(R 주거, M 복합)는 이 모델의 배치이며 실제 지구단위계획 획지와 다릅니다.`,
       YS_ASSUME[1], YS_ASSUME[3], YS_ASSUME[4], YS_ASSUME[5], YS_ASSUME[6],
       `조망: ${plan.views.water ? `창 정면 ±60° 안의 ${plan.views.water.name} 표적 ${plan.views.water.targets.length}곳 중 3곳 이상이 보이면 ${plan.views.water.name} 조망` : '수변 조망 대상 없음'}, ${plan.views.peak ? `${plan.views.peak.name} 정상이 보이면 ${plan.views.peak.name} 조망` : '산 조망 대상 없음'}으로 봅니다.`,
-      `주변 맥락: ${ctx.source === 'osm' ? 'OpenStreetMap에서 받은 실제 건물·도로·하천·녹지입니다. 높이가 없는 건물은 층수나 용도로 추정합니다.' : '지도를 받지 못하면 택지 성격(' + (FABRICS[site.fabric] || '중층') + ')에 맞춰 도로망과 건물을 자동으로 만듭니다.'} 분석에는 대지 경계 300m 안 건물만 씁니다.`,
+      `주변 맥락: ${ctx.source === 'osm' ? 'OpenStreetMap에서 받은 실제 건물·도로·하천·녹지입니다. 높이가 없는 건물은 층수나 용도로 추정합니다.' : '실제 지도(OpenStreetMap)를 씁니다. 지도를 받지 못하면 주변을 지어내지 않고 비워 둡니다.'} 분석에는 대지 경계 300m 안 건물만 씁니다.`,
     ];
     $('m-assume').innerHTML = list.map(x => `<li>${x}</li>`).join('');
     $('m-srcs').innerHTML = [...(site.id === 'yongsan' ? YS_SOURCES : []), ...LAW_SOURCES].map(x => `<li><span class="d">${x.d}</span><a href="${x.url}" target="_blank" rel="noopener">${x.t}</a></li>`).join('');

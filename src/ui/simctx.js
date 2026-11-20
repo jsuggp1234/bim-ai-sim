@@ -1,7 +1,7 @@
 // 공법 시뮬레이터의 넓은 주변 맥락: 입지(택지)의 실제 지도(OpenStreetMap: 건물·도로·철도·물·녹지·산)를
 // 시뮬레이션 좌표(x 단면 가로, z 대로 방향, 대표 동 중심이 (건물 가운데, 0))로 옮겨, 현장 둘레의 가로 모형(city3d) 바깥을 채운다.
 // 같은 매스 배치의 다른 동은 '계획 동'(반투명 볼륨)으로 제자리에 세운다.
-// 지도가 아직 없으면(받는 중·끔) 같은 택지의 자동 생성 맥락을 쓴다 (ctxload.js).
+// 지도가 아직 없으면(받는 중·끔·실패) 주변을 지어내지 않고 빈 땅으로 둔다 (ctxload.js).
 import * as THREE from 'three';
 import { buildContext } from '../sim/scene/context3d.js';
 import { inPoly, densify } from '../sim/ctxmodel.js';

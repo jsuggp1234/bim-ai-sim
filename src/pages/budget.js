@@ -60,10 +60,10 @@ export function mount(root) {
       <section><div class="sec-title"><span class="n">06.6</span><h2>예산 가정</h2></div><ul class="issues" id="b-assume"></ul></section>
     </div>
     <aside class="panel" id="b-ctl" aria-label="단가와 비율">
-      <div class="grp"><div class="sec-h" style="margin:0"><span class="label-sm">Unit rates · 공종 단가</span><button class="chipbtn" id="b-reset" type="button">기본값</button></div></div>
+      <div class="grp"><div class="sec-h" style="margin:0"><span class="label-sm">공종 단가</span><button class="chipbtn" id="b-reset" type="button">기본값</button></div></div>
       <div class="grp" id="b-unit"></div>
-      <div class="grp"><span class="label-sm">Rates · 비율</span><div id="b-rate"></div></div>
-      <div class="grp"><span class="label-sm">Export</span><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"><button class="btn" type="button" id="b-csv-m">월별 기성 CSV</button><button class="btn ghost" type="button" id="b-csv-i">내역 CSV</button><button class="btn ghost" type="button" id="b-json">JSON</button></div></div>
+      <div class="grp"><span class="label-sm">비율</span><div id="b-rate"></div></div>
+      <div class="grp"><span class="label-sm">내보내기</span><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"><button class="btn" type="button" id="b-csv-m">월별 기성 CSV</button><button class="btn ghost" type="button" id="b-csv-i">내역 CSV</button><button class="btn ghost" type="button" id="b-json">JSON</button></div></div>
     </aside>
   </div>`;
 

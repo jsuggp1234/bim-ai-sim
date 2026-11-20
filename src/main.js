@@ -5,6 +5,7 @@ import './system.css';
 import { store, currentSite } from './store.js';
 import { pipeline, fmt, won, projKey } from './pipeline.js';
 import { isHousingGen, useOf } from './sim/uses.js';
+import { foldPage, openFor } from './ui/fold.js';
 
 const PAGES = {
   intro: () => import('./pages/intro.js'),
@@ -84,11 +85,15 @@ function renderGuide(active) {
   let el = document.getElementById('guide');
   if (!el) { el = document.createElement('div'); el.id = 'guide'; el.className = 'guide'; el.setAttribute('role', 'status'); document.querySelector('.top').appendChild(el); }
   const g = active === 'intro' ? null : guideFor(active);
+  const html = g ? `<span class="g-k">${g.ok ? '✓' : '지금 할 일'}</span><b>${g.t}</b><span class="g-d">${g.d}</span>${g.prog != null ? `<i class="g-p"><i style="width:${(g.prog * 100).toFixed(1)}%"></i></i>` : ''}` : '';
+  // 단계 머리 안에 자리가 있으면 거기에 한 줄로 적고(떠 있는 띠는 숨긴다), 없으면 머리글 아래 띠로
+  const slot = document.querySelector('#page [data-guide]');
+  if (slot) { slot.hidden = !g; slot.classList.toggle('ok', !!(g && g.ok)); slot.innerHTML = html; el.hidden = true; return; }
   el.hidden = !g; if (!g) return;
   const cur = document.querySelector('#steps [aria-current]');
   if (cur) { const r = cur.getBoundingClientRect(), tr = document.querySelector('.top').getBoundingClientRect(); el.style.setProperty('--gx', `${Math.round(r.left - tr.left + r.width / 2)}px`); }
   el.classList.toggle('ok', !!g.ok);
-  el.innerHTML = `<span class="g-k">${g.ok ? '✓' : '지금 할 일'}</span><b>${g.t}</b><span class="g-d">${g.d}</span>${g.prog != null ? `<i class="g-p"><i style="width:${(g.prog * 100).toFixed(1)}%"></i></i>` : ''}`;
+  el.innerHTML = html;
 }
 window.addEventListener('resize', () => renderGuide(parse().name));
 window.addEventListener('scroll', () => { const el = document.getElementById('guide'); if (el) el.classList.toggle('far', window.scrollY > 140); }, { passive: true });
@@ -115,6 +120,8 @@ async function route() {
   if (document.title === before) document.title = name === 'intro' ? 'BIM·AI 건설 시뮬레이터' : `${mod.title} · BIM·AI 건설 시뮬레이터`;
   addNext(name);
   paintFoot();
+  renderGuide(name);
+  foldPage(page, name);
   if (current !== name) { window.scrollTo(0, 0); page.focus({ preventScroll: true }); }
   current = name;
 }
@@ -187,4 +194,14 @@ paintThemeBtn();
 
 store.subscribe(() => { renderSteps(parse().name); paintFoot(); });
 window.addEventListener('hashchange', route);
+// 페이지 안 링크(#섹션): 단계 이동(#/…)이 아니므로 라우터로 보내지 않고 그 섹션을 펼쳐 스크롤한다
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('a[href^="#"]:not([href^="#/"])'); if (!a) return;
+  const id = a.getAttribute('href').slice(1), el = id && document.getElementById(id); if (!el) return;
+  e.preventDefault();
+  const head = el.querySelector(':scope > .fold-h');
+  if (head && el.classList.contains('folded')) head.click();
+  openFor(el);
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
 route();

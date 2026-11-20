@@ -38,12 +38,12 @@ export function mount(root) {
     <div class="ov f-top"><div class="seg" id="x-modes" role="group" aria-label="색 표시">${MODES.map(([k, n]) => `<button type="button" data-mode="${k}" aria-pressed="${k === ui.mode}">${n}</button>`).join('')}</div>
       <div class="seg" id="x-views" role="group" aria-label="시점">${VIEWS.map(([k, n]) => `<button type="button" data-view="${k}" aria-pressed="${k === 'axon'}">${n}</button>`).join('')}</div><span class="ctxb" id="x-ctxb" hidden></span></div>
     <aside class="float f-l" id="x-fl" aria-label="배치 변수">
-      <div class="f-head"><span class="label-sm">Parameters · 배치 변수</span><button type="button" data-fold="x-fl" aria-expanded="true" aria-label="변수 패널 접기">−</button></div>
+      <div class="f-head"><span class="label-sm">배치 변수</span><button type="button" data-fold="x-fl" aria-expanded="true" aria-label="변수 패널 접기">−</button></div>
       <div class="f-body m-ctl">${GEST ? `<div class="grp gx" id="x-gx"><div class="sec-h" style="margin-bottom:6px"><span class="label-sm">형태 제스처 · Form</span></div><div id="x-gxb"></div></div>` : ''}<div class="grp"><div class="sec-h" style="margin-bottom:8px"><span class="label-sm">${u.code} · ${u.name}</span><button class="chipbtn" id="x-reset" type="button">기본값</button></div><div id="x-ctl"></div></div>
         <div class="grp"><span class="label-sm">맥락 지도</span><div class="map-state" id="x-map" role="status"></div></div></div>
     </aside>
     <aside class="float f-r side" id="x-fr" aria-label="배치 결과">
-      <div class="f-head"><span class="label-sm">Results · 배치 결과</span><button type="button" data-fold="x-fr" aria-expanded="true" aria-label="결과 패널 접기">−</button></div>
+      <div class="f-head"><span class="label-sm">배치 결과</span><button type="button" data-fold="x-fr" aria-expanded="true" aria-label="결과 패널 접기">−</button></div>
       <div class="f-body" id="x-side"></div>
     </aside>
     <div class="float f-leg" id="x-legend"></div>

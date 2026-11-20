@@ -81,10 +81,24 @@ src/
     impact-more.js   세부 공종 판정 근거: 현장 소음 dB, 지하 수압, 펌프 압송 압력, 창 열관류율 기준, 냉방 부하, 급수 수압, 수전 용량, 승강기 운행 시간, 천장고 등
     viewer.js, scene/  three.js 3D (원통·구형·랙 등 플랜트형 포함, scene/water.js: 흐르는 물결·물가 거품 재질, scene/noise.js: 땅 표면 얼룩, scene/context3d.js: 넓은 주변 맥락의 완만한 지형·수종 7가지 나무·건물 색·박공지붕·옥상 물탱크·실외기)
     sitefit.js       실제 지도에 대지 맞추기 (가로 방향·빈 블록) 와 대지 네 변 실측 → 현장 조건
-    ctxload.js       주변 맥락 고르기 (대지 둘레 지도 먼저, 넓은 지도 나중, 못 받으면 임시 맥락)
+    ctxload.js       주변 맥락 고르기 (사이트에 담아 둔 지도 → 지도 서버. 끝내 없으면 주변을 비워 둠, 용산만 정리한 지형)
+    ctxpack.js       사이트에 담아 두는 주변 지도 형식 (좌표 차분·필요 태그만, public/ctx/<후보지>.json)
     osm.js           OpenStreetMap 지도 받기·해석 (건물·도로·철도·물·녹지·산, 해안선 → 바다 다각형)
   pages/             intro, use, sitekr, site(서울 상세), mass, massx, schedule, method, process, budget, risk
 ```
+
+## 후보지 주변 지도 (public/ctx)
+
+후보지 145곳의 주변 실제 지도(OpenStreetMap: 건물·도로·철도·물·녹지·산·해안선)를 사이트에 담아 둡니다. 보는 사람의 브라우저가 지도 서버(Overpass)에 붙지 못해도 후보지 주변은 실제 지도로 보입니다.
+
+- 고르는 범위는 지도 서버에 묻던 것과 같습니다(`src/sim/osm.js`의 `queries`): 건물 1km, 큰길 2.3km, 작은 길 1.2km, 물·녹지 2.7km, 철도 2.3km, 산 8km, 해안선 5.2km.
+- 만드는 법: GitHub Actions의 `Fetch site context maps`(`.github/workflows/fetch-ctx.yml`)가 Geofabrik의 한국 전체 지도 파일(.osm.pbf)을 받아 `scripts/ctx_from_pbf.py`(pyosmium)로 후보지마다 뽑고, `node scripts/fetch-ctx.mjs --from raw`로 줄여 `ctx-data` 브랜치의 `public/ctx`에 올립니다. 확인한 뒤 main으로 가져옵니다. 후보지 좌표가 바뀌면 다시 돌려야 합니다(`tests/ctxpack.test.js`가 좌표 차이를 잡습니다).
+- 지도를 고르는 순서: 브라우저에 저장된 지도 → 사이트에 담아 둔 지도 → 지도 서버(직접 입력한 대지 등). 끝내 지도가 없으면 주변을 지어내지 않고 비워 두며, 주변 일조 영향도 계산하지 않습니다. 공법 단계도 같은 지도로 현장 둘레를 채우고, 지어낸 건물 줄은 두지 않습니다(앞 도로·보도·매설물과 간섭 검토용 인접 건물만 모형).
+- 지도 데이터 © OpenStreetMap contributors (ODbL). 2026-11-20에 뽑은 것입니다.
+
+## 화면 정리
+
+첫 화면에는 핵심만 둡니다. 단계 머리는 '지금 할 일' 한 줄, 제목, 한 줄 요약, 숫자 3개이고, 긴 설명은 '이 단계 설명'을 눌러야 펼쳐집니다. 단계 아래 섹션은 첫 섹션만 펼쳐 두고 나머지는 제목을 눌러 펼칩니다(`src/ui/fold.js`, 접고 편 상태는 브라우저에 기억). 매스 단계의 결과 패널·형태 제스처·용도지역, 지도 카드의 대지 둘레 실측, 공정 간섭 목록·위험 등록부의 긴 줄도 처음엔 접거나 줄여 둡니다. 시작 화면의 흐르는 배경·글자 연출은 뺐습니다.
 
 ## 설계안 연동 (매스 JSON)
 

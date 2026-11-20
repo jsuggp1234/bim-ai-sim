@@ -8,19 +8,22 @@ export { escH };
 export const code = (n, key, sub = 0) => `<span class="sx-code"><span class="sl">//</span> ${pad2(n)}.${pad2(sub)} SEC_${key} <b>[${pad2(n)} / ${pad2(STEP_TOTAL)}]</b></span>`;
 export const dot = (text, tone = 'acc') => `<span class="sx-dot ${tone}"><i></i>${text}</span>`;
 
-// 단계 머리: 코드 라벨 · 큰 제목(마침표) · 설명 · 상태 · 숫자 3개 · 버튼
-export function head({ n, key, title, dim, desc, status, stats = [], actions = '' }) {
+// 단계 머리: 지금 할 일 한 줄 · 제목 · 한 줄 요약 · 버튼 · 숫자 3개. 긴 설명은 '이 단계 설명'을 눌러야 펼쳐진다 (첫 화면에는 핵심만)
+// n·key·status는 예전 코드 라벨용 값이라 받기만 하고 그리지 않는다
+export function head({ title, dim, desc, stats = [], actions = '' }) {
   return `<header class="sx-head">
     <div class="sx-head-l">
-      <div class="sx-meta">${code(n, key)}${status ? dot(status) : ''}</div>
+      <div class="sx-guide" data-guide hidden></div>
       <h1 class="sx-title">${title}<span class="pd">.</span></h1>
       ${dim ? `<p class="sx-dim">${dim}</p>` : ''}
-      ${desc ? `<p class="sx-desc">${desc}</p>` : ''}
+      ${desc ? moreDesc(desc) : ''}
       ${actions ? `<div class="sx-act">${actions}</div>` : ''}
     </div>
     ${stats.length ? `<dl class="sx-stats" id="sx-stats">${stats.map(statCell).join('')}</dl>` : ''}
   </header>`;
 }
+// 접어 둔 단계 설명
+export const moreDesc = (desc, id = '') => `<details class="sx-more"><summary>이 단계 설명</summary><p class="sx-desc"${id ? ` id="${id}"` : ''}>${desc}</p></details>`;
 export const statCell = ([k, v, s, tone]) => `<div class="${tone || ''}"><dt>${k}</dt><dd>${v}</dd>${s ? `<span>${s}</span>` : ''}</div>`;
 
 // 필터 탭: [{k, name, n}], 지금 값

@@ -81,7 +81,7 @@ export function mount(root) {
   <section class="sws" id="wz-sec" aria-label="공법·재료 시공 시뮬레이터">
     <header class="sws-top">
       <a class="sws-back" href="#/mass" title="03 매스로" aria-label="03 매스로">←</a>
-      <div class="sws-t"><span class="sws-code">04 · METHOD ${dot('BUILD SIMULATOR', 'acc')}</span><h1>어떻게 지을까<span class="pd">.</span></h1><span class="sws-dim">${escH(R.site.name)} · ${R.u.name} · ${N}개 공종 · ${nOpt}개 공법</span></div>
+      <div class="sws-t"><h1>어떻게 지을까<span class="pd">.</span></h1><span class="sws-dim">${escH(R.site.name)} · ${R.u.name} · ${N}개 공종 · ${nOpt}개 공법</span></div>
       <nav class="sws-strip" id="strip" aria-label="공종 진행 (누르면 그 공종으로)"></nav>
       <dl class="sws-k">
         <div><dt>확정</dt><dd id="k-done">—</dd><span id="k-done2"></span></div>
