@@ -1904,7 +1904,10 @@ body[data-page="method"] .guide { display: none; }
 .folded > .fold-h { margin-bottom: 0; }
 .sec-title.fold-h { padding-top: 16px; padding-bottom: 2px; }
 .sec:has(> .sec-title.fold-h), section:has(> .sec-title.fold-h) { margin-top: 22px; }
-.folded > .sec-title .hint, .folded > .sx-sub .hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1 1 0; min-width: 0; flex-basis: 0; }
+/* 접힌 섹션은 제목만: 설명 글은 펼쳤을 때만 */
+.folded > .sec-title .hint, .folded > .sx-sub .hint { display: none; }
+.folded:has(> .fold-h) { padding-bottom: 0 !important; gap: 0 !important; }
+.folded > .sec-title.fold-h, .folded > .sx-sub.fold-h { padding-bottom: 14px; margin-bottom: 0; }
 .sec-title.fold-h:hover h2 { color: var(--accent-ink); }
 /* 시작 화면: 결과 예시 패널은 조용하게 (상태 글·진행 막대 없음) */
 .ix-pipe .ix-rows .s, .ix-pipe .ix-pbar, .ix-pipe .ix-pct { display: none; }
@@ -1925,3 +1928,6 @@ body[data-page="method"] .guide { display: none; }
 .sx-sec:has(> .sx-sub.fold-h) { margin-top: 18px; }
 .folded > .sx-sub { margin-bottom: 0; }
 .sx-sub.fold-h .r { right: 30px; }
+/* 접힌 섹션이 이어지면 목록처럼 촘촘하게 */
+.folded > .sec-title.fold-h, .folded > .sx-sub.fold-h { padding-top: 15px; padding-bottom: 15px; }
+.folded + .folded, .folded + .sec:has(> .folded), .sec:has(> .folded) + .folded { margin-top: 0 !important; }
