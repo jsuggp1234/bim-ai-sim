@@ -1,0 +1,43 @@
+# 후보지 주변 실제 지도(OpenStreetMap)를 받아 public/ctx 에 담을 자료를 만든다.
+# 받은 자료는 실행 결과의 "ctx" 묶음으로 올라가고, 확인한 뒤 저장소 public/ctx 에 넣는다.
+name: Fetch site context maps
+on:
+  workflow_dispatch:
+    inputs:
+      args:
+        description: "fetch-ctx.mjs 인자 (예: --only yongsan,guryong --force)"
+        required: false
+        default: "--force"
+  push:
+    branches: [ctx-fetch]
+    paths:
+      - .github/workflows/fetch-ctx.yml
+      - scripts/fetch-ctx.mjs
+      - src/sim/ctxpack.js
+permissions:
+  contents: read
+concurrency:
+  group: fetch-ctx
+  cancel-in-progress: true
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 170
+    env:
+      PUSH_ARGS: "--force --only yongsan,sel-sewoon,guryong,gg-banwol,bs-north,jj-jungmun"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Fetch
+        run: node scripts/fetch-ctx.mjs --out ctx-out ${{ github.event_name == 'workflow_dispatch' && inputs.args || env.PUSH_ARGS }}
+      - name: Sizes
+        if: always()
+        run: ls -l ctx-out | head -200; du -sh ctx-out; tar -czf ctx.tgz -C ctx-out . && ls -l ctx.tgz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ctx
+          path: ctx.tgz
+          retention-days: 7
