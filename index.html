@@ -5,19 +5,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>BIM·AI 건설 시뮬레이터</title>
 <meta name="description" content="용도(주거·오피스·반도체·박물관·플랜트 등 17종)를 정하고 전국 후보지에서 입지를 고른 뒤, 매스·공법·4D 공정과 간섭·5D 예산·위험 예측까지 BIM 모델 하나로 이어지는 BIM·AI 건설 시뮬레이션">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#ffffff">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..700&display=swap">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Cpath d='M8 25V15h5v10zm6 0V7h5v18zm6 0V12h4v13z' fill='%23fff'/%3E%3Crect x='14' y='7' width='5' height='3' fill='%23ff2d55'/%3E%3C/svg%3E">
 <script>
-  // 기본은 검정 화면. 밝은 화면을 고른 적이 있으면 첫 페인트 전에 적용
-  try { if (localStorage.getItem('bim-sim-theme') === 'light') document.documentElement.dataset.theme = 'light'; } catch (e) {}
+  // 기본은 흰 화면(포트폴리오 YP.STUDIO와 같은 판). 어두운 화면을 고른 적이 있을 때만 검정으로 — 첫 페인트 전에 적용
+  try { if (localStorage.getItem('bim-sim-theme') !== 'dark') document.documentElement.dataset.theme = 'light'; } catch (e) { document.documentElement.dataset.theme = 'light'; }
 </script>
 </head>
 <body>
 <a class="skip" href="#page">본문으로 건너뛰기</a>
 <header class="top">
+  <a class="yp-logo" href="https://jsuggp1234.github.io/YP.ARC/lab.html" aria-label="YP.STUDIO Lab으로 돌아가기"><b>YP.STUDIO</b><span>/ LAB</span></a>
   <a class="brand" href="#/" aria-label="처음 화면">
     <span class="bt"><b>BIM·AI<span class="pd">.</span></b></span>
     <span class="sx-dot acc live" aria-hidden="true"><i></i><span id="top-proj">SYS.READY</span></span>
@@ -34,7 +35,7 @@
   <div><b>// STAGES</b><a href="#/use">01 용도</a><a href="#/site">02 입지</a><a href="#/mass">03 매스</a><a href="#/method">04 공법·재료</a><a href="#/process">05 4D·간섭</a><a href="#/budget">06 5D 예산</a><a href="#/risk">07 위험 예측</a></div>
   <div><b>// SOURCES</b><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">지도 © OpenStreetMap 기여자</a><a href="https://www.law.go.kr/법령/건축법시행령" target="_blank" rel="noopener">건축법 시행령</a><a href="https://www.law.go.kr/법령/주택건설기준등에관한규정" target="_blank" rel="noopener">주택건설기준 등에 관한 규정</a></div>
   <div><b>// PROJECT</b><span id="foot-site"></span><span id="foot-loc"></span></div>
-  <div class="copy"><span>© 2026 BIM·AI 건설 시뮬레이터</span><span>three.js · vite · pretendard · jetbrains mono</span></div>
+  <div class="copy"><span>© 2026 BIM·AI 건설 시뮬레이터</span><span>three.js · vite · pretendard</span></div>
 </footer>
 <script type="module" src="/src/main.js"></script>
 </body>

@@ -2,6 +2,7 @@
 import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
 import './styles.css';
 import './system.css';
+import './skin.css';
 import { store, currentSite } from './store.js';
 import { pipeline, fmt, won, projKey } from './pipeline.js';
 import { isHousingGen, useOf } from './sim/uses.js';
@@ -177,7 +178,7 @@ const clockFmt = new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', hour
 function tick() { document.getElementById('clock').textContent = 'SEOUL ' + clockFmt.format(new Date()); }
 tick(); setInterval(tick, 1000);
 
-// 테마: 기본은 검정, 누르면 밝게
+// 테마: 기본은 흰 화면, 누르면 어둡게 (고른 값은 'light' / 'dark'로 저장)
 function themeNow() { return document.documentElement.dataset.theme === 'light' ? 'light' : 'dark'; }
 function paintThemeBtn() {
   const t = themeNow(), b = document.getElementById('themeBtn');
@@ -187,7 +188,7 @@ function paintThemeBtn() {
 document.getElementById('themeBtn').addEventListener('click', () => {
   const next = themeNow() === 'light' ? 'dark' : 'light';
   if (next === 'light') document.documentElement.dataset.theme = 'light'; else delete document.documentElement.dataset.theme;
-  try { if (next === 'light') localStorage.setItem('bim-sim-theme', 'light'); else localStorage.removeItem('bim-sim-theme'); } catch (e) { /* 무시 */ }
+  try { localStorage.setItem('bim-sim-theme', next); } catch (e) { /* 무시 */ }
   paintThemeBtn();
 });
 paintThemeBtn();
